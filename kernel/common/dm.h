@@ -165,14 +165,17 @@ static inline offset_t *get_node(struct dm_table *t, int l, int n)
 }
 
 /*
- * The device-mapper can be driven through one of two interfaces; 
+ * The device-mapper can be driven through one of two interfaces;
  * ioctl or filesystem, depending which patch you have applied.
  */
 
 int dm_interface_init(void);
 void dm_interface_exit(void);
 
-/* 
+/* Code in dm-snapshot called by dm-origin to do snapshot COW */
+int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh);
+
+/*
  * Targets for linear and striped mappings
  */
 

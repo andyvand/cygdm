@@ -18,9 +18,6 @@
 
 #include "dm.h"
 
-/* TODO: put in dm.h */
-extern int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh);
-
 /*
  * Origin: maps a linear range of a device, with hooks for snapshotting.
  */
@@ -28,30 +25,8 @@ struct origin_c {
 	struct dm_dev *target_dev;
 };
 
-/* A list of origins and their dm-devs so we can translate between them
-   when attaching a snapshot */
-static LIST_HEAD(origin_devs);
-struct origin_dev {
-        struct list_head *list;
-        struct dm_dev *dev;
-        struct origin_c *origin;
-};
-
-
-static inline char *next_token(char **p)
-{
-	static const char *delim = " \t";
-	char *r;
-
-	do {
-		r = strsep(p, delim);
-	} while (r && *r == 0);
-
-	return r;
-}
-
 /*
- * Construct a origin mapping: <dev_path> <offset>
+ * Construct an origin mapping: <dev_path> <offset>
  */
 static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
 		      int argc, char **argv, void **context)
