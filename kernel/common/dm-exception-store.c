@@ -431,7 +431,7 @@ static void persistent_fraction_full(struct exception_store *store,
 				     sector_t *numerator,
 				     sector_t *denominator)
 {
-	*numerator = get_info(store)->next_free * store->snap->chunk_size - 1;
+	*numerator = get_info(store)->next_free * store->snap->chunk_size;
 	*denominator = get_dev_size(store->snap->cow->dev);
 }
 
@@ -564,8 +564,10 @@ int dm_create_persistent(struct exception_store *store, uint32_t chunk_size)
 	ps->callbacks = vcalloc(ps->exceptions_per_area,
 				sizeof(*ps->callbacks));
 
-	if (!ps->callbacks)
+	if (!ps->callbacks) {
+		r = -ENOMEM;
 		goto bad;
+	}
 
 	/*
 	 * Read the snapshot header.
