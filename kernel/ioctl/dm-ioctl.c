@@ -6,6 +6,7 @@
 
 #include "dm.h"
 
+#include <linux/miscdevice.h>
 #include <linux/dm-ioctl.h>
 
 static void free_params(struct dm_ioctl *p)
@@ -317,28 +318,50 @@ static struct file_operations _ctl_fops = {
 
 static devfs_handle_t _ctl_handle;
 
+static struct miscdevice _dm_misc = {
+	minor:		MISC_DYNAMIC_MINOR,
+	name:		DM_NAME,
+	fops:		&_ctl_fops
+};
+
+/* Create misc character device and link to DM_DIR/control */
 int dm_interface_init(void)
 {
 	int r;
+	char rname[64];
 
-	r = devfs_register_chrdev(DM_CHAR_MAJOR, DM_DIR, &_ctl_fops);
-	if (r < 0) {
-		DMERR("devfs_register_chrdev failed for control device");
-		return -EIO;
+	r = misc_register(&_dm_misc);
+	if (r) {
+		DMERR("misc_register failed for control device");
+		return r;
 	}
 
-	_ctl_handle = devfs_register(0, DM_DIR "/control", 0,
-				     DM_CHAR_MAJOR, 0,
-				     S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP,
-				     &_ctl_fops, NULL);
+	r = devfs_generate_path(_dm_misc.devfs_handle, rname + 3,
+				sizeof rname - 3);
+	if (r < 0) {
+		DMERR("devfs_generate_path failed for control device");
+		goto failed;
+	}
 
+	strncpy(rname + r, "../", 3);
+	r = devfs_mk_symlink(NULL, DM_DIR "/control", 
+			     DEVFS_FL_DEFAULT, rname + r,
+			     &_ctl_handle, NULL);
+	if (r) {
+		DMERR("devfs_mk_symlink failed for control device");
+		goto failed;
+	}
+	devfs_auto_unregister(_dm_misc.devfs_handle, _ctl_handle);
+
+	return 0;
+
+      failed:
+	misc_deregister(&_dm_misc);
 	return r;
 }
 
 void dm_interface_exit(void)
 {
-	// FIXME: remove control device
-
-	if (devfs_unregister_chrdev(DM_CHAR_MAJOR, DM_DIR) < 0)
-		DMERR("devfs_unregister_chrdev failed for control device");
+	if (misc_deregister(&_dm_misc) < 0)
+		DMERR("misc_deregister failed for control device");
 }

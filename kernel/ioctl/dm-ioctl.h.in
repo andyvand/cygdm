@@ -46,7 +46,6 @@ struct dm_ioctl {
 
 /* FIXME: find own numbers: LVM1 used 109 */
 #define DM_IOCTL 0xfd
-#define DM_CHAR_MAJOR 124
 
 #define	DM_CREATE _IOWR(DM_IOCTL, 0x00, struct dm_ioctl)
 #define	DM_REMOVE _IOW(DM_IOCTL, 0x01, struct dm_ioctl)
