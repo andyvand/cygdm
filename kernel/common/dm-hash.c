@@ -148,7 +148,7 @@ struct mapped_device *dm_get_r(kdev_t dev)
 		goto out;
 
 	down_read(&hc->md->lock);
-	if (hc->md->invalid) {
+	if (!dm_flag(hc->md, DMF_VALID)) {
 		up_read(&hc->md->lock);
 		goto out;
 	}
@@ -172,7 +172,7 @@ struct mapped_device *dm_get_w(kdev_t dev)
 		goto out;
 
 	down_write(&hc->md->lock);
-	if (hc->md->invalid) {
+	if (!dm_flag(hc->md, DMF_VALID)) {
 		up_write(&hc->md->lock);
 		goto out;
 	}
@@ -232,7 +232,7 @@ static inline struct mapped_device *get_name(const char *str, int uuid,
 	else
 		down_read(&hc->md->lock);
 
-	if (hc->md->invalid) {
+	if (!dm_flag(hc->md, DMF_VALID)) {
 		if (write)
 			up_write(&hc->md->lock);
 		else
@@ -352,7 +352,7 @@ static void dispose_cell(struct hash_cell *hc)
 }
 
 /*
- * md should already have the write lock and md->invalid is already set.
+ * md should already have the write lock and DMF_VALID unset.
  */
 void dm_hash_remove(struct mapped_device *md)
 {
@@ -360,7 +360,7 @@ void dm_hash_remove(struct mapped_device *md)
 
 	/*
 	 * Ensure that anything else waiting for the lock gets it and
-	 * promptly releases it because md->invalid has now been set.
+	 * promptly releases it because DMF_VALID is no longer set.
 	 * Acquiring _hash_lock exclusively prevents anything else
 	 * starting a search for an md until our md is completely removed.
 	 */

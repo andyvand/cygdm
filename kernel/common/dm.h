@@ -100,15 +100,13 @@ struct dm_table {
  */
 struct mapped_device {
 	struct rw_semaphore lock;
+	unsigned long flags;
 
 	kdev_t dev;
 	char *name;
 	char *uuid;
 
 	int use_count;
-	int invalid;
-	int suspended;
-	int read_only;
 
 	/* a list of io's that arrived while we were suspended */
 	atomic_t pending;
@@ -239,6 +237,29 @@ static inline char *dm_strdup(const char *str)
 	if (r)
 		strcpy(r, str);
 	return r;
+}
+
+/*
+ * Flags in struct mapped_device
+ */
+
+#define DMF_VALID	0
+#define DMF_SUSPENDED	1
+#define DMF_RO		2
+
+static inline int dm_flag(struct mapped_device *md, int flag)
+{
+	return (md->flags & (1 << flag));
+}
+
+static inline void dm_set_flag(struct mapped_device *md, int flag)
+{
+	md->flags |= (1 << flag);
+}
+
+static inline void dm_clear_flag(struct mapped_device *md, int flag)
+{
+	md->flags &= ~(1 << flag);
 }
 
 /*

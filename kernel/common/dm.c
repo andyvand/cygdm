@@ -310,7 +310,7 @@ static int queue_io(struct buffer_head *bh, int rw)
 		return -ENXIO;
 	}
 
-	if (!md->suspended) {
+	if (!dm_flag(md, DMF_SUSPENDED)) {
 		dm_put_w(md);
 		free_deferred(di);
 		return 1;
@@ -415,7 +415,7 @@ static int request(request_queue_t *q, int rw, struct buffer_head *bh)
 	 * If we're suspended we have to queue
 	 * this io for later.
 	 */
-	while (md->suspended) {
+	while (dm_flag(md, DMF_SUSPENDED)) {
 		dm_put_r(md);
 
 		if (rw == READA)
@@ -479,7 +479,7 @@ static int do_bmap(kdev_t dev, unsigned long block,
 	if (!md)
 		return -ENXIO;
 
-	if (md->suspended) {
+	if (dm_flag(md, DMF_SUSPENDED)) {
 		dm_put_r(md);
 		return -EPERM;
 	}
@@ -610,8 +610,8 @@ static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 	if (minor < 0)
 		goto bad;
 
-	md->suspended = 0;
-	md->invalid = 0;
+	dm_clear_flag(md, DMF_SUSPENDED);
+	dm_set_flag(md, DMF_VALID);
 	md->use_count = 0;
 	md->deferred = NULL;
 
@@ -800,7 +800,7 @@ int dm_destroy(struct mapped_device *md)
 	 * Signal that this md is now invalid so that nothing further
 	 * can acquire its lock.
 	 */
-	md->invalid = 1;
+	dm_clear_flag(md, DMF_VALID);
 
 	__unbind(md);
 	free_dev(md);
@@ -837,7 +837,11 @@ void dm_destroy_all(void)
  */
 void dm_set_ro(struct mapped_device *md, int ro)
 {
-	md->read_only = ro;
+	if (ro)
+		dm_set_flag(md, DMF_RO);
+	else
+		dm_clear_flag(md, DMF_RO);
+
 	set_device_ro(md->dev, ro);
 }
 
@@ -865,7 +869,7 @@ int dm_swap_table(struct mapped_device *md, struct dm_table *table)
 	int r;
 
 	/* device must be suspended */
-	if (!md->suspended)
+	if (!dm_flag(md, DMF_SUSPENDED))
 		return -EPERM;
 
 	__unbind(md);
@@ -898,12 +902,12 @@ int dm_suspend(kdev_t dev)
 	if (!md)
 		return -ENXIO;
 
-	if (md->suspended) {
+	if (dm_flag(md, DMF_SUSPENDED)) {
 		dm_put_w(md);
 		return -EINVAL;
 	}
 
-	md->suspended = 1;
+	dm_set_flag(md, DMF_SUSPENDED);
 	dm_put_w(md);
 
 	/*
@@ -913,7 +917,7 @@ int dm_suspend(kdev_t dev)
 	md = dm_get_r(dev);
 	if (!md)
 		return -ENXIO;
-	if (!md->suspended)
+	if (!dm_flag(md, DMF_SUSPENDED))
 		return -EINVAL;
 
 	add_wait_queue(&md->wait, &wait);
@@ -942,12 +946,12 @@ int dm_resume(kdev_t dev)
 	if (!md)
 		return -ENXIO;
 
-	if (!md->suspended || !md->map->num_targets) {
+	if (!dm_flag(md, DMF_SUSPENDED) || !md->map->num_targets) {
 		dm_put_w(md);
 		return -EINVAL;
 	}
 
-	md->suspended = 0;
+	dm_clear_flag(md, DMF_SUSPENDED);
 	def = md->deferred;
 	md->deferred = NULL;
 	dm_put_w(md);

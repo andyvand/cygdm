@@ -190,9 +190,9 @@ static int results_to_user(struct dm_ioctl *user, struct dm_ioctl *param,
 static void __info(struct mapped_device *md, struct dm_ioctl *param)
 {
 	param->flags = DM_EXISTS_FLAG;
-	if (md->suspended)
+	if (dm_flag(md, DMF_SUSPENDED))
 		param->flags |= DM_SUSPEND_FLAG;
-	if (md->read_only)
+	if (dm_flag(md, DMF_RO))
 		param->flags |= DM_READONLY_FLAG;
 
 	strncpy(param->name, md->name, sizeof(param->name));
