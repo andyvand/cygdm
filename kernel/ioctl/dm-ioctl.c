@@ -463,13 +463,6 @@ static void __info(struct mapped_device *md, struct dm_param *param)
 
 	param->output_size = sizeof(*dmi);
 
-	if (!md) {
-		dmi->flags &= ~DM_EXISTS_FLAG;
-		return;
-	}
-
-	dmi->flags |= DM_EXISTS_FLAG;
-
 	if (dm_suspended(md))
 		dmi->flags |= DM_SUSPEND_FLAG;
 	else
@@ -542,10 +535,12 @@ static int info(struct dm_param *param)
 	struct mapped_device *md;
 
 	md = find_device(param->dmi);
+	if (!md)
+		return -ENXIO;
+
 	__info(md, param);
 
-	if (md)
-		dm_put(md);
+	dm_put(md);
 
 	return 0;
 }
@@ -627,9 +622,6 @@ static void __status(struct mapped_device *md, struct dm_param *param)
 	status_type_t type;
 	struct dm_table *table;
 	
-	if (!md)
-		return;
-
 	table = dm_get_table(md);
 
 	if (param->dmi->flags & DM_STATUS_TABLE_FLAG)
@@ -694,12 +686,13 @@ static int get_status(struct dm_param *param)
 	struct mapped_device *md;
 
 	md = find_device(param->dmi);
+	if (!md)
+		return -ENXIO;
 
 	__info(md, param);
 	__status(md, param);
 
-	if (md)
-		dm_put(md);
+	dm_put(md);
 
 	return 0;
 }
@@ -730,6 +723,7 @@ static int wait_device_event(struct dm_param *param)
 	set_current_state(TASK_RUNNING);
 	dm_table_remove_wait_queue(table, &wq);
 
+	param->dmi->flags &= ~DM_STATUS_TABLE_FLAG;
 	get_status(param);
 	return 0;
 }
