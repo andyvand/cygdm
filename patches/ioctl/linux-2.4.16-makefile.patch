@@ -8,13 +8,13 @@ diff -ruN -X /home/thornber/packages/2.4/dontdiff linux/drivers/md/Makefile linu
 -export-objs	:= md.o xor.o
 +export-objs	:= md.o xor.o dm-table.o dm-target.o
  list-multi	:= lvm-mod.o
- lvm-mod-objs	:= lvm.o lvm-snap.o
+ lvm-mod-objs	:= lvm.o lvm-snap.o lvm-fs.o
 +dm-mod-objs	:= dm.o dm-table.o dm-target.o dm-ioctl.o \
-		   dm-linear.o dm-stripe.c
++		   dm-linear.o dm-stripe.o
  
  # Note: link order is important.  All raid personalities
  # and xor.o must come before md.o, as they each initialise 
-@@ -20,8 +21,12 @@
+@@ -20,8 +22,12 @@
  obj-$(CONFIG_MD_MULTIPATH)	+= multipath.o
  obj-$(CONFIG_BLK_DEV_MD)	+= md.o
  obj-$(CONFIG_BLK_DEV_LVM)	+= lvm-mod.o

@@ -64,6 +64,18 @@ AC_ARG_WITH(kerneldir,
   [ kerneldir="$withval" ],
   [ kerneldir=/usr/src/linux ])
 
+dnl -- Kernel version string
+AC_ARG_WITH(kernelvsn,
+  [  --with-kernelvsn=VSN    linux kernel version [2.4.16]],
+  [ kernelvsn="$withval" ],
+  [ kernelvsn=2.4.16 ])
+
+dnl -- Temporary directory for kernel diffs
+AC_ARG_WITH(tmpdir,
+  [  --with-tmpdir=DIR    temp directory for kernel diffs [/tmp/kerneldiffs]],
+  [ tmpdir="$withval" ],
+  [ tmpdir=/tmp/kerneldiffs ])
+
 dnl -- which kernel interface to use (ioctl or fs)
 AC_ARG_WITH(interface,
   [  --with-interface=IFACE  Choose kernel interface (ioctl or fs) [ioctl]],
@@ -85,11 +97,13 @@ AC_FUNC_VPRINTF
 AC_CHECK_FUNCS(mkdir rmdir uname)
 
 AC_SUBST(JOBS)
-AC_SUBST(kerneldir)
-AC_SUBST(interface)
 AC_SUBST(OWNER)
 AC_SUBST(GROUP)
 AC_SUBST(LIBS)
+AC_SUBST(interface)
+AC_SUBST(kerneldir)
+AC_SUBST(kernelvsn)
+AC_SUBST(tmpdir)
 dnl First and last lines should not contain files to generate in order to 
 dnl keep utility scripts running properly
 AC_OUTPUT( 								\

@@ -21,23 +21,89 @@ SHELL = /bin/sh
 srcdir = @srcdir@
 top_srcdir = @top_srcdir@
 VPATH = @srcdir@
-
 interface = @interface@
 kerneldir = @kerneldir@
-
+kernelvsn = @kernelvsn@
+tmpdir=@tmpdir@
 LN_S = @LN_S@
+
+
+FS=dmfs-error.c dmfs-lv.c dmfs-root.c dmfs-status.c \
+   dmfs-super.c dmfs-suspend.c dmfs-table.c dmfs.h
+
+COMMON=device-mapper.h dm-linear.c dm-stripe.c \
+       dm-table.c dm-target.c dm.c dm.h
+
+IOCTL=dm-ioctl.c dm-ioctl.h
+
+HDRS=common/device-mapper.h
+
+
+KERNELTAR=/usr/src/linux-$(kernelvsn).tar
+
+fs=$(patsubst %,fs/%,$(FS))
+common=$(patsubst %,common/%,$(COMMON))
+ioctl=$(patsubst %,ioctl/%,$(IOCTL))
 
 all: symlinks
 
 symlinks:
-	for i in common/* fs/* ioctl/* ; do \
+	for i in $(common) $(fs) $(ioctl); do \
 		if [ -L $(kerneldir)/drivers/md/`basename $$i` ] ; \
 			then $(RM) $(kerneldir)/drivers/md/`basename $$i`; \
 		fi; \
 	done
-	for i in common/* $(interface)/* ; do \
+	for i in $(common) $($(interface)) ; do \
 		$(LN_S) `pwd`/$$i $(kerneldir)/drivers/md ; \
 	done
+	for i in $(HDRS) ; do \
+		if [ -L $(kerneldir)/linux/include/linux/`basename $$i` ] ; \
+			then $(RM) \
+			     $(kerneldir)/linux/include/linux/`basename $$i`; \
+		fi; \
+		$(LN_S) `pwd`/$$i $(kerneldir)/linux/include/linux ; \
+	done
+
+patches:
+	if [ ! -e $(KERNELTAR) ] ; then \
+		echo "Can't find kernel source tarball $(KERNELTAR)" ; \
+		exit 1; \
+	fi
+	if [ ! -e $(tmpdir) ] ; then mkdir $(tmpdir); fi
+	if [ ! -d $(tmpdir) ] ; then \
+		echo "Working directory $(tmpdir) missing" ; \
+		exit 1; \
+	fi
+
+	( \
+		cd $(tmpdir); \
+		tar xf $(KERNELTAR) ; \
+		cp -al linux linux-$(kernelvsn) ; \
+	)
+
+	for i in $(common) $($(interface)) ; do \
+		$(LN_S) `pwd`/$$i $(tmpdir)/linux/drivers/md ; \
+	done
+
+	for i in $(HDRS) ; do \
+		$(LN_S) `pwd`/$$i $(tmpdir)/linux/include/linux ; \
+	done
+
+	for i in ../patches/common/* ../patches/$(interface)/* ; do \
+		patch -d $(tmpdir)/linux -p1 -i `pwd`/$$i ; \
+	done
+	
+	( \
+		cd $(tmpdir); \
+		diff -ruN linux-$(kernelvsn) linux ; \
+		exit 0; \
+	) > ../patches/linux-$(kernelvsn)-devmapper-$(interface).patch
+	
+	$(RM) -r $(tmpdir)
+
+patches-clean:
+	$(RM) -r $(tmpdir)
+	$(RM) ../patches/linux-$(kernelvsn)-devmapper-$(interface).patch
 
 install:
 
