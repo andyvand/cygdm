@@ -7282,3 +7282,14 @@ diff -ruN linux-2.4.19-rc1/mm/vmalloc.c linux/mm/vmalloc.c
 +
 +	return addr;
 +}
+diff -Nru linux-2.4.19-rc1/kernel/ksyms.c linux/kernel/ksyms.c
+--- linux-2.4.19-rc1/kernel/ksyms.c	Wed Jun 26 18:42:28 2002
++++ linux/kernel/ksyms.c	Wed Jun 26 18:37:01 2002
+@@ -109,6 +109,7 @@
+ EXPORT_SYMBOL(vfree);
+ EXPORT_SYMBOL(__vmalloc);
+ EXPORT_SYMBOL(vmalloc_to_page);
++EXPORT_SYMBOL(vcalloc);
+ EXPORT_SYMBOL(mem_map);
+ EXPORT_SYMBOL(remap_page_range);
+ EXPORT_SYMBOL(max_mapnr);
