@@ -125,8 +125,10 @@ struct snapshot_c {
 	/* Hash table for looking up inflight COW operations */
 	struct list_head *inflight_hash_table;
 
-	/* So we can get at the locking rwsem */
-	struct origin_list *origin;
+	 /* To serialise access to the metadata */
+	struct rw_semaphore lock;
+
+	/* To help with calculating the hash function */
 	uint32_t hash_mask;
 	uint32_t inflight_hash_mask;
 	uint32_t hash_size;
@@ -235,9 +237,6 @@ struct origin_list
 {
 	/* The origin device */
 	kdev_t origin_dev;
-
-	 /* To serialise access to the metadata */
-	struct rw_semaphore lock;
 
 	/* List pointers for this list */
 	struct list_head list;
@@ -381,7 +380,7 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 
 		/* Add a proper exception,
 		   and remove the inflight exception from the list */
-		down_write(&iex->snap->origin->lock);
+		down_write(&iex->snap->lock);
 
 		add_exception(iex->snap, iex->rsector_org, iex->rsector_new);
 		list_del(&iex->list);
@@ -389,7 +388,7 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 		/* Submit any pending write BHs */
 		bh = iex->bh;
 		iex->bh = NULL;
-		up_write(&iex->snap->origin->lock);
+		up_write(&iex->snap->lock);
 		kmem_cache_free(inflight_cachep, iex);
 
 		while (bh) {
@@ -438,7 +437,6 @@ static int register_snapshot(kdev_t origin_dev, struct snapshot_c *snap)
 
 		/* Initialise the struct */
 		ol->origin_dev = origin_dev;
-		init_rwsem(&ol->lock);
 
 		/* Add this origin to the hash table */
 		snapshot_list = &snapshot_origins[origin_hash(origin_dev)];
@@ -448,7 +446,6 @@ static int register_snapshot(kdev_t origin_dev, struct snapshot_c *snap)
 	list_add_tail(&snap->list, &ol->snap_list);
 
 	up_write(&origin_hash_lock);
-	snap->origin = ol;
 	return 1;
 }
 
@@ -1063,6 +1060,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	lc->next_free_sector = blocksize/SECTOR_SIZE; /* Leave the first block alone */
 	lc->full      = 0;
 	lc->disk_cow  = NULL;
+	init_rwsem(&lc->lock);
 
 	/* Work out the power of 2 that it is */
 	lc->chunk_size_shift = 0;
@@ -1165,7 +1163,7 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 	if (rw == WRITE) {
 		struct inflight_exception *iex;
 
-		down_write(&lc->origin->lock);
+		down_write(&lc->lock);
 
 		/* If the block is already remapped - use that, else remap it */
 		ex = find_exception(context, bh->b_rsector);
@@ -1178,7 +1176,7 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 			/* Exception has not been committed to disk - save this bh */
 			bh->b_reqnext = iex->bh;
 			iex->bh = bh;
-			up_write(&lc->origin->lock);
+			up_write(&lc->lock);
 			return 0;
 		}
 
@@ -1194,7 +1192,7 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 				lc->full = 1;
 				if (lc->persistent)
 					write_header(lc);
-				up_write(&lc->origin->lock);
+				up_write(&lc->lock);
 				return -1;
 			}
 
@@ -1208,7 +1206,7 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 				lc->full = 1;
 				if (lc->persistent)
 					write_header(lc);
-				up_write(&lc->origin->lock);
+				up_write(&lc->lock);
 				return -1;
 			}
 
@@ -1226,11 +1224,11 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 			ret = 0;
 		}
 
-		up_write(&lc->origin->lock);
+		up_write(&lc->lock);
 	}
 	else {
 		/* Do reads */
-		down_read(&lc->origin->lock);
+		down_read(&lc->lock);
 
 		/* See if it it has been remapped */
 		ex = find_exception(context, bh->b_rsector);
@@ -1241,7 +1239,7 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 		} else {
 			bh->b_rdev = lc->origin_dev->dev;
 		}
-		up_read(&lc->origin->lock);
+		up_read(&lc->lock);
 	}
 
 	return ret;
@@ -1262,11 +1260,6 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 
 	if (ol && !list_empty(&ol->snap_list)) {
 		struct list_head *origin_snaps = &ol->snap_list;
-		struct snapshot_c *lock_snap;
-
-		/* Lock the metadata */
-		lock_snap = list_entry(origin_snaps->next, struct snapshot_c, list);
-		down_write(&lock_snap->origin->lock);
 
 		/* Do all the snapshots on this origin */
 		list_for_each(snap_list, origin_snaps) {
@@ -1277,6 +1270,8 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 			/* Ignore full snapshots */
 			if (snap->full)
 				continue;
+
+			down_write(&snap->lock);
 
 			/*
 			 * Check exception table to see if block is already remapped in this
@@ -1295,6 +1290,7 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 						iex->bh = bh;
 						ret = 0;
 					}
+					up_write(&snap->lock);
 					continue;
 				}
 
@@ -1311,6 +1307,7 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 						/* Mark it full on the device */
 						if (snap->persistent)
 							write_header(snap);
+						up_write(&snap->lock);
 						continue;
 				}
 				else {
@@ -1329,6 +1326,7 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 						snap->full = 1;
 						if (snap->persistent)
 							write_header(snap);
+						up_write(&snap->lock);
 						continue;
 					}
 
@@ -1344,8 +1342,8 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 					}
 				}
 			}
+			up_write(&snap->lock);
 		}
-		up_write(&lock_snap->origin->lock);
 	}
 	return ret;
 }
