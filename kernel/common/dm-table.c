@@ -22,12 +22,12 @@ struct dm_table {
 	atomic_t holders;
 
 	/* btree table */
-	int depth;
-	int counts[MAX_DEPTH];	/* in nodes */
+	unsigned int depth;
+	unsigned int counts[MAX_DEPTH];	/* in nodes */
 	sector_t *index[MAX_DEPTH];
 
-	int num_targets;
-	int num_allocated;
+	unsigned int num_targets;
+	unsigned int num_allocated;
 	sector_t *highs;
 	struct dm_target *targets;
 
@@ -74,7 +74,7 @@ static unsigned int int_log(unsigned long n, unsigned long base)
 /*
  * Calculate the index of the child node of the n'th node k'th key.
  */
-static inline int get_child(int n, int k)
+static inline unsigned int get_child(unsigned int n, unsigned int k)
 {
 	return (n * CHILDREN_PER_NODE) + k;
 }
@@ -82,7 +82,8 @@ static inline int get_child(int n, int k)
 /*
  * Return the n'th node of level l from table t.
  */
-static inline sector_t *get_node(struct dm_table *t, int l, int n)
+static inline sector_t *get_node(struct dm_table *t, unsigned int l,
+				 unsigned int n)
 {
 	return t->index[l] + (n * KEYS_PER_NODE);
 }
@@ -91,7 +92,7 @@ static inline sector_t *get_node(struct dm_table *t, int l, int n)
  * Return the highest key that you could lookup from the n'th
  * node on level l of the btree.
  */
-static sector_t high(struct dm_table *t, int l, int n)
+static sector_t high(struct dm_table *t, unsigned int l, unsigned int n)
 {
 	for (; l < t->depth - 1; l++)
 		n = get_child(n, CHILDREN_PER_NODE - 1);
@@ -106,15 +107,15 @@ static sector_t high(struct dm_table *t, int l, int n)
  * Fills in a level of the btree based on the highs of the level
  * below it.
  */
-static int setup_btree_index(int l, struct dm_table *t)
+static int setup_btree_index(unsigned int l, struct dm_table *t)
 {
-	int n, k;
+	unsigned int n, k;
 	sector_t *node;
 
-	for (n = 0; n < t->counts[l]; n++) {
+	for (n = 0U; n < t->counts[l]; n++) {
 		node = get_node(t, l, n);
 
-		for (k = 0; k < KEYS_PER_NODE; k++)
+		for (k = 0U; k < KEYS_PER_NODE; k++)
 			node[k] = high(t, l + 1, get_child(n, k));
 	}
 
@@ -125,7 +126,7 @@ static int setup_btree_index(int l, struct dm_table *t)
  * highs, and targets are managed as dynamic arrays during a
  * table load.
  */
-static int alloc_targets(struct dm_table *t, int num)
+static int alloc_targets(struct dm_table *t, unsigned int num)
 {
 	sector_t *n_highs;
 	struct dm_target *n_targets;
@@ -193,7 +194,7 @@ static void free_devices(struct list_head *devices)
 
 void table_destroy(struct dm_table *t)
 {
-	int i;
+	unsigned int i;
 
 	/* destroying the table counts as an event */
 	dm_table_event(t);
@@ -558,7 +559,8 @@ int dm_table_add_target(struct dm_table *t, const char *type,
 
 static int setup_indexes(struct dm_table *t)
 {
-	int i, total = 0;
+	int i;
+	unsigned int total = 0;
 	sector_t *indexes;
 
 	/* allocate the space for *all* the indexes */
@@ -586,7 +588,8 @@ static int setup_indexes(struct dm_table *t)
  */
 int dm_table_complete(struct dm_table *t)
 {
-	int leaf_nodes, r = 0;
+	int r = 0;
+	unsigned int leaf_nodes;
 
 	/* how many indexes will the btree have ? */
 	leaf_nodes = div_up(t->num_targets, KEYS_PER_NODE);
@@ -612,7 +615,7 @@ sector_t dm_table_get_size(struct dm_table *t)
 	return t->num_targets ? (t->highs[t->num_targets - 1] + 1) : 0;
 }
 
-struct dm_target *dm_table_get_target(struct dm_table *t, int index)
+struct dm_target *dm_table_get_target(struct dm_table *t, unsigned int index)
 {
 	if (index > t->num_targets)
 		return NULL;
@@ -625,7 +628,7 @@ struct dm_target *dm_table_get_target(struct dm_table *t, int index)
  */
 struct dm_target *dm_table_find_target(struct dm_table *t, sector_t sector)
 {
-	int l, n = 0, k = 0;
+	unsigned int l, n = 0, k = 0;
 	sector_t *node;
 
 	for (l = 0; l < t->depth; l++) {
@@ -640,7 +643,7 @@ struct dm_target *dm_table_find_target(struct dm_table *t, sector_t sector)
 	return &t->targets[(KEYS_PER_NODE * n) + k];
 }
 
-int dm_table_get_num_targets(struct dm_table *t)
+unsigned int dm_table_get_num_targets(struct dm_table *t)
 {
 	return t->num_targets;
 }

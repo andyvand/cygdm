@@ -127,7 +127,7 @@ static struct buffer_head *_free_buffers;
 
 static int init_buffers(void)
 {
-	int i;
+	unsigned int i;
 	struct buffer_head *buffers;
 
 	buffers = vcalloc(NUM_BUFFERS, sizeof(struct buffer_head));
@@ -318,7 +318,7 @@ static void end_bh(struct buffer_head *bh, int uptodate)
 }
 
 static void dispatch_bh(struct kcopyd_job *job,
-			struct buffer_head *bh, int block)
+			struct buffer_head *bh, unsigned int block)
 {
 	int p;
 

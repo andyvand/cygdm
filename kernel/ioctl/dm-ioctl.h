@@ -46,7 +46,7 @@ struct dm_ioctl {
 	uint32_t data_start;	/* offset to start of data
 				 * relative to start of this struct */
 
-	int32_t target_count;	/* in/out */
+	uint32_t target_count;	/* in/out */
 	int32_t open_count;	/* out */
 	uint32_t flags;		/* in/out */
 
@@ -131,8 +131,8 @@ enum {
 
 #define DM_VERSION_MAJOR	3
 #define DM_VERSION_MINOR	0
-#define DM_VERSION_PATCHLEVEL	0
-#define DM_VERSION_EXTRA	"-ioctl-cvs (2003-03-28)"
+#define DM_VERSION_PATCHLEVEL	1
+#define DM_VERSION_EXTRA	"-ioctl-cvs (2003-04-08)"
 
 /* Status bits */
 #define DM_READONLY_FLAG	0x00000001

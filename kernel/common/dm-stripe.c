@@ -29,7 +29,7 @@ struct stripe_c {
 	struct stripe stripe[0];
 };
 
-static inline struct stripe_c *alloc_context(int stripes)
+static inline struct stripe_c *alloc_context(unsigned int stripes)
 {
 	size_t len;
 
@@ -46,7 +46,7 @@ static inline struct stripe_c *alloc_context(int stripes)
  * Parse a single <dev> <sector> pair
  */
 static int get_stripe(struct dm_target *ti, struct stripe_c *sc,
-		      int stripe, char **argv)
+		      unsigned int stripe, char **argv)
 {
 	sector_t start;
 
@@ -90,14 +90,15 @@ static int multiple(sector_t a, sector_t b, sector_t *n)
  * Construct a striped mapping.
  * <number of stripes> <chunk size (2^^n)> [<dev_path> <offset>]+
  */
-static int stripe_ctr(struct dm_target *ti, int argc, char **argv)
+static int stripe_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct stripe_c *sc;
 	sector_t width;
 	uint32_t stripes;
 	uint32_t chunk_size;
 	char *end;
-	int r, i;
+	int r;
+	unsigned int i;
 
 	if (argc < 2) {
 		ti->error = "dm-stripe: Not enough arguments";
@@ -201,12 +202,12 @@ static int stripe_map(struct dm_target *ti, struct buffer_head *bh, int rw,
 	return 1;
 }
 
-static int stripe_status(struct dm_target *ti,
-			 status_type_t type, char *result, int maxlen)
+static int stripe_status(struct dm_target *ti, status_type_t type,
+			 char *result, unsigned int maxlen)
 {
 	struct stripe_c *sc = (struct stripe_c *) ti->private;
 	int offset;
-	int i;
+	unsigned int i;
 
 	switch (type) {
 	case STATUSTYPE_INFO:

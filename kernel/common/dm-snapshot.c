@@ -202,7 +202,7 @@ static void unregister_snapshot(struct dm_snapshot *s)
  */
 static int init_exception_table(struct exception_table *et, uint32_t size)
 {
-	int i;
+	unsigned int i;
 
 	et->hash_mask = size - 1;
 	et->table = vcalloc(size, sizeof(struct list_head));
@@ -389,7 +389,7 @@ static inline ulong round_up(ulong n, ulong size)
 /*
  * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n> <chunk-size>
  */
-static int snapshot_ctr(struct dm_target *ti, int argc, char **argv)
+static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	struct dm_snapshot *s;
 	unsigned long chunk_size;
@@ -936,7 +936,7 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 }
 
 static int snapshot_status(struct dm_target *ti, status_type_t type,
-			   char *result, int maxlen)
+			   char *result, unsigned int maxlen)
 {
 	struct dm_snapshot *snap = (struct dm_snapshot *) ti->private;
 	char cow[16];
@@ -1000,7 +1000,7 @@ int do_origin(struct dm_dev *origin, struct buffer_head *bh)
  * The context for an origin is merely a 'struct dm_dev *'
  * pointing to the real device.
  */
-static int origin_ctr(struct dm_target *ti, int argc, char **argv)
+static int origin_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	int r;
 	struct dm_dev *dev;
@@ -1039,7 +1039,7 @@ static int origin_map(struct dm_target *ti, struct buffer_head *bh, int rw,
 }
 
 static int origin_status(struct dm_target *ti, status_type_t type, char *result,
-			 int maxlen)
+			 unsigned int maxlen)
 {
 	struct dm_dev *dev = (struct dm_dev *) ti->private;
 

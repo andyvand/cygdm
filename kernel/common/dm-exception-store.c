@@ -158,7 +158,8 @@ static int do_io(int rw, struct kcopyd_region *where, struct kiobuf *iobuf)
 
 static int allocate_iobuf(struct pstore *ps)
 {
-	size_t i, r = -ENOMEM, len, nr_pages;
+	int r = -ENOMEM;
+	size_t i, len, nr_pages;
 	struct page *page;
 
 	len = ps->chunk_size << SECTOR_SHIFT;
@@ -355,7 +356,8 @@ static int write_exception(struct pstore *ps,
  */
 static int insert_exceptions(struct pstore *ps, int *full)
 {
-	int i, r;
+	int r;
+	unsigned int i;
 	struct disk_exception de;
 
 	/* presume the area is full */
@@ -471,7 +473,8 @@ static void persistent_commit(struct exception_store *store,
 			      void (*callback) (void *, int success),
 			      void *callback_context)
 {
-	int r, i;
+	int r;
+	unsigned int i;
 	struct pstore *ps = get_info(store);
 	struct disk_exception de;
 	struct commit_callback *cb;

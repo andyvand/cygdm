@@ -98,9 +98,9 @@ int dm_table_add_target(struct dm_table *t, const char *type,
 int dm_table_complete(struct dm_table *t);
 void dm_table_event(struct dm_table *t);
 sector_t dm_table_get_size(struct dm_table *t);
-struct dm_target *dm_table_get_target(struct dm_table *t, int index);
+struct dm_target *dm_table_get_target(struct dm_table *t, unsigned int index);
 struct dm_target *dm_table_find_target(struct dm_table *t, sector_t sector);
-int dm_table_get_num_targets(struct dm_table *t);
+unsigned int dm_table_get_num_targets(struct dm_table *t);
 struct list_head *dm_table_get_devices(struct dm_table *t);
 int dm_table_get_mode(struct dm_table *t);
 void dm_table_add_wait_queue(struct dm_table *t, wait_queue_t *wq);
