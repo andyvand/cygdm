@@ -22,7 +22,7 @@ struct exception_table {
  * time. Typically 64k - 256k.
  */
 /* FIXME: can we get away with limiting these to a uint32_t ? */
-typedef offset_t chunk_t;
+typedef sector_t chunk_t;
 
 /*
  * An exception is used where an old chunk of data has been
@@ -44,31 +44,31 @@ struct exception_store {
 	/*
 	 * Destroys this object when you've finished with it.
 	 */
-	void (*destroy) (struct exception_store *store);
+	void (*destroy) (struct exception_store * store);
 
 	/*
 	 * Find somewhere to store the next exception.
 	 */
-	int (*prepare_exception) (struct exception_store *store,
-				  struct exception *e);
+	int (*prepare_exception) (struct exception_store * store,
+				  struct exception * e);
 
 	/*
 	 * Update the metadata with this exception.
 	 */
-	void (*commit_exception) (struct exception_store *store,
-				  struct exception *e,
+	void (*commit_exception) (struct exception_store * store,
+				  struct exception * e,
 				  void (*callback) (void *, int success),
 				  void *callback_context);
 
 	/*
 	 * The snapshot is invalid, note this in the metadata.
 	 */
-	void (*drop_snapshot) (struct exception_store *store);
+	void (*drop_snapshot) (struct exception_store * store);
 
 	/*
 	 * Return the %age full of the snapshot
 	 */
-	int (*percent_full) (struct exception_store *store);
+	int (*percent_full) (struct exception_store * store);
 
 	struct dm_snapshot *snap;
 	void *context;
@@ -118,12 +118,12 @@ int dm_add_exception(struct dm_snapshot *s, chunk_t old, chunk_t new);
 int dm_create_persistent(struct exception_store *store, uint32_t chunk_size);
 
 int dm_create_transient(struct exception_store *store,
-			struct dm_snapshot *s, int blocksize, void **error);
+			struct dm_snapshot *s, int blocksize);
 
 /*
  * Return the number of sectors in the device.
  */
-static inline offset_t get_dev_size(kdev_t dev)
+static inline sector_t get_dev_size(kdev_t dev)
 {
 	int *sizes;
 
@@ -134,12 +134,12 @@ static inline offset_t get_dev_size(kdev_t dev)
 	return 0;
 }
 
-static inline chunk_t sector_to_chunk(struct dm_snapshot *s, offset_t sector)
+static inline chunk_t sector_to_chunk(struct dm_snapshot *s, sector_t sector)
 {
 	return (sector & ~s->chunk_mask) >> s->chunk_shift;
 }
 
-static inline offset_t chunk_to_sector(struct dm_snapshot *s, chunk_t chunk)
+static inline sector_t chunk_to_sector(struct dm_snapshot *s, chunk_t chunk)
 {
 	return chunk << s->chunk_shift;
 }

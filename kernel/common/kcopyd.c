@@ -4,18 +4,20 @@
  * This file is released under the GPL.
  */
 
-#include <linux/config.h>
-#include <linux/module.h>
-#include <linux/init.h>
-#include <linux/slab.h>
-#include <linux/list.h>
-#include <linux/fs.h>
-#include <linux/blkdev.h>
-#include <linux/device-mapper.h>
-#include <linux/mempool.h>
 #include <asm/atomic.h>
-#include <linux/pagemap.h>
+
+#include <linux/blkdev.h>
+#include <linux/config.h>
+#include <linux/device-mapper.h>
+#include <linux/fs.h>
+#include <linux/init.h>
+#include <linux/list.h>
 #include <linux/locks.h>
+#include <linux/mempool.h>
+#include <linux/module.h>
+#include <linux/pagemap.h>
+#include <linux/slab.h>
+#include <linux/vmalloc.h>
 
 #include "kcopyd.h"
 
@@ -255,7 +257,7 @@ struct kcopyd_job *kcopyd_alloc_job(void)
 {
 	struct kcopyd_job *job;
 
-	job = mempool_alloc(_job_pool, GFP_KERNEL);
+	job = mempool_alloc(_job_pool, GFP_NOIO);
 	if (!job)
 		return NULL;
 
@@ -611,7 +613,7 @@ static void exit_copier(void)
 
 static inline struct copy_info *alloc_copy_info(void)
 {
-	return mempool_alloc(_copy_pool, GFP_KERNEL);
+	return mempool_alloc(_copy_pool, GFP_NOIO);
 }
 
 static inline void free_copy_info(struct copy_info *info)

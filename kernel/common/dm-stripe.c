@@ -9,14 +9,14 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/blkdev.h>
+#include <linux/slab.h>
 
 struct stripe {
 	struct dm_dev *dev;
-	offset_t physical_start;
+	sector_t physical_start;
 };
 
 struct stripe_c {
-	offset_t logical_start;
 	uint32_t stripes;
 
 	/* The size of this target / num. stripes */
@@ -24,7 +24,7 @@ struct stripe_c {
 
 	/* stripe chunk size */
 	uint32_t chunk_shift;
-	offset_t chunk_mask;
+	sector_t chunk_mask;
 
 	struct stripe stripe[0];
 };
@@ -45,18 +45,17 @@ static inline struct stripe_c *alloc_context(int stripes)
 /*
  * Parse a single <dev> <sector> pair
  */
-static int get_stripe(struct dm_table *t, struct stripe_c *sc,
+static int get_stripe(struct dm_target *ti, struct stripe_c *sc,
 		      int stripe, char **argv)
 {
-	char *end;
-	unsigned long start;
+	sector_t start;
 
-	start = simple_strtoul(argv[1], &end, 10);
-	if (*end)
+	if (sscanf(argv[1], SECTOR_FORMAT, &start) != 1)
 		return -EINVAL;
 
-	if (dm_table_get_device(t, argv[0], start, sc->stripe_width,
-				t->mode, &sc->stripe[stripe].dev))
+	if (dm_get_device(ti, argv[0], start, sc->stripe_width,
+			  dm_table_get_mode(ti->table),
+			  &sc->stripe[stripe].dev))
 		return -ENXIO;
 
 	sc->stripe[stripe].physical_start = start;
@@ -64,62 +63,85 @@ static int get_stripe(struct dm_table *t, struct stripe_c *sc,
 }
 
 /*
+ * FIXME: Nasty function, only present because we can't link
+ * against __moddi3 and __divdi3.
+ *
+ * returns a == b * n
+ */
+static int multiple(sector_t a, sector_t b, sector_t *n)
+{
+	sector_t acc, prev, i;
+
+	*n = 0;
+	while (a >= b) {
+		for (acc = b, prev = 0, i = 1;
+		     acc <= a;
+		     prev = acc, acc <<= 1, i <<= 1)
+			;
+
+		a -= prev;
+		*n += i >> 1;
+	}
+
+	return a == 0;
+}
+
+/*
  * Construct a striped mapping.
  * <number of stripes> <chunk size (2^^n)> [<dev_path> <offset>]+
  */
-static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
-		      int argc, char **argv, void **context)
+static int stripe_ctr(struct dm_target *ti, int argc, char **argv)
 {
 	struct stripe_c *sc;
+	sector_t width;
 	uint32_t stripes;
 	uint32_t chunk_size;
 	char *end;
 	int r, i;
 
 	if (argc < 2) {
-		*context = "dm-stripe: Not enough arguments";
+		ti->error = "dm-stripe: Not enough arguments";
 		return -EINVAL;
 	}
 
 	stripes = simple_strtoul(argv[0], &end, 10);
 	if (*end) {
-		*context = "dm-stripe: Invalid stripe count";
+		ti->error = "dm-stripe: Invalid stripe count";
 		return -EINVAL;
 	}
 
 	chunk_size = simple_strtoul(argv[1], &end, 10);
 	if (*end) {
-		*context = "dm-stripe: Invalid chunk_size";
+		ti->error = "dm-stripe: Invalid chunk_size";
 		return -EINVAL;
 	}
 
-	if (l % stripes) {
-		*context = "dm-stripe: Target length not divisable by "
+	if (!multiple(ti->len, stripes, &width)) {
+		ti->error = "dm-stripe: Target length not divisable by "
 		    "number of stripes";
 		return -EINVAL;
 	}
 
 	sc = alloc_context(stripes);
 	if (!sc) {
-		*context = "dm-stripe: Memory allocation for striped context "
-		    "failed";
+		ti->error = "dm-stripe: Memory allocation for striped context "
+			    "failed";
 		return -ENOMEM;
 	}
 
-	sc->logical_start = b;
 	sc->stripes = stripes;
-	sc->stripe_width = l / stripes;
+	sc->stripe_width = width;
 
 	/*
 	 * chunk_size is a power of two
 	 */
 	if (!chunk_size || (chunk_size & (chunk_size - 1))) {
-		*context = "dm-stripe: Invalid chunk size";
+		ti->error = "dm-stripe: Invalid chunk size";
 		kfree(sc);
 		return -EINVAL;
 	}
 
-	sc->chunk_mask = chunk_size - 1;
+	sc->chunk_mask = ((sector_t) chunk_size) - 1;
 	for (sc->chunk_shift = 0; chunk_size; sc->chunk_shift++)
 		chunk_size >>= 1;
 	sc->chunk_shift--;
@@ -129,45 +151,45 @@ static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
 	 */
 	for (i = 0; i < stripes; i++) {
 		if (argc < 2) {
-			*context = "dm-stripe: Not enough destinations "
-			    "specified";
+			ti->error = "dm-stripe: Not enough destinations "
+				    "specified";
 			kfree(sc);
 			return -EINVAL;
 		}
 
 		argv += 2;
 
-		r = get_stripe(t, sc, i, argv);
+		r = get_stripe(ti, sc, i, argv);
 		if (r < 0) {
-			*context = "dm-stripe: Couldn't parse stripe "
-			    "destination";
+			ti->error = "dm-stripe: Couldn't parse stripe "
+				    "destination";
 			while (i--)
-				dm_table_put_device(t, sc->stripe[i].dev);
+				dm_put_device(ti, sc->stripe[i].dev);
 			kfree(sc);
 			return r;
 		}
 	}
 
-	*context = sc;
+	ti->private = sc;
 	return 0;
 }
 
-static void stripe_dtr(struct dm_table *t, void *c)
+static void stripe_dtr(struct dm_target *ti)
 {
 	unsigned int i;
-	struct stripe_c *sc = (struct stripe_c *) c;
+	struct stripe_c *sc = (struct stripe_c *) ti->private;
 
 	for (i = 0; i < sc->stripes; i++)
-		dm_table_put_device(t, sc->stripe[i].dev);
+		dm_put_device(ti, sc->stripe[i].dev);
 
 	kfree(sc);
 }
 
-static int stripe_map(struct buffer_head *bh, int rw, void *context)
+static int stripe_map(struct dm_target *ti, struct buffer_head *bh, int rw)
 {
-	struct stripe_c *sc = (struct stripe_c *) context;
+	struct stripe_c *sc = (struct stripe_c *) ti->private;
 
-	offset_t offset = bh->b_rsector - sc->logical_start;
+	sector_t offset = bh->b_rsector - ti->begin;
 	uint32_t chunk = (uint32_t) (offset >> sc->chunk_shift);
 	uint32_t stripe = chunk % sc->stripes;	/* 32bit modulus */
 	chunk = chunk / sc->stripes;
@@ -178,10 +200,10 @@ static int stripe_map(struct buffer_head *bh, int rw, void *context)
 	return 1;
 }
 
-static int stripe_status(status_type_t type, char *result, int maxlen,
-			 void *context)
+static int stripe_status(struct dm_target *ti,
+			 status_type_t type, char *result, int maxlen)
 {
-	struct stripe_c *sc = (struct stripe_c *) context;
+	struct stripe_c *sc = (struct stripe_c *) ti->private;
 	int offset;
 	int i;
 
@@ -191,14 +213,14 @@ static int stripe_status(status_type_t type, char *result, int maxlen,
 		break;
 
 	case STATUSTYPE_TABLE:
-		offset = snprintf(result, maxlen, "%d %ld",
+		offset = snprintf(result, maxlen, "%d " SECTOR_FORMAT,
 				  sc->stripes, sc->chunk_mask + 1);
 		for (i = 0; i < sc->stripes; i++) {
-			offset +=
-			    snprintf(result + offset, maxlen - offset,
-				     " %s %ld",
-				     kdevname(sc->stripe[i].dev->dev),
-				     sc->stripe[i].physical_start);
+			offset += snprintf(result + offset, maxlen - offset,
+					   " %s " SECTOR_FORMAT,
+		       			   kdevname(to_kdev_t
+					     (sc->stripe[i].dev->bdev->bd_dev)),
+					   sc->stripe[i].physical_start);
 		}
 		break;
 	}
@@ -206,12 +228,12 @@ static int stripe_status(status_type_t type, char *result, int maxlen,
 }
 
 static struct target_type stripe_target = {
-	name:	"striped",
-	module:	THIS_MODULE,
-	ctr:	stripe_ctr,
-	dtr:	stripe_dtr,
-	map:	stripe_map,
-	status:	stripe_status,
+	.name   = "striped",
+	.module = THIS_MODULE,
+	.ctr    = stripe_ctr,
+	.dtr    = stripe_dtr,
+	.map    = stripe_map,
+	.status = stripe_status,
 };
 
 int __init dm_stripe_init(void)

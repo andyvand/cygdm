@@ -9,51 +9,46 @@
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/blkdev.h>
+#include <linux/slab.h>
 
 /*
  * Linear: maps a linear range of a device.
  */
 struct linear_c {
-	long delta;		/* FIXME: we need a signed offset type */
-	long start;		/* For display only */
 	struct dm_dev *dev;
+	sector_t start;
 };
 
 /*
  * Construct a linear mapping: <dev_path> <offset>
  */
-static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
-		      int argc, char **argv, void **context)
+static int linear_ctr(struct dm_target *ti, int argc, char **argv)
 {
 	struct linear_c *lc;
-	unsigned long start;	/* FIXME: unsigned long long */
-	char *end;
 
 	if (argc != 2) {
-		*context = "dm-linear: Not enough arguments";
+		ti->error = "dm-linear: Not enough arguments";
 		return -EINVAL;
 	}
 
 	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
 	if (lc == NULL) {
-		*context = "dm-linear: Cannot allocate linear context";
+		ti->error = "dm-linear: Cannot allocate linear context";
 		return -ENOMEM;
 	}
 
-	start = simple_strtoul(argv[1], &end, 10);
-	if (*end) {
-		*context = "dm-linear: Invalid device sector";
+	if (sscanf(argv[1], SECTOR_FORMAT, &lc->start) != 1) {
+		ti->error = "dm-linear: Invalid device sector";
 		goto bad;
 	}
 
-	if (dm_table_get_device(t, argv[0], start, l, t->mode, &lc->dev)) {
-		*context = "dm-linear: Device lookup failed";
+	if (dm_get_device(ti, argv[0], lc->start, ti->len,
+			  dm_table_get_mode(ti->table), &lc->dev)) {
+		ti->error = "dm-linear: Device lookup failed";
 		goto bad;
 	}
 
-	lc->delta = (int) start - (int) b;
-	lc->start = start;
-	*context = lc;
+	ti->private = lc;
 	return 0;
 
       bad:
@@ -61,28 +56,28 @@ static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
 	return -EINVAL;
 }
 
-static void linear_dtr(struct dm_table *t, void *c)
+static void linear_dtr(struct dm_target *ti)
 {
-	struct linear_c *lc = (struct linear_c *) c;
+	struct linear_c *lc = (struct linear_c *) ti->private;
 
-	dm_table_put_device(t, lc->dev);
-	kfree(c);
+	dm_put_device(ti, lc->dev);
+	kfree(lc);
 }
 
-static int linear_map(struct buffer_head *bh, int rw, void *context)
+static int linear_map(struct dm_target *ti, struct buffer_head *bh, int rw)
 {
-	struct linear_c *lc = (struct linear_c *) context;
+	struct linear_c *lc = (struct linear_c *) ti->private;
 
 	bh->b_rdev = lc->dev->dev;
-	bh->b_rsector = bh->b_rsector + lc->delta;
+	bh->b_rsector = lc->start + (bh->b_rsector - ti->begin);
 
 	return 1;
 }
 
-static int linear_status(status_type_t type, char *result, int maxlen,
-			 void *context)
+static int linear_status(struct dm_target *ti, status_type_t type,
+			 char *result, int maxlen)
 {
-	struct linear_c *lc = (struct linear_c *) context;
+	struct linear_c *lc = (struct linear_c *) ti->private;
 
 	switch (type) {
 	case STATUSTYPE_INFO:
@@ -90,20 +85,20 @@ static int linear_status(status_type_t type, char *result, int maxlen,
 		break;
 
 	case STATUSTYPE_TABLE:
-		snprintf(result, maxlen, "%s %ld", kdevname(lc->dev->dev),
-			 lc->start);
+		snprintf(result, maxlen, "%s " SECTOR_FORMAT,
+			 kdevname(to_kdev_t(lc->dev->bdev->bd_dev)), lc->start);
 		break;
 	}
 	return 0;
 }
 
 static struct target_type linear_target = {
-	name:	"linear",
-	module:	THIS_MODULE,
-	ctr:	linear_ctr,
-	dtr:	linear_dtr,
-	map:	linear_map,
-	status:	linear_status,
+	.name   = "linear",
+	.module = THIS_MODULE,
+	.ctr    = linear_ctr,
+	.dtr    = linear_dtr,
+	.map    = linear_map,
+	.status = linear_status,
 };
 
 int __init dm_linear_init(void)

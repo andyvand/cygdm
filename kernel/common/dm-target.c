@@ -6,7 +6,9 @@
 
 #include "dm.h"
 
+#include <linux/module.h>
 #include <linux/kmod.h>
+#include <linux/slab.h>
 
 struct tt_internal {
 	struct target_type tt;
@@ -19,57 +21,6 @@ static LIST_HEAD(_targets);
 static rwlock_t _lock = RW_LOCK_UNLOCKED;
 
 #define DM_MOD_NAME_SIZE 32
-
-/*
- * Destructively splits up the argument list to pass to ctr.
- */
-int split_args(int max, int *argc, char **argv, char *input)
-{
-	char *start, *end = input, *out;
-	*argc = 0;
-
-	while (1) {
-		start = end;
-
-		/* Skip whitespace */
-		while (*start && isspace(*start))
-			start++;
-
-		if (!*start)
-			break;	/* success, we hit the end */
-
-		/* 'out' is used to remove any back-quotes */
-		end = out = start;
-		while (*end) {
-			/* Everything apart from '\0' can be quoted */
-			if (*end == '\\' && *(end + 1)) {
-				*out++ = *(end + 1);
-				end += 2;
-				continue;
-			}
-
-			if (isspace(*end))
-				break;	/* end of token */
-
-			*out++ = *end++;
-		}
-
-		/* have we already filled the array ? */
-		if ((*argc + 1) > max)
-			return -EINVAL;
-
-		/* we know this is whitespace */
-		if (*end)
-			end++;
-
-		/* terminate the string and put it in the array */
-		*out = '\0';
-		argv[*argc] = start;
-		(*argc)++;
-	}
-
-	return 0;
-}
 
 static inline struct tt_internal *__find_target_type(const char *name)
 {
@@ -198,33 +149,30 @@ int dm_unregister_target(struct target_type *t)
 
 /*
  * io-err: always fails an io, useful for bringing
- * up LV's that have holes in them.
+ * up LVs that have holes in them.
  */
-static int io_err_ctr(struct dm_table *t, offset_t b, offset_t l,
-		      int argc, char **args, void **context)
+static int io_err_ctr(struct dm_target *ti, int argc, char **args)
 {
-	*context = NULL;
 	return 0;
 }
 
-static void io_err_dtr(struct dm_table *t, void *c)
+static void io_err_dtr(struct dm_target *ti)
 {
 	/* empty */
 	return;
 }
 
-static int io_err_map(struct buffer_head *bh, int rw, void *context)
+static int io_err_map(struct dm_target *ti, struct buffer_head *bh, int rw)
 {
 	buffer_IO_error(bh);
 	return 0;
 }
 
 static struct target_type error_target = {
-	name:	"error",
-	ctr:	io_err_ctr,
-	dtr:	io_err_dtr,
-	map:	io_err_map,
-	status:	NULL,
+	.name = "error",
+	.ctr  = io_err_ctr,
+	.dtr  = io_err_dtr,
+	.map  = io_err_map,
 };
 
 int dm_target_init(void)

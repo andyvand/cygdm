@@ -8,8 +8,11 @@
 
 #include "dm-snapshot.h"
 #include "kcopyd.h"
+
 #include <linux/mm.h>
 #include <linux/pagemap.h>
+#include <linux/vmalloc.h>
+#include <linux/slab.h>
 
 #define SECTOR_SIZE 512
 #define SECTOR_SHIFT 9
@@ -78,7 +81,7 @@ struct disk_exception {
 };
 
 struct commit_callback {
-	void (*callback)(void *, int success);
+	void (*callback) (void *, int success);
 	void *context;
 };
 
@@ -155,32 +158,6 @@ static int do_io(int rw, struct kcopyd_region *where, struct kiobuf *iobuf)
 
 	return 0;
 }
-
-#if LINUX_VERSION_CODE < KERNEL_VERSION ( 2, 4, 19)
-/*
- * FIXME: Remove once 2.4.19 has been released.
- */
-struct page *vmalloc_to_page(void *vmalloc_addr)
-{
-	unsigned long addr = (unsigned long) vmalloc_addr;
-	struct page *page = NULL;
-	pmd_t *pmd;
-	pte_t *pte;
-	pgd_t *pgd;
-
-	pgd = pgd_offset_k(addr);
-	if (!pgd_none(*pgd)) {
-		pmd = pmd_offset(pgd, addr);
-		if (!pmd_none(*pmd)) {
-			pte = pte_offset(pmd, addr);
-			if (pte_present(*pte)) {
-				page = pte_page(*pte);
-			}
-		}
-	}
-	return page;
-}
-#endif
 
 static int allocate_iobuf(struct pstore *ps)
 {
@@ -302,11 +279,11 @@ static int read_header(struct pstore *ps, int *new_snapshot)
 	if (dh->magic == 0) {
 		*new_snapshot = 1;
 
-	} else if (le32_to_cpu(dh->magic) == SNAP_MAGIC) {
+	} else if (dh->magic == SNAP_MAGIC) {
 		*new_snapshot = 0;
-		ps->valid = le32_to_cpu(dh->valid);
-		ps->version = le32_to_cpu(dh->version);
-		ps->chunk_size = le32_to_cpu(dh->chunk_size);
+		ps->valid = dh->valid;
+		ps->version = dh->version;
+		ps->chunk_size = dh->chunk_size;
 
 	} else {
 		DMWARN("Invalid/corrupt snapshot");
@@ -472,7 +449,7 @@ static int persistent_prepare(struct exception_store *store,
 {
 	struct pstore *ps = get_info(store);
 	uint32_t stride;
-	offset_t size = get_dev_size(store->snap->cow->dev);
+	sector_t size = get_dev_size(store->snap->cow->dev);
 
 	/* Is there enough room ? */
 	if (size <= (ps->next_free * store->snap->chunk_size))
@@ -664,7 +641,7 @@ int dm_create_persistent(struct exception_store *store, uint32_t chunk_size)
  * Implementation of the store for non-persistent snapshots.
  *---------------------------------------------------------------*/
 struct transient_c {
-	offset_t next_free;
+	sector_t next_free;
 };
 
 void transient_destroy(struct exception_store *store)
@@ -675,7 +652,7 @@ void transient_destroy(struct exception_store *store)
 int transient_prepare(struct exception_store *store, struct exception *e)
 {
 	struct transient_c *tc = (struct transient_c *) store->context;
-	offset_t size = get_dev_size(store->snap->cow->dev);
+	sector_t size = get_dev_size(store->snap->cow->dev);
 
 	if (size < (tc->next_free + store->snap->chunk_size))
 		return -1;
@@ -702,7 +679,7 @@ static int transient_percentfull(struct exception_store *store)
 }
 
 int dm_create_transient(struct exception_store *store,
-			struct dm_snapshot *s, int blocksize, void **error)
+			struct dm_snapshot *s, int blocksize)
 {
 	struct transient_c *tc;
 

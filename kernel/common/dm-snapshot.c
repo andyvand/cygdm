@@ -15,6 +15,7 @@
 #include <linux/blkdev.h>
 #include <linux/mempool.h>
 #include <linux/device-mapper.h>
+#include <linux/vmalloc.h>
 
 #include "dm-snapshot.h"
 #include "kcopyd.h"
@@ -345,7 +346,7 @@ static inline uint32_t round_down(uint32_t n)
  */
 static int init_hash_tables(struct dm_snapshot *s)
 {
-	offset_t hash_size, cow_dev_size, origin_dev_size, max_buckets;
+	sector_t hash_size, cow_dev_size, origin_dev_size, max_buckets;
 
 	/*
 	 * Calculate based on the size of the original volume or
@@ -392,8 +393,7 @@ static inline ulong round_up(ulong n, ulong size)
 /*
  * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n> <chunk-size>
  */
-static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
-			int argc, char **argv, void **context)
+static int snapshot_ctr(struct dm_target *ti, int argc, char **argv)
 {
 	struct dm_snapshot *s;
 	unsigned long chunk_size;
@@ -405,7 +405,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	int blocksize;
 
 	if (argc < 4) {
-		*context = "dm-snapshot: requires exactly 4 arguments";
+		ti->error = "dm-snapshot: requires exactly 4 arguments";
 		r = -EINVAL;
 		goto bad;
 	}
@@ -415,36 +415,38 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	persistent = argv[2];
 
 	if ((*persistent & 0x5f) != 'P' && (*persistent & 0x5f) != 'N') {
-		*context = "Persistent flag is not P or N";
+		ti->error = "Persistent flag is not P or N";
 		r = -EINVAL;
 		goto bad;
 	}
 
 	chunk_size = simple_strtoul(argv[3], &value, 10);
 	if (chunk_size == 0 || value == NULL) {
-		*context = "Invalid chunk size";
+		ti->error = "Invalid chunk size";
 		r = -EINVAL;
 		goto bad;
 	}
 
 	s = kmalloc(sizeof(*s), GFP_KERNEL);
 	if (s == NULL) {
-		*context = "Cannot allocate snapshot context private structure";
+		ti->error = "Cannot allocate snapshot context private "
+			    "structure";
 		r = -ENOMEM;
 		goto bad;
 	}
 
-	r = dm_table_get_device(t, origin_path, 0, 0, FMODE_READ, &s->origin);
+	r = dm_get_device(ti, origin_path, 0, ti->len, FMODE_READ, &s->origin);
 	if (r) {
-		*context = "Cannot get origin device";
+		ti->error = "Cannot get origin device";
 		goto bad_free;
 	}
 
-	r = dm_table_get_device(t, cow_path, 0, 0,
-				FMODE_READ | FMODE_WRITE, &s->cow);
+	/* FIXME: get cow length */
+	r = dm_get_device(ti, cow_path, 0, 0,
+			  FMODE_READ | FMODE_WRITE, &s->cow);
 	if (r) {
-		dm_table_put_device(t, s->origin);
-		*context = "Cannot get COW device";
+		dm_put_device(ti, s->origin);
+		ti->error = "Cannot get COW device";
 		goto bad_free;
 	}
 
@@ -457,21 +459,21 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	/* Validate the chunk size against the device block size */
 	blocksize = get_hardsect_size(s->cow->dev);
 	if (chunk_size % (blocksize / SECTOR_SIZE)) {
-		*context = "Chunk size is not a multiple of device blocksize";
+		ti->error = "Chunk size is not a multiple of device blocksize";
 		r = -EINVAL;
 		goto bad_putdev;
 	}
 
 	/* Check the sizes are small enough to fit in one kiovec */
 	if (chunk_size > KIO_MAX_SECTORS) {
-		*context = "Chunk size is too big";
+		ti->error = "Chunk size is too big";
 		r = -EINVAL;
 		goto bad_putdev;
 	}
 
 	/* Check chunk_size is a power of 2 */
 	if (chunk_size & (chunk_size - 1)) {
-		*context = "Chunk size is not a power of 2";
+		ti->error = "Chunk size is not a power of 2";
 		r = -EINVAL;
 		goto bad_putdev;
 	}
@@ -486,12 +488,12 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 
 	s->valid = 1;
 	s->last_percent = 0;
-	s->table = t;
 	init_rwsem(&s->lock);
+	s->table = ti->table;
 
 	/* Allocate hash table for COW data */
 	if (init_hash_tables(s)) {
-		*context = "Unable to allocate hash table space";
+		ti->error = "Unable to allocate hash table space";
 		r = -ENOMEM;
 		goto bad_putdev;
 	}
@@ -505,10 +507,10 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	if ((*persistent & 0x5f) == 'P')
 		r = dm_create_persistent(&s->store, s->chunk_size);
 	else
-		r = dm_create_transient(&s->store, s, blocksize, context);
+		r = dm_create_transient(&s->store, s, blocksize);
 
 	if (r) {
-		*context = "Couldn't create exception store";
+		ti->error = "Couldn't create exception store";
 		r = -EINVAL;
 		goto bad_free1;
 	}
@@ -523,7 +525,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	/* Add snapshot to the list of snapshots for this origin */
 	if (register_snapshot(s)) {
 		r = -EINVAL;
-		*context = "Cannot register snapshot origin";
+		ti->error = "Cannot register snapshot origin";
 		goto bad_free2;
 	}
 #if LVM_VFS_ENHANCEMENT
@@ -531,7 +533,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 #endif
 	kcopyd_inc_client_count();
 
-	*context = s;
+	ti->private = s;
 	return 0;
 
       bad_free2:
@@ -542,8 +544,8 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	exit_exception_table(&s->complete, exception_cache);
 
       bad_putdev:
-	dm_table_put_device(t, s->cow);
-	dm_table_put_device(t, s->origin);
+	dm_put_device(ti, s->cow);
+	dm_put_device(ti, s->origin);
 
       bad_free:
 	kfree(s);
@@ -552,11 +554,11 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	return r;
 }
 
-static void snapshot_dtr(struct dm_table *t, void *context)
+static void snapshot_dtr(struct dm_target *ti)
 {
-	struct dm_snapshot *s = (struct dm_snapshot *) context;
+	struct dm_snapshot *s = (struct dm_snapshot *) ti->private;
 
-	dm_table_event(s->table);
+	dm_table_event(ti->table);
 
 	unregister_snapshot(s);
 
@@ -566,8 +568,8 @@ static void snapshot_dtr(struct dm_table *t, void *context)
 	/* Deallocate memory used */
 	s->store.destroy(&s->store);
 
-	dm_table_put_device(t, s->origin);
-	dm_table_put_device(t, s->cow);
+	dm_put_device(ti, s->origin);
+	dm_put_device(ti, s->cow);
 	kfree(s);
 
 	kcopyd_dec_client_count();
@@ -783,10 +785,10 @@ static inline void remap_exception(struct dm_snapshot *s, struct exception *e,
 	    (bh->b_rsector & s->chunk_mask);
 }
 
-static int snapshot_map(struct buffer_head *bh, int rw, void *context)
+static int snapshot_map(struct dm_target *ti, struct buffer_head *bh, int rw)
 {
 	struct exception *e;
-	struct dm_snapshot *s = (struct dm_snapshot *) context;
+	struct dm_snapshot *s = (struct dm_snapshot *) ti->private;
 	int r = 1;
 	chunk_t chunk;
 	struct pending_exception *pe;
@@ -933,10 +935,10 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 	return r;
 }
 
-static int snapshot_status(status_type_t type, char *result,
-			   int maxlen, void *context)
+static int snapshot_status(struct dm_target *ti, status_type_t type,
+			   char *result, int maxlen)
 {
-	struct dm_snapshot *snap = (struct dm_snapshot *) context;
+	struct dm_snapshot *snap = (struct dm_snapshot *) ti->private;
 	char cow[16];
 	char org[16];
 
@@ -998,47 +1000,47 @@ int do_origin(struct dm_dev *origin, struct buffer_head *bh)
  * The context for an origin is merely a 'struct dm_dev *'
  * pointing to the real device.
  */
-static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
-		      int argc, char **argv, void **context)
+static int origin_ctr(struct dm_target *ti, int argc, char **argv)
 {
 	int r;
 	struct dm_dev *dev;
 
 	if (argc != 1) {
-		*context = "dm-origin: incorrect number of arguments";
+		ti->error = "dm-origin: incorrect number of arguments";
 		return -EINVAL;
 	}
 
-	r = dm_table_get_device(t, argv[0], 0, l, t->mode, &dev);
+	r = dm_get_device(ti, argv[0], 0, ti->len,
+			  dm_table_get_mode(ti->table), &dev);
 	if (r) {
-		*context = "Cannot get target device";
+		ti->error = "Cannot get target device";
 		return r;
 	}
 
-	*context = dev;
+	ti->private = dev;
 
 	return 0;
 }
 
-static void origin_dtr(struct dm_table *t, void *c)
+static void origin_dtr(struct dm_target *ti)
 {
-	struct dm_dev *dev = (struct dm_dev *) c;
-	dm_table_put_device(t, dev);
+	struct dm_dev *dev = (struct dm_dev *) ti->private;
+	dm_put_device(ti, dev);
 }
 
-static int origin_map(struct buffer_head *bh, int rw, void *context)
+static int origin_map(struct dm_target *ti, struct buffer_head *bh, int rw)
 {
-	struct dm_dev *dev = (struct dm_dev *) context;
+	struct dm_dev *dev = (struct dm_dev *) ti->private;
 	bh->b_rdev = dev->dev;
 
 	/* Only tell snapshots if this is a write */
 	return (rw == WRITE) ? do_origin(dev, bh) : 1;
 }
 
-static int origin_status(status_type_t type, char *result,
-			 int maxlen, void *context)
+static int origin_status(struct dm_target *ti, status_type_t type, char *result,
+			 int maxlen)
 {
-	struct dm_dev *dev = (struct dm_dev *) context;
+	struct dm_dev *dev = (struct dm_dev *) ti->private;
 
 	switch (type) {
 	case STATUSTYPE_INFO:
@@ -1060,7 +1062,6 @@ static struct target_type origin_target = {
 	dtr:	origin_dtr,
 	map:	origin_map,
 	status:	origin_status,
-	err:	NULL
 };
 
 static struct target_type snapshot_target = {
@@ -1070,7 +1071,6 @@ static struct target_type snapshot_target = {
 	dtr:	snapshot_dtr,
 	map:	snapshot_map,
 	status:	snapshot_status,
-	err:	NULL
 };
 
 int __init dm_snapshot_init(void)

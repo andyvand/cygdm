@@ -15,8 +15,8 @@
 
 struct kcopyd_region {
 	kdev_t dev;
-	offset_t sector;
-	offset_t count;
+	sector_t sector;
+	sector_t count;
 };
 
 #define MAX_KCOPYD_PAGES 128
@@ -46,11 +46,11 @@ struct kcopyd_job {
 	 * Shifts and masks that will be useful when dispatching
 	 * each buffer_head.
 	 */
-	offset_t offset;
-	offset_t block_size;
-	offset_t block_shift;
-	offset_t bpp_shift;	/* blocks per page */
-	offset_t bpp_mask;
+	sector_t offset;
+	sector_t block_size;
+	sector_t block_shift;
+	sector_t bpp_shift;	/* blocks per page */
+	sector_t bpp_mask;
 
 	/*
 	 * nr_blocks is how many buffer heads will have to be
@@ -66,7 +66,7 @@ struct kcopyd_job {
 	 * Set this to ensure you are notified when the job has
 	 * completed.  'context' is for callback to use.
 	 */
-	void (*callback)(struct kcopyd_job *job);
+	void (*callback) (struct kcopyd_job *job);
 	void *context;
 };
 
@@ -82,7 +82,7 @@ int kcopyd_queue_job(struct kcopyd_job *job);
  * Submit a copy job to kcopyd.  This is built on top of the
  * previous three fns.
  */
-typedef void (*kcopyd_notify_fn)(int err, void *context);
+typedef void (*kcopyd_notify_fn) (int err, void *context);
 
 int kcopyd_copy(struct kcopyd_region *from, struct kcopyd_region *to,
 		kcopyd_notify_fn fn, void *context);
