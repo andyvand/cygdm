@@ -82,6 +82,12 @@ int dm_task_set_ro(struct dm_task *dmt)
 	return 1;
 }
 
+int dm_task_set_newname(struct dm_task *dmt, const char *newname)
+{
+	log("Renaming is not yet supported by the filesystem interface");
+	return 0;
+}
+
 struct target *create_target(uint64_t start,
 			     uint64_t len, const char *type, const char *params)
 {

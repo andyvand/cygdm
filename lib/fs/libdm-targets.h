@@ -12,6 +12,7 @@ struct target {
 struct dm_task {
 	int type;
 	char *dev_name;
+	int minor;
 
 	struct target *head, *tail;
 
