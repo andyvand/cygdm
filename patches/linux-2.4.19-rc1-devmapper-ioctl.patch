@@ -65,7 +65,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/Makefile linux/drivers/md/Makefile
 diff -ruN linux-2.4.19-rc1/drivers/md/dm-exception-store.c linux/drivers/md/dm-exception-store.c
 --- linux-2.4.19-rc1/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-exception-store.c	Thu Jun 13 14:58:15 2002
-@@ -0,0 +1,727 @@
+@@ -0,0 +1,698 @@
 +/*
 + * dm-snapshot.c
 + *
@@ -224,32 +224,6 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-exception-store.c linux/drivers/md/dm-e
 +	return 0;
 +}
 +
-+#if LINUX_VERSION_CODE < KERNEL_VERSION ( 2, 4, 19)
-+/*
-+ * FIXME: Remove once 2.4.19 has been released.
-+ */
-+struct page *vmalloc_to_page(void *vmalloc_addr)
-+{
-+	unsigned long addr = (unsigned long) vmalloc_addr;
-+	struct page *page = NULL;
-+	pmd_t *pmd;
-+	pte_t *pte;
-+	pgd_t *pgd;
-+
-+	pgd = pgd_offset_k(addr);
-+	if (!pgd_none(*pgd)) {
-+		pmd = pmd_offset(pgd, addr);
-+		if (!pmd_none(*pmd)) {
-+			pte = pte_offset(pmd, addr);
-+			if (pte_present(*pte)) {
-+				page = pte_page(*pte);
-+			}
-+		}
-+	}
-+	return page;
-+}
-+#endif
-+
 +static int allocate_iobuf(struct pstore *ps)
 +{
 +	size_t i, r = -ENOMEM, len, nr_pages;
@@ -266,9 +240,6 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-exception-store.c linux/drivers/md/dm-e
 +		return r;
 +
 +	if (alloc_kiovec(1, &ps->iobuf))
-+		goto bad;
-+
-+	if (alloc_kiobuf_bhs(ps->iobuf))
 +		goto bad;
 +
 +	nr_pages = ps->chunk_size / (PAGE_SIZE / SECTOR_SIZE);
@@ -6881,8 +6852,8 @@ diff -ruN linux-2.4.19-rc1/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl
 +
 +#define DM_VERSION_MAJOR	1
 +#define DM_VERSION_MINOR	0
-+#define DM_VERSION_PATCHLEVEL	0
-+#define DM_VERSION_EXTRA	"-ioctl (2002-06-25)"
++#define DM_VERSION_PATCHLEVEL	1
++#define DM_VERSION_EXTRA	"-ioctl (2002-06-26)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	0x00000001

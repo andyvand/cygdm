@@ -1,0 +1,20 @@
+Apply all of these to the core kernel:
+  -mempool.patch            - sct's backport
+  -mempool_slab.patch       - a couple more functions
+  -vcalloc.patch            - a calloc implementation (with overflow check)
+
+And this one too:
+  -b_bdev_private.patch     - add a private b_private (avoids ext3 conflict)
+
+These patches provide the core driver and implement basic mapping functions:
+  -config.patch             - add device-mapper option (tagged experimental)
+  -devmapper_1_core.patch             - the core driver
+  -devmapper_2_ioctl.patch            - ioctl interface to driver
+  -devmapper_3_basic_mappings.patch   - linear and striped mappings
+
+Optional asynchronous snapshot implementation:
+  -devmapper_4_snapshots.patch        - snapshot implementation
+
+Optional mirror implementation (requires snapshots patch):
+  -devmapper_5_mirror.patch           - mirror implementation (for pvmove)
+

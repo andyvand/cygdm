@@ -200,9 +200,6 @@ static int allocate_iobuf(struct pstore *ps)
 	if (alloc_kiovec(1, &ps->iobuf))
 		goto bad;
 
-	if (alloc_kiobuf_bhs(ps->iobuf))
-		goto bad;
-
 	nr_pages = ps->chunk_size / (PAGE_SIZE / SECTOR_SIZE);
 	r = expand_kiobuf(ps->iobuf, nr_pages);
 	if (r)

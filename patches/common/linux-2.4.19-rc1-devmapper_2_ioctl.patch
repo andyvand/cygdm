@@ -980,8 +980,8 @@ diff -ruN linux-2.4.19-rc1/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl
 +
 +#define DM_VERSION_MAJOR	1
 +#define DM_VERSION_MINOR	0
-+#define DM_VERSION_PATCHLEVEL	0
-+#define DM_VERSION_EXTRA	"-ioctl (2002-06-25)"
++#define DM_VERSION_PATCHLEVEL	1
++#define DM_VERSION_EXTRA	"-ioctl (2002-06-26)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	0x00000001
