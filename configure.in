@@ -102,6 +102,14 @@ AC_CHECK_FUNCS(mkdir rmdir uname)
 dnl Check for getopt
 AC_CHECK_HEADERS(getopt.h, CFLAGS="$CFLAGS -DHAVE_GETOPTLONG")
 
+dnl Check for is_selinux_enabled
+AC_CHECK_LIB(selinux, is_selinux_enabled, HAVE_SELINUX=yes, HAVE_SELINUX=no)
+
+if test x$HAVE_SELINUX = xyes; then
+	CFLAGS="$CFLAGS -DHAVE_SELINUX"
+	LIBS="-lselinux $LIBS"
+fi
+
 echo $ac_n "checking whether to enable internationalisation""... $ac_c" 1>&6
 dnl Internationalisation stuff
 AC_ARG_ENABLE(nls, [  --enable-nls            Enable Native Language Support],\

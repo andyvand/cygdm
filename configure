@@ -2056,6 +2056,53 @@ fi
 done
 
 
+echo $ac_n "checking for is_selinux_enabled in -lselinux""... $ac_c" 1>&6
+echo "configure:2061: checking for is_selinux_enabled in -lselinux" >&5
+ac_lib_var=`echo selinux'_'is_selinux_enabled | sed 'y%./+-%__p_%'`
+if eval "test \"`echo '$''{'ac_cv_lib_$ac_lib_var'+set}'`\" = set"; then
+  echo $ac_n "(cached) $ac_c" 1>&6
+else
+  ac_save_LIBS="$LIBS"
+LIBS="-lselinux  $LIBS"
+cat > conftest.$ac_ext <<EOF
+#line 2069 "configure"
+#include "confdefs.h"
+/* Override any gcc2 internal prototype to avoid an error.  */
+/* We use char because int might match the return type of a gcc2
+    builtin and then its argument prototype would still apply.  */
+char is_selinux_enabled();
+
+int main() {
+is_selinux_enabled()
+; return 0; }
+EOF
+if { (eval echo configure:2080: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
+  rm -rf conftest*
+  eval "ac_cv_lib_$ac_lib_var=yes"
+else
+  echo "configure: failed program was:" >&5
+  cat conftest.$ac_ext >&5
+  rm -rf conftest*
+  eval "ac_cv_lib_$ac_lib_var=no"
+fi
+rm -f conftest*
+LIBS="$ac_save_LIBS"
+
+fi
+if eval "test \"`echo '$ac_cv_lib_'$ac_lib_var`\" = yes"; then
+  echo "$ac_t""yes" 1>&6
+  HAVE_SELINUX=yes
+else
+  echo "$ac_t""no" 1>&6
+HAVE_SELINUX=no
+fi
+
+
+if test x$HAVE_SELINUX = xyes; then
+	CFLAGS="$CFLAGS -DHAVE_SELINUX"
+	LIBS="-lselinux $LIBS"
+fi
+
 echo $ac_n "checking whether to enable internationalisation""... $ac_c" 1>&6
 # Check whether --enable-nls or --disable-nls was given.
 if test "${enable_nls+set}" = set; then
@@ -2073,7 +2120,7 @@ if test x$INTL = xyes; then
 	# Extract the first word of "msgfmt", so it can be a program name with args.
 set dummy msgfmt; ac_word=$2
 echo $ac_n "checking for $ac_word""... $ac_c" 1>&6
-echo "configure:2077: checking for $ac_word" >&5
+echo "configure:2124: checking for $ac_word" >&5
 if eval "test \"`echo '$''{'ac_cv_path_MSGFMT'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
