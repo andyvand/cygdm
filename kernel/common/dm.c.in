@@ -49,22 +49,38 @@ static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb);
 static void __free_dev(struct mapped_device *md);
 
 /*
- * Shortcuts to lock/unlock the global _dev_lock
+ * Protect the mapped_devices referenced from _dev[]
  */
-static inline void dm_lock_r(void) {
+static inline void dm_lock_r(void)
+{
 	down_read(&_dev_lock);
 }
 
-static inline void dm_unlock_r(void) {
+static inline void dm_unlock_r(void)
+{
 	up_read(&_dev_lock);
 }
 
-static inline void dm_lock_w(void) {
+static inline void dm_lock_w(void)
+{
 	down_write(&_dev_lock);
 }
 
-static inline void dm_unlock_w(void) {
+static inline void dm_unlock_w(void)
+{
 	up_write(&_dev_lock);
+}
+
+/*
+ * Reference count held for struct mapped_device when used outside a lock.
+ */
+static void __dm_get(struct mapped_device *md) {
+	atomic_inc(&md->ref_count);
+}
+
+static void __dm_put(struct mapped_device *md) {
+	if (atomic_dec_and_test(&md->ref_count))
+		__free_dev(md);
 }
 
 
@@ -412,12 +428,15 @@ static int request(request_queue_t *q, int rw, struct buffer_head *bh)
 	struct mapped_device *md;
 	int r, minor = MINOR(bh->b_rdev);
 
-	if (minor >= MAX_DEVICES)
-		goto bad_no_lock;
+	if (minor >= MAX_DEVICES) {
+		buffer_IO_error(bh);
+		return 0;
+	}
 
 	dm_lock_r();
-	md = _devs[minor];
 
+	md = _devs[minor];
+	__dm_get(md);
 	if (!md)
 		goto bad;
 
@@ -449,13 +468,18 @@ static int request(request_queue_t *q, int rw, struct buffer_head *bh)
 	if (__map_buffer(md, bh, rw, __find_node(md->map, bh)) < 0)
 		goto bad;
 
+	__dm_put(md);
 	dm_unlock_r();
 	return 1;
 
       bad:
+	__dm_put(md);
 	dm_unlock_r();
+	buffer_IO_error(bh);
+	return 0;
 
       bad_no_lock:
+	dm_put(md);
 	buffer_IO_error(bh);
 	return 0;
 }
@@ -589,6 +613,8 @@ static struct mapped_device *alloc_dev(int minor)
 	md->dev = MKDEV(_major, minor);
 	md->name[0] = '\0';
 	md->suspended = 0;
+
+	atomic_set(&md->ref_count, 1);
 
 	init_waitqueue_head(&md->wait);
 
@@ -736,13 +762,14 @@ int dm_create(const char *name, int minor, struct dm_table *table,
 	if (r)
 		goto err;
 
+	__dm_get(md);
 	dm_unlock_w();
 
 	*result = md;
 	return 0;
 
       err:
-	__free_dev(md);
+	__dm_put(md);
 	dm_unlock_w();
 	return r;
 }
@@ -779,8 +806,9 @@ int dm_destroy(struct mapped_device *md)
 	minor = MINOR(md->dev);
 	_devs[minor] = 0;
 	__unbind(md);
-	__free_dev(md);
 
+	__dm_put(md);
+	__dm_put(md);
 	dm_unlock_w();
 
 	return 0;
@@ -917,9 +945,18 @@ struct mapped_device *dm_get(const char *name)
 
 	dm_lock_r();
 	md = __get_by_name(name);
+	if (md)
+		__dm_get(md);
 	dm_unlock_r();
 
 	return md;
+}
+
+void dm_put(struct mapped_device *md)
+{
+	dm_lock_r();
+	__dm_put(md);
+	dm_unlock_r();
 }
 
 struct block_device_operations dm_blk_dops = {

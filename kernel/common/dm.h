@@ -84,6 +84,8 @@ struct mapped_device {
 	kdev_t dev;
 	char name[DM_NAME_LEN];
 
+	atomic_t ref_count;
+
 	int use_count;
 	int suspended;
 	int read_only;
@@ -115,6 +117,7 @@ int split_args(int max, int *argc, char **argv, char *input);
 
 /* dm.c */
 struct mapped_device *dm_get(const char *name);
+void dm_put(struct mapped_device *md);
 int dm_create(const char *name, int minor, struct dm_table *table,
 	      struct mapped_device **result);
 int dm_destroy(struct mapped_device *md);

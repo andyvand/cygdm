@@ -165,6 +165,8 @@ static int info(const char *name, struct dm_ioctl *user)
 	param.minor = MINOR(md->dev);
 	param.target_count = md->map->num_targets;
 
+	dm_put(md);
+
       out:
 	return copy_to_user(user, &param, sizeof(param));
 }
@@ -191,6 +193,7 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 		goto bad;
 	}
 
+	dm_put(md);
 	return 0;
 
       bad:
@@ -217,6 +220,7 @@ static int suspend(struct dm_ioctl *param)
 		return -ENXIO;
 
 	r = param->suspend ? dm_suspend(md) : dm_resume(md);
+	dm_put(md);
 	return r;
 }
 
@@ -231,23 +235,27 @@ static int reload(struct dm_ioctl *param)
 
 	r = dm_table_create(&t);
 	if (r)
-		return r;
+		goto bad_no_table;
 
 	r = populate_table(t, param);
-	if (r) {
-		dm_table_destroy(t);
-		return r;
-	}
+	if (r)
+		goto bad;
 
 	r = dm_swap_table(md, t);
-	if (r) {
-		dm_table_destroy(t);
-		return r;
-	}
+	if (r)
+		goto bad;
 
 	dm_set_ro(md, param->read_only);
 
+	dm_put(md);
 	return 0;
+
+      bad:
+	dm_table_destroy(t);
+
+      bad_no_table:
+	dm_put(md);
+	return r;
 }
 
 static int ctl_open(struct inode *inode, struct file *file)
