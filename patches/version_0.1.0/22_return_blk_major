@@ -1,0 +1,20 @@
+--- linux-last/include/linux/dm-ioctl.h	Wed Nov 21 17:39:43 2001
++++ linux/include/linux/dm-ioctl.h	Wed Nov 21 17:41:50 2001
+@@ -38,6 +38,7 @@
+ 	int exists;		/* out */
+ 	int suspend;		/* in/out */
+ 	int open_count;		/* out */
++	int major;              /* out */
+ 	int minor;		/* in/out */
+ 
+ 	int target_count;	/* in/out */
+--- linux-last/drivers/md/dm-ioctl.c	Wed Nov 21 17:39:43 2001
++++ linux/drivers/md/dm-ioctl.c	Wed Nov 21 17:42:15 2001
+@@ -153,6 +153,7 @@
+ 	param.exists = 1;
+ 	param.suspend = md->suspended;
+ 	param.open_count = md->use_count;
++	param.major = DM_BLK_MAJOR;
+ 	param.minor = MINOR(md->dev);
+ 	param.target_count = md->map->num_targets;
+ 
