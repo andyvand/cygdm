@@ -43,7 +43,7 @@ struct dm_ioctl {
 	uint32_t data_size;	/* total size of data passed in
 				 * including this struct */
 
-	uint32_t data_offset;	/* offset to start of data
+	uint32_t data_start;	/* offset to start of data
 				 * relative to start of this struct */
 
 	uint32_t target_count;	/* in/out */
@@ -131,8 +131,8 @@ enum {
 
 #define DM_VERSION_MAJOR	3
 #define DM_VERSION_MINOR	0
-#define DM_VERSION_PATCHLEVEL	4
-#define DM_VERSION_EXTRA	"-ioctl-cvs (2003-04-24)"
+#define DM_VERSION_PATCHLEVEL	5
+#define DM_VERSION_EXTRA	"-ioctl-cvs (2003-04-26)"
 
 /* Status bits */
 #define DM_READONLY_FLAG	0x00000001	/* In/Out */
@@ -147,7 +147,10 @@ enum {
 
 #define DM_ERROR_DEFERRED_FLAG	0x00000020	/* In     */
 
+/*
+ * Indicates that the buffer passed in wasn't big enough for the
+ * results.
+ */
 #define DM_BUFFER_FULL_FLAG	0x00000100	/*    Out */
-
 
 #endif				/* _LINUX_DM_IOCTL_H */
