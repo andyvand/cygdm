@@ -60,21 +60,53 @@ AC_ARG_WITH(group,
 
 dnl -- Where the linux src tree is
 AC_ARG_WITH(kerneldir,
-  [  --with-kerneldir=DIR    linux kernel source in DIR [/usr/src/linux]],
+  [  --with-kernel-dir=DIR   linux kernel source in DIR [/usr/src/linux]],
   [ kerneldir="$withval" ],
   [ kerneldir=/usr/src/linux ])
+if test "${with_kernel_dir+set}" = set; then
+   kerneldir="$with_kernel_dir"
+fi
+if test "${with_kernel-dir+set}" = set; then
+   kerneldir="$with_kerneldir"
+fi
+if test "${with_kernel-src+set}" = set; then
+   kerneldir="$with_kernel-src"
+fi
+if test "${with_kernel_src+set}" = set; then
+   kerneldir="$with_kernel_src"
+fi
+if test "${with_kernel+set}" = set; then
+   kerneldir="$with_kernel"
+fi
 
 dnl -- Kernel version string
-AC_ARG_WITH(kernelvsn,
-  [  --with-kernelvsn=VSN    linux kernel version [2.4.16]],
+AC_ARG_WITH(kernel-version,
+  [  --with-kernel-version=VERSION   linux kernel version [2.4.16]],
   [ kernelvsn="$withval" ],
   [ kernelvsn=2.4.16 ])
+if test "${with_kernelvsn+set}" = set; then
+   kernelvsn="$with_kernelvsn"
+fi
+if test "${with_kernel_version+set}" = set; then
+   kernelvsn="$with_kernel_version"
+fi
+if test "${with_kernelversion+set}" = set; then
+   kernelvsn="$with_kernelversion"
+fi
+
+echo "using kernel version $kernelvsn in $kerneldir"
 
 dnl -- Temporary directory for kernel diffs
-AC_ARG_WITH(tmpdir,
-  [  --with-tmpdir=DIR    temp directory for kernel diffs [/tmp/kerneldiffs]],
+AC_ARG_WITH(tmp-dir,
+  [  --with-tmp-dir=DIR      temp directory to make kernel patches [/tmp/kerndiff]],
   [ tmpdir="$withval" ],
   [ tmpdir=/tmp/kerneldiffs ])
+if test "${with_tmp_dir+set}" = set; then
+   tmpdir="$with_tmp_dir"
+fi
+if test "${with_tmpdir+set}" = set; then
+   tmpdir="$with_tmpdir"
+fi
 
 dnl -- which kernel interface to use (ioctl or fs)
 AC_ARG_WITH(interface,
@@ -86,6 +118,8 @@ then
   echo
   echo "Please specify either  --with-interface=ioctl  or --with-interface=fs"
   exit 1;
+else
+  echo "using $interface interface"
 fi
 
 AC_ARG_ENABLE(jobs, [  --enable-jobs=NUM       Number of jobs to run simultaneously], JOBS=-j$enableval, JOBS=)

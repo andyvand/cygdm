@@ -1,0 +1,17 @@
+This directory contains a beta release of the proposed device mapper 
+for the linux kernel.
+
+For more information about the device mapper read the INTRO file.
+Installation instructions are in INSTALL.
+
+Tarballs are available from ftp://ftp.sistina.com/pub/LVM2/device-mapper/
+
+To access the CVS tree use:
+  cvs -d :pserver:cvs@tech.sistina.com:/data/cvs login
+  CVS password: cvs1
+  cvs -d :pserver:cvs@tech.sistina.com:/data/cvs checkout device-mapper
+
+Mailing list for discussion/bug reports etc.
+  lvm-devel@sistina.com
+  Subscribe from http://lists.sistina.com/mailman/listinfo/lvm-devel
+

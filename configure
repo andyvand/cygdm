@@ -17,11 +17,11 @@ ac_help="$ac_help
 ac_help="$ac_help
   --with-group=GROUP      Set the group owner of installed files "
 ac_help="$ac_help
-  --with-kerneldir=DIR    linux kernel source in DIR [/usr/src/linux]"
+  --with-kernel-dir=DIR   linux kernel source in DIR [/usr/src/linux]"
 ac_help="$ac_help
-  --with-kernelvsn=VSN    linux kernel version [2.4.16]"
+  --with-kernel-version=VERSION   linux kernel version [2.4.16]"
 ac_help="$ac_help
-  --with-tmpdir=DIR    temp directory for kernel diffs [/tmp/kerneldiffs]"
+  --with-tmp-dir=DIR      temp directory to make kernel patches [/tmp/kerndiff]"
 ac_help="$ac_help
   --with-interface=IFACE  Choose kernel interface (ioctl or fs) [ioctl]"
 ac_help="$ac_help
@@ -1618,24 +1618,56 @@ else
    kerneldir=/usr/src/linux 
 fi
 
+if test "${with_kernel_dir+set}" = set; then
+   kerneldir="$with_kernel_dir"
+fi
+if test "${with_kernel-dir+set}" = set; then
+   kerneldir="$with_kerneldir"
+fi
+if test "${with_kernel-src+set}" = set; then
+   kerneldir="$with_kernel-src"
+fi
+if test "${with_kernel_src+set}" = set; then
+   kerneldir="$with_kernel_src"
+fi
+if test "${with_kernel+set}" = set; then
+   kerneldir="$with_kernel"
+fi
 
-# Check whether --with-kernelvsn or --without-kernelvsn was given.
-if test "${with_kernelvsn+set}" = set; then
-  withval="$with_kernelvsn"
+# Check whether --with-kernel-version or --without-kernel-version was given.
+if test "${with_kernel_version+set}" = set; then
+  withval="$with_kernel_version"
    kernelvsn="$withval" 
 else
    kernelvsn=2.4.16 
 fi
 
+if test "${with_kernelvsn+set}" = set; then
+   kernelvsn="$with_kernelvsn"
+fi
+if test "${with_kernel_version+set}" = set; then
+   kernelvsn="$with_kernel_version"
+fi
+if test "${with_kernelversion+set}" = set; then
+   kernelvsn="$with_kernelversion"
+fi
 
-# Check whether --with-tmpdir or --without-tmpdir was given.
-if test "${with_tmpdir+set}" = set; then
-  withval="$with_tmpdir"
+echo "using kernel version $kernelvsn in $kerneldir"
+
+# Check whether --with-tmp-dir or --without-tmp-dir was given.
+if test "${with_tmp_dir+set}" = set; then
+  withval="$with_tmp_dir"
    tmpdir="$withval" 
 else
    tmpdir=/tmp/kerneldiffs 
 fi
 
+if test "${with_tmp_dir+set}" = set; then
+   tmpdir="$with_tmp_dir"
+fi
+if test "${with_tmpdir+set}" = set; then
+   tmpdir="$with_tmpdir"
+fi
 
 # Check whether --with-interface or --without-interface was given.
 if test "${with_interface+set}" = set; then
@@ -1650,6 +1682,8 @@ then
   echo
   echo "Please specify either  --with-interface=ioctl  or --with-interface=fs"
   exit 1;
+else
+  echo "using $interface interface"
 fi
 
 # Check whether --enable-jobs or --disable-jobs was given.
@@ -1663,13 +1697,13 @@ fi
 
 if test $ac_cv_prog_gcc = yes; then
     echo $ac_n "checking whether ${CC-cc} needs -traditional""... $ac_c" 1>&6
-echo "configure:1667: checking whether ${CC-cc} needs -traditional" >&5
+echo "configure:1701: checking whether ${CC-cc} needs -traditional" >&5
 if eval "test \"`echo '$''{'ac_cv_prog_gcc_traditional'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
     ac_pattern="Autoconf.*'x'"
   cat > conftest.$ac_ext <<EOF
-#line 1673 "configure"
+#line 1707 "configure"
 #include "confdefs.h"
 #include <sgtty.h>
 Autoconf TIOCGETP
@@ -1687,7 +1721,7 @@ rm -f conftest*
 
   if test $ac_cv_prog_gcc_traditional = no; then
     cat > conftest.$ac_ext <<EOF
-#line 1691 "configure"
+#line 1725 "configure"
 #include "confdefs.h"
 #include <termio.h>
 Autoconf TCGETA
@@ -1709,12 +1743,12 @@ echo "$ac_t""$ac_cv_prog_gcc_traditional" 1>&6
 fi
 
 echo $ac_n "checking return type of signal handlers""... $ac_c" 1>&6
-echo "configure:1713: checking return type of signal handlers" >&5
+echo "configure:1747: checking return type of signal handlers" >&5
 if eval "test \"`echo '$''{'ac_cv_type_signal'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   cat > conftest.$ac_ext <<EOF
-#line 1718 "configure"
+#line 1752 "configure"
 #include "confdefs.h"
 #include <sys/types.h>
 #include <signal.h>
@@ -1731,7 +1765,7 @@ int main() {
 int i;
 ; return 0; }
 EOF
-if { (eval echo configure:1735: \"$ac_compile\") 1>&5; (eval $ac_compile) 2>&5; }; then
+if { (eval echo configure:1769: \"$ac_compile\") 1>&5; (eval $ac_compile) 2>&5; }; then
   rm -rf conftest*
   ac_cv_type_signal=void
 else
@@ -1750,12 +1784,12 @@ EOF
 
 
 echo $ac_n "checking for vprintf""... $ac_c" 1>&6
-echo "configure:1754: checking for vprintf" >&5
+echo "configure:1788: checking for vprintf" >&5
 if eval "test \"`echo '$''{'ac_cv_func_vprintf'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   cat > conftest.$ac_ext <<EOF
-#line 1759 "configure"
+#line 1793 "configure"
 #include "confdefs.h"
 /* System header to define __stub macros and hopefully few prototypes,
     which can conflict with char vprintf(); below.  */
@@ -1778,7 +1812,7 @@ vprintf();
 
 ; return 0; }
 EOF
-if { (eval echo configure:1782: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
+if { (eval echo configure:1816: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
   rm -rf conftest*
   eval "ac_cv_func_vprintf=yes"
 else
@@ -1802,12 +1836,12 @@ fi
 
 if test "$ac_cv_func_vprintf" != yes; then
 echo $ac_n "checking for _doprnt""... $ac_c" 1>&6
-echo "configure:1806: checking for _doprnt" >&5
+echo "configure:1840: checking for _doprnt" >&5
 if eval "test \"`echo '$''{'ac_cv_func__doprnt'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   cat > conftest.$ac_ext <<EOF
-#line 1811 "configure"
+#line 1845 "configure"
 #include "confdefs.h"
 /* System header to define __stub macros and hopefully few prototypes,
     which can conflict with char _doprnt(); below.  */
@@ -1830,7 +1864,7 @@ _doprnt();
 
 ; return 0; }
 EOF
-if { (eval echo configure:1834: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
+if { (eval echo configure:1868: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
   rm -rf conftest*
   eval "ac_cv_func__doprnt=yes"
 else
@@ -1857,12 +1891,12 @@ fi
 for ac_func in mkdir rmdir uname
 do
 echo $ac_n "checking for $ac_func""... $ac_c" 1>&6
-echo "configure:1861: checking for $ac_func" >&5
+echo "configure:1895: checking for $ac_func" >&5
 if eval "test \"`echo '$''{'ac_cv_func_$ac_func'+set}'`\" = set"; then
   echo $ac_n "(cached) $ac_c" 1>&6
 else
   cat > conftest.$ac_ext <<EOF
-#line 1866 "configure"
+#line 1900 "configure"
 #include "confdefs.h"
 /* System header to define __stub macros and hopefully few prototypes,
     which can conflict with char $ac_func(); below.  */
@@ -1885,7 +1919,7 @@ $ac_func();
 
 ; return 0; }
 EOF
-if { (eval echo configure:1889: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
+if { (eval echo configure:1923: \"$ac_link\") 1>&5; (eval $ac_link) 2>&5; } && test -s conftest${ac_exeext}; then
   rm -rf conftest*
   eval "ac_cv_func_$ac_func=yes"
 else
