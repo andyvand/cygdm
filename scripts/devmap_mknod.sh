@@ -25,8 +25,8 @@ if test ! -e /proc/devices ; then
 fi
 
 # Get major, minor, and mknod
-major=$(awk '$2 ~ /^misc$/ {print $1}' /proc/devices)
-minor=$(awk "\$2 ~ /^$DM_NAME\$/ {print \$1}" /proc/misc)
+major=$(sed -n 's/^[ ]*\([0-9]\+\)[ ]\+misc$/\1/p' /proc/devices)
+minor=$(sed -n "s/^[ ]*\([0-9]\+\)[ ]\+$DM_NAME\$/\1/p" /proc/misc)
 
 if test -z "$major" -o -z "$minor" ; then
 	echo "$DM_NAME kernel module not loaded: can't create $control."
