@@ -38,7 +38,8 @@ void dm_error(const char *message);
  * are opened/closed correctly
  */
 int dm_table_get_device(struct dm_table *t, const char *path,
-			offset_t start, offset_t len, struct dm_dev **result);
+			offset_t start, offset_t len,
+			int mode, struct dm_dev **result);
 void dm_table_put_device(struct dm_table *table, struct dm_dev *d);
 
 /*

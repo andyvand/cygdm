@@ -41,6 +41,8 @@ struct dm_dev {
 	atomic_t count;
 	struct list_head list;
 
+	int mode;
+
 	kdev_t dev;
 	struct block_device *bd;
 };
@@ -75,6 +77,13 @@ struct dm_table {
 	int num_allocated;
 	offset_t *highs;
 	struct target *targets;
+
+	/*
+	 * Indicates the rw permissions for the new logical
+	 * device.  This should be a combination of FMODE_READ
+	 * and FMODE_WRITE.
+	 */
+	int mode;
 
 	/* a list of devices used by this table */
 	struct list_head devices;
@@ -167,7 +176,7 @@ int dm_suspend(struct mapped_device *md);
 int dm_resume(struct mapped_device *md);
 
 /* dm-table.c */
-int dm_table_create(struct dm_table **result);
+int dm_table_create(struct dm_table **result, int mode);
 void dm_table_destroy(struct dm_table *t);
 
 int dm_table_add_target(struct dm_table *t, offset_t highs,
@@ -178,14 +187,6 @@ int dm_table_complete(struct dm_table *t);
  * Event handling
  */
 void dm_table_event(struct dm_table *t);
-
-/* Snapshots */
-int dm_snapshot_init(void);
-void dm_snapshot_exit(void);
-
-/* dm-mirror.c */
-int dm_mirror_init(void);
-void dm_mirror_exit(void);
 
 #define DMWARN(f, x...) printk(KERN_WARNING DM_NAME ": " f "\n" , ## x)
 #define DMERR(f, x...) printk(KERN_ERR DM_NAME ": " f "\n" , ## x)
@@ -214,20 +215,27 @@ static inline int array_too_big(unsigned long fixed, unsigned long obj,
 }
 
 /*
- * The device-mapper can be driven through one of two interfaces;
- * ioctl or filesystem, depending which patch you have applied.
+ * Targets
  */
-int __init dm_interface_init(void);
-void dm_interface_exit(void);
-
-/*
- * Targets for linear and striped mappings
- */
-
 int dm_linear_init(void);
 void dm_linear_exit(void);
 
 int dm_stripe_init(void);
 void dm_stripe_exit(void);
+
+int dm_snapshot_init(void);
+void dm_snapshot_exit(void);
+
+int dm_mirror_init(void);
+void dm_mirror_exit(void);
+
+/*
+ * Init functions for the user interface to device-mapper.  At
+ * the moment an ioctl interface on a special char device is
+ * used.  A filesystem based interface would be a nicer way to
+ * go.
+ */
+int __init dm_interface_init(void);
+void dm_interface_exit(void);
 
 #endif

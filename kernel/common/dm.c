@@ -5,7 +5,6 @@
  */
 
 #include "dm.h"
-#include "kcopyd.h"
 
 #include <linux/blk.h>
 #include <linux/blkpg.h>
@@ -437,7 +436,7 @@ static inline int call_err_fn(struct io_hook *ih, struct buffer_head *bh)
  */
 static void dec_pending(struct buffer_head *bh, int uptodate)
 {
-	struct io_hook *ih = bh->b_bdev_private;
+	struct io_hook *ih = bh->b_private;
 
 	if (!uptodate && call_err_fn(ih, bh))
 		return;
@@ -447,7 +446,7 @@ static void dec_pending(struct buffer_head *bh, int uptodate)
 		wake_up(&ih->md->wait);
 
 	bh->b_end_io = ih->end_io;
-	bh->b_bdev_private = ih->context;
+	bh->b_private = ih->context;
 	free_io_hook(ih);
 
 	bh->b_end_io(bh, uptodate);
@@ -510,7 +509,7 @@ static inline int __map_buffer(struct mapped_device *md,
 	ih->rw = rw;
 	ih->target = ti;
 	ih->end_io = bh->b_end_io;
-	ih->context = bh->b_bdev_private;
+	ih->context = bh->b_private;
 
 	r = fn(bh, rw, context);
 
@@ -518,7 +517,7 @@ static inline int __map_buffer(struct mapped_device *md,
 		/* hook the end io request fn */
 		atomic_inc(&md->pending);
 		bh->b_end_io = dec_pending;
-		bh->b_bdev_private = ih;
+		bh->b_private = ih;
 
 	} else if (r == 0)
 		/* we don't need to hook */

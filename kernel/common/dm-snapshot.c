@@ -380,6 +380,16 @@ static int init_hash_tables(struct dm_snapshot *s)
 }
 
 /*
+ * Round a number up to the nearest 'size' boundary.  size must
+ * be a power of 2.
+ */
+static inline ulong round_up(ulong n, ulong size)
+{
+	size--;
+	return (n + size) & ~size;
+}
+
+/*
  * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n> <chunk-size>
  */
 static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
@@ -424,22 +434,25 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad;
 	}
 
-	r = dm_table_get_device(t, origin_path, 0, 0, &s->origin);
+	r = dm_table_get_device(t, origin_path, 0, 0, FMODE_READ, &s->origin);
 	if (r) {
 		*context = "Cannot get origin device";
 		goto bad_free;
 	}
 
-	r = dm_table_get_device(t, cow_path, 0, 0, &s->cow);
+	r = dm_table_get_device(t, cow_path, 0, 0,
+				FMODE_READ | FMODE_WRITE, &s->cow);
 	if (r) {
 		dm_table_put_device(t, s->origin);
 		*context = "Cannot get COW device";
 		goto bad_free;
 	}
 
-	/* Chunk size must be multiple of page size. If it's wrong, fix it */
-	if (chunk_size < (PAGE_SIZE / SECTOR_SIZE))
-		chunk_size = PAGE_SIZE / SECTOR_SIZE;
+	/*
+	 * Chunk size must be multiple of page size.  Silently
+	 * round up if it's not.
+	 */
+	chunk_size = round_up(chunk_size, PAGE_SIZE / SECTOR_SIZE);
 
 	/* Validate the chunk size against the device block size */
 	blocksize = get_hardsect_size(s->cow->dev);
@@ -996,7 +1009,7 @@ static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
 		return -EINVAL;
 	}
 
-	r = dm_table_get_device(t, argv[0], 0, l, &dev);
+	r = dm_table_get_device(t, argv[0], 0, l, t->mode, &dev);
 	if (r) {
 		*context = "Cannot get target device";
 		return r;

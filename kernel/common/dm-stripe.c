@@ -56,7 +56,7 @@ static int get_stripe(struct dm_table *t, struct stripe_c *sc,
 		return -EINVAL;
 
 	if (dm_table_get_device(t, argv[0], start, sc->stripe_width,
-				&sc->stripe[stripe].dev))
+				t->mode, &sc->stripe[stripe].dev))
 		return -ENXIO;
 
 	sc->stripe[stripe].physical_start = start;

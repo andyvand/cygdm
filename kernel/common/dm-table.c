@@ -104,7 +104,7 @@ static int alloc_targets(struct dm_table *t, int num)
 	return 0;
 }
 
-int dm_table_create(struct dm_table **result)
+int dm_table_create(struct dm_table **result, int mode)
 {
 	struct dm_table *t = kmalloc(sizeof(*t), GFP_NOIO);
 
@@ -122,6 +122,7 @@ int dm_table_create(struct dm_table **result)
 	}
 
 	init_waitqueue_head(&t->eventq);
+	t->mode = mode;
 	*result = t;
 	return 0;
 }
@@ -244,7 +245,7 @@ static int open_dev(struct dm_dev *d)
 	if (!(d->bd = bdget(kdev_t_to_nr(d->dev))))
 		return -ENOMEM;
 
-	if ((err = blkdev_get(d->bd, FMODE_READ | FMODE_WRITE, 0, BDEV_FILE)))
+	if ((err = blkdev_get(d->bd, d->mode, 0, BDEV_FILE)))
 		return err;
 
 	return 0;
@@ -284,11 +285,35 @@ static int check_device_area(kdev_t dev, offset_t start, offset_t len)
 }
 
 /*
+ * This upgrades the mode on an already open dm_dev.  Being
+ * careful to leave things as they were if we fail to reopen the
+ * device.
+ */
+static int upgrade_mode(struct dm_dev *dd, int new_mode)
+{
+	int r;
+	struct dm_dev dd_copy;
+
+	memcpy(&dd_copy, dd, sizeof(dd_copy));
+
+	dd->mode |= new_mode;
+	dd->bd = NULL;
+	r = open_dev(dd);
+	if (!r)
+		close_dev(&dd_copy);
+	else
+		memcpy(dd, &dd_copy, sizeof(dd_copy));
+
+	return r;
+}
+
+/*
  * Add a device to the list, or just increment the usage count
  * if it's already present.
  */
 int dm_table_get_device(struct dm_table *t, const char *path,
-			offset_t start, offset_t len, struct dm_dev **result)
+			offset_t start, offset_t len, int mode,
+			struct dm_dev **result)
 {
 	int r;
 	kdev_t dev;
@@ -310,6 +335,7 @@ int dm_table_get_device(struct dm_table *t, const char *path,
 		if (!dd)
 			return -ENOMEM;
 
+		dd->mode = mode;
 		dd->dev = dev;
 		dd->bd = NULL;
 
@@ -320,6 +346,11 @@ int dm_table_get_device(struct dm_table *t, const char *path,
 
 		atomic_set(&dd->count, 0);
 		list_add(&dd->list, &t->devices);
+
+	} else if (dd->mode != (mode | dd->mode)) {
+		r = upgrade_mode(dd, mode);
+		if (r)
+			return r;
 	}
 	atomic_inc(&dd->count);
 

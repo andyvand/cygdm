@@ -66,8 +66,8 @@ static void mirror_bh(struct mirror_c *mc, struct buffer_head *bh)
 	dest.sector = bh->b_rsector - mc->from_delta + mc->to_delta;
 	dest.count = bh->b_size / 512;
 	kcopyd_write_pages(&dest, 1, &bh->b_page,
-			   ((long) bh->b_data -
-			    (long) page_address(bh->b_page)) / 512,
+			   ((long)bh->b_data -
+			    (long)page_address(bh->b_page)) / 512,
 			   mirror_callback, mc);
 }
 
@@ -76,6 +76,7 @@ static void copy_callback(int err, void *context)
 {
 	struct mirror_c *lc = (struct mirror_c *) context;
 	struct buffer_head *bh;
+
 
 	/* Submit, and mirror any pending BHs */
 	down_write(&lc->lock);
@@ -112,7 +113,7 @@ static void copy_callback(int err, void *context)
 
 		src.dev = lc->fromdev->dev;
 		src.sector = lc->frompos + lc->got_to;
-		src.count = min((unsigned long) lc->chunksize, 
+		src.count = min((unsigned long)lc->chunksize,
 				lc->size - lc->got_to);
 
 		dest.dev = lc->todev->dev;
@@ -154,7 +155,7 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 		return -ENOMEM;
 	}
 
-	if (dm_table_get_device(t, argv[0], 0, l, &lc->fromdev)) {
+	if (dm_table_get_device(t, argv[0], 0, l, t->mode, &lc->fromdev)) {
 		*context = "dm-mirror: Device lookup failed";
 		goto bad;
 	}
@@ -166,7 +167,7 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad;
 	}
 
-	if (dm_table_get_device(t, argv[2], 0, l, &lc->todev)) {
+	if (dm_table_get_device(t, argv[2], 0, l, t->mode, &lc->todev)) {
 		*context = "dm-mirror: Device lookup failed";
 		dm_table_put_device(t, lc->fromdev);
 		goto bad;
@@ -209,7 +210,7 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	/* Tell kcopyd to do the biz */
 	src.dev = lc->fromdev->dev;
 	src.sector = offset1;
-	src.count = min((unsigned long) chunksize, lc->size);
+	src.count = min((unsigned long)chunksize, lc->size);
 
 	dest.dev = lc->todev->dev;
 	dest.sector = offset2;

@@ -179,12 +179,21 @@ static struct buffer_head *alloc_buffer(void)
  */
 static void free_buffer(struct buffer_head *bh)
 {
-	int flags;
+	int flags, was_empty;
 
 	spin_lock_irqsave(&_buffer_lock, flags);
+	was_empty = (_free_buffers == NULL) ? 1 : 0;
 	bh->b_reqnext = _free_buffers;
 	_free_buffers = bh;
 	spin_unlock_irqrestore(&_buffer_lock, flags);
+
+	/*
+	 * If the buffer list was empty then kcopyd probably went
+	 * to sleep because it ran out of buffer heads, so let's
+	 * wake it up.
+	 */
+	if (was_empty)
+		wake_kcopyd();
 }
 
 /*-----------------------------------------------------------------

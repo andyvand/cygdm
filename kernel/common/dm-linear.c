@@ -46,7 +46,7 @@ static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad;
 	}
 
-	if (dm_table_get_device(t, argv[0], start, l, &lc->dev)) {
+	if (dm_table_get_device(t, argv[0], start, l, t->mode, &lc->dev)) {
 		*context = "dm-linear: Device lookup failed";
 		goto bad;
 	}

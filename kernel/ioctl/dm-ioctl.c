@@ -252,13 +252,23 @@ static int info(struct dm_ioctl *param, struct dm_ioctl *user)
 	return results_to_user(user, param, NULL, 0);
 }
 
+static inline int get_mode(struct dm_ioctl *param)
+{
+	int mode = FMODE_READ | FMODE_WRITE;
+
+	if (param->flags & DM_READONLY_FLAG)
+		mode = FMODE_READ;
+
+	return mode;
+}
+
 static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 {
 	int r, ro;
 	struct dm_table *t;
 	int minor;
 
-	r = dm_table_create(&t);
+	r = dm_table_create(&t, get_mode(param));
 	if (r)
 		return r;
 
@@ -523,7 +533,7 @@ static int reload(struct dm_ioctl *param, struct dm_ioctl *user)
 	struct mapped_device *md;
 	struct dm_table *t;
 
-	r = dm_table_create(&t);
+	r = dm_table_create(&t, get_mode(param));
 	if (r)
 		return r;
 
