@@ -771,7 +771,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 {
 	struct snapshot_c *lc;
 	unsigned long chunk_size;
-	unsigned long extent_size;
+	unsigned long extent_size = 0L;
 	int r = -EINVAL;
 	char *persistent;
 	char *origin_path;
@@ -779,7 +779,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	char *value;
 	int blocksize;
 
-	if (argc < 5) {
+	if (argc < 4) {
 		*context = "dm-snapshot: Not enough arguments";
 		return -EINVAL;
 	}
@@ -799,10 +799,17 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad;
 	}
 
-	extent_size = simple_strtoul(argv[4], &value, 10);
-	if (extent_size == 0 || value == NULL) {
-		*context = "Invalid extent size";
-		goto bad;
+	/* Get the extent size for persistent snapshots */
+	if ((*persistent & 0x5f) == 'P') {
+		*context = "No extent size specified";
+		if (argc < 5)
+			goto bad;
+
+		extent_size = simple_strtoul(argv[4], &value, 10);
+		if (extent_size == 0 || value == NULL) {
+			*context = "Invalid extent size";
+			goto bad;
+		}
 	}
 
 	*context = "Cannot allocate snapshot context private structure";
@@ -878,15 +885,13 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	   to check the LV header */
 	if ((*persistent & 0x5f) == 'P') {
 		lc->persistent = 1;
+
+		/* Allocate the COW iobuf and set associated variables */
+		if (setup_persistent_snapshot(lc, blocksize, context))
+			goto bad_free1;
 	}
 	else {
 		lc->persistent = 0;
-	}
-
-	/* For a persistent snapshot allocate the COW iobuf and set associated variables */
-	if (lc->persistent) {
-		if (setup_persistent_snapshot(lc, blocksize, context))
-			goto bad_free1;
 	}
 
 	/* Flush IO to the origin device */
