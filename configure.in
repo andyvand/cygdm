@@ -1,129 +1,177 @@
-################################################################################
+###############################################################################
+## Copyright (C) 2001-2004 Sistina Software, Inc. All rights reserved.
+## Copyright (C) 2004 Red Hat, Inc. All rights reserved.
 ##
-##    Copyright 1999-2001 Sistina Software, Inc.
+## This file is part of the device-mapper userspace tools.
 ##
-##    This is free software released under the GNU General Public License.
-##    There is no warranty for this software.  See the file COPYING for
-##    details.
+## This copyrighted material is made available to anyone wishing to use,
+## modify, copy, or redistribute it subject to the terms and conditions
+## of the GNU General Public License v.2.
 ##
-##    See the file CONTRIBUTORS for a list of contributors.
-##
-##    File name: configure.in
-##
-##    Description: Input file for autoconf.  Generates the configure script 
-##                 that tries to keep everything nice and portable.  It also
-##                 simplifies distribution package building considerably.
+## You should have received a copy of the GNU General Public License
+## along with this program; if not, write to the Free Software Foundation,
+## Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+## MA 02111-1307, USA
 ################################################################################
 
-dnl Process this file with autoconf to produce a configure script.
+AC_PREREQ(2.53)
+################################################################################
+dnl -- Process this file with autoconf to produce a configure script.
 AC_INIT(lib/libdevmapper.h)
 
-dnl setup the directory where autoconf has auxilary files
+################################################################################
+dnl -- Setup the directory where autoconf has auxilary files
 AC_CONFIG_AUX_DIR(autoconf) 
 
-dnl Checks for programs.
+################################################################################
+dnl -- Get system type
+AC_CANONICAL_SYSTEM
+
+case "$host_os" in
+	linux*)
+		CFLAGS="$CFLAGS"
+		COPTIMISE_FLAG="-O2"
+		CLDFLAGS="$CLDFLAGS -Wl,--version-script,.export.sym"
+		LDDEPS="$LDDEPS .export.sym"
+		SOFLAG="-shared" ;;
+	darwin*)
+		CFLAGS="$CFLAGS -no-cpp-precomp -fno-common"
+		COPTIMISE_FLAG="-O2"
+		CLDFLAGS="$CLDFLAGS"
+		LDDEPS="$LDDEPS"
+		SOFLAG="-dynamiclib" ;;
+esac
+
+################################################################################
+dnl -- Checks for programs.
 AC_PROG_AWK
 AC_PROG_CC
+AC_PROG_GCC_TRADITIONAL
 AC_PROG_INSTALL
 AC_PROG_LN_S
 AC_PROG_MAKE_SET
 AC_PROG_RANLIB
 
-dnl Checks for header files.
+################################################################################
+dnl -- Checks for header files.
 AC_HEADER_DIRENT
 AC_HEADER_STDC
-AC_CHECK_HEADERS(ctype.h errno.h fcntl.h stdio.h sys/ioctl.h sys/stat.h sys/types.h unistd.h)
-
-dnl Checks for typedefs, structures, and compiler characteristics.
-AC_C_CONST
-AC_C_INLINE
-AC_TYPE_OFF_T
-AC_TYPE_PID_T
-AC_TYPE_SIZE_T
-AC_STRUCT_ST_RDEV
 AC_HEADER_TIME
 
-dnl Get system type
-AC_CANONICAL_SYSTEM
+AC_CHECK_HEADERS(ctype.h dirent.h errno.h fcntl.h getopt.h inttypes.h limits.h stdarg.h stdio.h stdlib.h string.h sys/ioctl.h sys/param.h sys/stat.h sys/types.h unistd.h,,AC_MSG_ERROR(bailing out))
 
-case "$host_os" in
-	linux*)
-		CFLAGS=
-		CLDFLAGS="-Wl,--version-script,.export.sym"
-		LD_DEPS=".export.sym"
-		SOFLAG="-shared" ;;
-	darwin*)
-		CFLAGS="-no-cpp-precomp"
-		CLDFLAGS=
-		LD_DEPS=
-		SOFLAG="-dynamiclib" ;;
-esac
+################################################################################
+dnl -- Checks for typedefs, structures, and compiler characteristics.
+AC_C_CONST
+AC_C_INLINE
+AC_STRUCT_ST_RDEV
+AC_TYPE_OFF_T
+AC_TYPE_PID_T
+AC_TYPE_SIGNAL
+AC_TYPE_SIZE_T
 
-dnl -- prefix is /usr by default, the exec_prefix default is setup later
+################################################################################
+dnl -- Checks for functions
+AC_CHECK_FUNCS(memset mkdir rmdir strchr strdup strerror strrchr uname,,AC_MSG_ERROR(bailing out))
+AC_FUNC_CLOSEDIR_VOID
+AC_FUNC_MALLOC
+AC_FUNC_STAT
+AC_FUNC_VPRINTF
+
+################################################################################
+dnl -- Prefix is /usr by default, the exec_prefix default is setup later
 AC_PREFIX_DEFAULT(/usr)
 
-OWNER="root"
-GROUP="root"
+################################################################################
+dnl -- Parallel make jobs?
+AC_ARG_ENABLE(jobs, [  --enable-jobs=NUM       Number of jobs to run simultaneously], JOBS=-j$enableval)
 
-dnl -- setup the ownership of the files
+################################################################################
+dnl -- Setup the ownership of the files
+AC_MSG_CHECKING(file owner)
+OWNER="root"
+
 AC_ARG_WITH(user,
   [  --with-user=USER        Set the owner of installed files ],
   [ OWNER="$withval" ])
+AC_MSG_RESULT($OWNER)
 
 if test x$OWNER != x; then
 	OWNER="-o $OWNER"
 fi
 
-dnl -- setup the group ownership of the files
+################################################################################
+dnl -- Setup the group ownership of the files
+AC_MSG_CHECKING(group owner)
+GROUP="root"
 AC_ARG_WITH(group,
   [  --with-group=GROUP      Set the group owner of installed files ],
   [ GROUP="$withval" ])
+AC_MSG_RESULT($GROUP)
 
 if test x$GROUP != x; then
 	GROUP="-g $GROUP"
 fi
 
-AC_ARG_ENABLE(jobs, [  --enable-jobs=NUM       Number of jobs to run simultaneously], JOBS=-j$enableval, JOBS=)
+################################################################################
+dnl -- Enable Debugging
+AC_MSG_CHECKING(whether to enable debugging)
+AC_ARG_ENABLE(debug,    [  --enable-debug          Enable debugging],
+DEBUG=$enableval, DEBUG=no)
+AC_MSG_RESULT($DEBUG)
 
-dnl Enable Debugging
-AC_ARG_ENABLE(debug,    [  --enable-debug          Enable debugging],  \
-DEBUG=yes, DEBUG=no)
+dnl -- Normally turn off optimisation for debug builds
+if test x$DEBUG = xyes; then
+	COPTIMISE_FLAG=
+fi
 
-dnl Disable Compatibility mode
-AC_ARG_ENABLE(compat,   [  --enable-compat         Enable support for old device-mapper versions],  \
-COMPAT=yes, COMPAT=no)
+################################################################################
+dnl -- Override optimisation
+AC_MSG_CHECKING(for C optimisation flag)
+AC_ARG_WITH(optimisation,
+  [  --with-optimisation=OPT C optimisation flag [OPT=-O2] ],
+  [ COPTIMISE_FLAG="$withval" ])
+AC_MSG_RESULT($COPTIMISE_FLAG)
 
-dnl Enables staticly-linked tools
+################################################################################
+dnl -- Disable Compatibility mode
+AC_ARG_ENABLE(compat,   [  --enable-compat         Enable support for old device-mapper versions],
+COMPAT=$enableval, COMPAT=no)
+
+################################################################################
+dnl -- Enables staticly-linked tools
 AC_ARG_ENABLE(static_link, [  --enable-static_link    Use this to link the tools to their libraries
                           statically.  Default is dynamic linking],  STATIC_LINK=$enableval, STATIC_LINK=no)
 
-dnl Clear default exec_prefix - install into /sbin rather than /usr/sbin
+################################################################################
+dnl -- Clear default exec_prefix - install into /sbin rather than /usr/sbin
 if [[ "x$exec_prefix" = xNONE -a "x$prefix" = xNONE ]];
  then  exec_prefix="";
 fi;
 
-dnl Checks for library functions.
-AC_PROG_GCC_TRADITIONAL
-AC_TYPE_SIGNAL
-AC_FUNC_VPRINTF
-AC_CHECK_FUNCS(mkdir rmdir uname)
+################################################################################
+dnl -- Check for is_selinux_enabled
+if test x$SELINUX = xyes; then
+	AC_CHECK_LIB(selinux, is_selinux_enabled, HAVE_SELINUX=yes, HAVE_SELINUX=no)
 
-dnl Check for getopt
-AC_CHECK_HEADERS(getopt.h, CFLAGS="$CFLAGS -DHAVE_GETOPTLONG")
-
-dnl Check for is_selinux_enabled
-AC_CHECK_LIB(selinux, is_selinux_enabled, HAVE_SELINUX=yes, HAVE_SELINUX=no)
-
-if test x$HAVE_SELINUX = xyes; then
-	CFLAGS="$CFLAGS -DHAVE_SELINUX"
-	LIBS="-lselinux $LIBS"
+	if test x$HAVE_SELINUX = xyes; then
+		CFLAGS="$CFLAGS -DHAVE_SELINUX"
+		LIBS="-lselinux $LIBS"
+	else
+		AC_MSG_WARN(Disabling selinux)
+	fi
 fi
 
-echo $ac_n "checking whether to enable internationalisation""... $ac_c" 1>&6
-dnl Internationalisation stuff
-AC_ARG_ENABLE(nls, [  --enable-nls            Enable Native Language Support],\
-		INTL=yes, INTL=no)
-echo "$ac_t""$INTL" 1>&6
+################################################################################
+dnl -- Check for getopt
+AC_CHECK_HEADERS(getopt.h, CFLAGS="$CFLAGS -DHAVE_GETOPTLONG")
+
+################################################################################
+dnl -- Internationalisation stuff
+AC_MSG_CHECKING(whether to enable internationalisation)
+AC_ARG_ENABLE(nls, [  --enable-nls            Enable Native Language Support],
+		INTL=$enableval, INTL=no)
+AC_MSG_RESULT($INTL)
 
 if test x$INTL = xyes; then
 	INTL_PACKAGE="device-mapper"
@@ -132,7 +180,6 @@ if test x$INTL = xyes; then
 		then  AC_MSG_ERROR(
 		msgfmt not found in path $PATH
 		)
-		exit  
 	fi;
 
 	AC_ARG_WITH(localedir,
@@ -142,8 +189,9 @@ if test x$INTL = xyes; then
 fi
 
 
-echo $ac_n "checking for kernel directory""... $ac_c" 1>&6
+################################################################################
 dnl -- Where the linux src tree is
+AC_MSG_CHECKING(for kernel directory)
 AC_ARG_WITH(kerneldir,
   [  --with-kernel-dir=DIR   linux kernel source in DIR []],
   [ kerneldir="$withval" ] )
@@ -162,16 +210,17 @@ fi
 if test "${with_kernel+set}" = set; then
    kerneldir="$with_kernel"
 fi
-echo "$ac_t""$kerneldir" 1>&6
+AC_MSG_RESULT($kerneldir)
 
 if test "x${kerneldir}" = x;  then
   missingkernel=yes
 else
-  test -d "${kerneldir}" || { echo "configure: WARNING: kernel dir $kerneldir not found" 1>&2; missingkernel=yes ; }
+  test -d "${kerneldir}" || { AC_MSG_WARN(kernel dir $kerneldir not found); missingkernel=yes ; }
 fi
 
-echo $ac_n "checking for kernel version""... $ac_c" 1>&6
+################################################################################
 dnl -- Kernel version string
+AC_MSG_CHECKING(for kernel version)
 AC_ARG_WITH(kernel-version,
   [  --with-kernel-version=VERSION   linux kernel version] )
 
@@ -195,8 +244,9 @@ if test "x${kernelvsn}" = x; then
     kernelvsn="UNKNOWN"
   fi
 fi
-echo "$ac_t""$kernelvsn" 1>&6
+AC_MSG_RESULT($kernelvsn)
 
+################################################################################
 dnl -- Temporary directory for kernel diffs
 AC_ARG_WITH(tmp-dir,
   [  --with-tmp-dir=DIR      temp directory to make kernel patches [/tmp/kerndiff]],
@@ -209,18 +259,18 @@ if test "${with_tmpdir+set}" = set; then
    tmpdir="$with_tmpdir"
 fi
 
-echo $ac_n "checking for kernel interface choice""... $ac_c" 1>&6
+################################################################################
 dnl -- which kernel interface to use (ioctl or fs)
+AC_MSG_CHECKING(for kernel interface choice)
 AC_ARG_WITH(interface,
   [  --with-interface=IFACE  Choose kernel interface (ioctl or fs) [ioctl]],
   [ interface="$withval" ],
   [ interface=ioctl ])
 if [[ "x$interface" != xfs -a "x$interface" != xioctl ]];
 then
-  echo "configure: error: --with-interface=ioctl or --with-interface=fs required" 1>&2
-  exit 1;
+  AC_MSG_ERROR(--with-interface=ioctl or --with-interface=fs required)
 fi
-echo "$ac_t""$interface" 1>&6
+AC_MSG_RESULT($interface)
 
 if test "-f VERSION" ; then
   DM_LIB_VERSION="\"`cat VERSION|sed -e \"s/[[0-9.]]*/\0-$interface/\"`\""
@@ -229,6 +279,7 @@ else
 fi
 
 
+################################################################################
 AC_SUBST(JOBS)
 AC_SUBST(STATIC_LINK)
 AC_SUBST(OWNER)
@@ -240,8 +291,9 @@ AC_SUBST(missingkernel)
 AC_SUBST(kernelvsn)
 AC_SUBST(tmpdir)
 AC_SUBST(CFLAGS)
+AC_SUBST(COPTIMISE_FLAG)
 AC_SUBST(CLDFLAGS)
-AC_SUBST(LD_DEPS)
+AC_SUBST(LDDEPS)
 AC_SUBST(SOFLAG)
 AC_SUBST(DEBUG)
 AC_SUBST(DM_LIB_VERSION)
@@ -252,8 +304,9 @@ AC_SUBST(INTL_PACKAGE)
 AC_SUBST(INTL)
 
 
-dnl First and last lines should not contain files to generate in order to 
-dnl keep utility scripts running properly
+################################################################################
+dnl -- First and last lines should not contain files to generate in order to 
+dnl -- keep utility scripts running properly
 AC_OUTPUT( 								\
 Makefile								\
 make.tmpl                                                               \
@@ -266,28 +319,24 @@ man/Makefile								\
 po/Makefile								\
 )
 
-echo
-
 if test "x${kerneldir}" != "x" ; then
   if test -d "${kerneldir}"; then
     if test ! -f "${kerneldir}/include/linux/dm-ioctl.h"; then
-      echo "Your kernel source in ${kerneldir} needs patching."
-      echo
+      AC_MSG_WARN(Your kernel source in ${kerneldir} needs patching)
       if test "x${kernelvsn}" != "xUNKNOWN"; then
-        echo "For supported kernels, try 'make apply-patches' next to do this, or apply the"
-	echo "device-mapper patches by hand."
+        AC_MSG_WARN([For supported kernels, try 'make apply-patches' next to do this, or apply the
+device-mapper patches by hand.
+])
       fi
-      echo
     fi
   else
-    echo "WARNING: kernel directory $kerneldir not found"
-    echo
+    AC_MSG_WARN(kernel directory $kerneldir not found)
   fi
   if test "x${kernelvsn}" = "xUNKNOWN"; then
-    echo "WARNING: kernel version not detected: 'make apply-patches' won't work."
-    echo "         If your kernel already contains device-mapper it may be OK,"
-    echo "         otherwise you'll need to apply the device-mapper patches by hand."
-    echo
+    AC_MSG_WARN([kernel version not detected: 'make apply-patches' won't work.
+If your kernel already contains device-mapper it may be OK,
+otherwise you'll need to apply the device-mapper patches by hand.
+])
   fi
 fi
 
