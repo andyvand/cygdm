@@ -579,11 +579,11 @@ static struct mapped_device *get_kdev(kdev_t dev)
 	if (major(dev) != _major)
 		return NULL;
 
-	spin_lock(_minor_lock);
+	spin_lock(&_minor_lock);
 	md = _mds[minor(dev)];
 	if (md)
 		dm_get(md);
-	spin_unlock(_minor_lock);
+	spin_unlock(&_minor_lock);
 
 	return md;
 }

@@ -1,6 +1,6 @@
-diff -ruN linux-2.4.19-dm/drivers/md/Makefile linux-2.4.19-dmbackport/drivers/md/Makefile
---- linux-2.4.19-dm/drivers/md/Makefile	Wed Aug 14 11:51:06 2002
-+++ linux-2.4.19-dmbackport/drivers/md/Makefile	Tue Nov 12 12:47:39 2002
+diff -ruN linux-2.4.19/drivers/md/Makefile linux-2.4.19-dm/drivers/md/Makefile
+--- linux-2.4.19/drivers/md/Makefile	Wed Aug 14 11:51:06 2002
++++ linux-2.4.19-dm/drivers/md/Makefile	Thu Nov 14 13:50:32 2002
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -28,9 +28,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/Makefile linux-2.4.19-dmbackport/drivers/md
 +
 +dm-mod.o: $(dm-mod-objs)
 +	$(LD) -r -o $@ $(dm-mod-objs)
-diff -ruN linux-2.4.19-dm/drivers/md/dm-exception-store.c linux-2.4.19-dmbackport/drivers/md/dm-exception-store.c
---- linux-2.4.19-dm/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/dm-exception-store.c	Wed Nov 13 17:29:01 2002
+diff -ruN linux-2.4.19/drivers/md/dm-exception-store.c linux-2.4.19-dm/drivers/md/dm-exception-store.c
+--- linux-2.4.19/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-exception-store.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,701 @@
 +/*
 + * dm-snapshot.c
@@ -733,9 +733,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm-exception-store.c linux-2.4.19-dmbackpor
 +
 +	return 0;
 +}
-diff -ruN linux-2.4.19-dm/drivers/md/dm-ioctl.c linux-2.4.19-dmbackport/drivers/md/dm-ioctl.c
---- linux-2.4.19-dm/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/dm-ioctl.c	Wed Nov 13 17:38:50 2002
+diff -ruN linux-2.4.19/drivers/md/dm-ioctl.c linux-2.4.19-dm/drivers/md/dm-ioctl.c
+--- linux-2.4.19/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-ioctl.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,1139 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -1876,9 +1876,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm-ioctl.c linux-2.4.19-dmbackport/drivers/
 +	if (misc_deregister(&_dm_misc) < 0)
 +		DMERR("misc_deregister failed for control device");
 +}
-diff -ruN linux-2.4.19-dm/drivers/md/dm-linear.c linux-2.4.19-dmbackport/drivers/md/dm-linear.c
---- linux-2.4.19-dm/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/dm-linear.c	Wed Nov 13 17:39:17 2002
+diff -ruN linux-2.4.19/drivers/md/dm-linear.c linux-2.4.19-dm/drivers/md/dm-linear.c
+--- linux-2.4.19/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-linear.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,120 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -2000,9 +2000,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm-linear.c linux-2.4.19-dmbackport/drivers
 +	if (r < 0)
 +		DMERR("linear: unregister failed %d", r);
 +}
-diff -ruN linux-2.4.19-dm/drivers/md/dm-snapshot.c linux-2.4.19-dmbackport/drivers/md/dm-snapshot.c
---- linux-2.4.19-dm/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/dm-snapshot.c	Wed Nov 13 17:44:55 2002
+diff -ruN linux-2.4.19/drivers/md/dm-snapshot.c linux-2.4.19-dm/drivers/md/dm-snapshot.c
+--- linux-2.4.19/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-snapshot.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,1169 @@
 +/*
 + * dm-snapshot.c
@@ -3173,9 +3173,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm-snapshot.c linux-2.4.19-dmbackport/drive
 + * c-file-style: "linux"
 + * End:
 + */
-diff -ruN linux-2.4.19-dm/drivers/md/dm-snapshot.h linux-2.4.19-dmbackport/drivers/md/dm-snapshot.h
---- linux-2.4.19-dm/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/dm-snapshot.h	Wed Nov 13 18:08:24 2002
+diff -ruN linux-2.4.19/drivers/md/dm-snapshot.h linux-2.4.19-dm/drivers/md/dm-snapshot.h
+--- linux-2.4.19/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-snapshot.h	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,147 @@
 +/*
 + * dm-snapshot.c
@@ -3324,9 +3324,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm-snapshot.h linux-2.4.19-dmbackport/drive
 +}
 +
 +#endif
-diff -ruN linux-2.4.19-dm/drivers/md/dm-stripe.c linux-2.4.19-dmbackport/drivers/md/dm-stripe.c
---- linux-2.4.19-dm/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/dm-stripe.c	Wed Nov 13 17:45:21 2002
+diff -ruN linux-2.4.19/drivers/md/dm-stripe.c linux-2.4.19-dm/drivers/md/dm-stripe.c
+--- linux-2.4.19/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-stripe.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,256 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -3584,9 +3584,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm-stripe.c linux-2.4.19-dmbackport/drivers
 +
 +	return;
 +}
-diff -ruN linux-2.4.19-dm/drivers/md/dm-table.c linux-2.4.19-dmbackport/drivers/md/dm-table.c
---- linux-2.4.19-dm/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/dm-table.c	Wed Nov 13 17:47:11 2002
+diff -ruN linux-2.4.19/drivers/md/dm-table.c linux-2.4.19-dm/drivers/md/dm-table.c
+--- linux-2.4.19/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-table.c	Thu Nov 21 13:39:57 2002
 @@ -0,0 +1,665 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -3859,7 +3859,7 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm-table.c linux-2.4.19-dmbackport/drivers/
 +	}
 +
 +	if (!S_ISBLK(inode->i_mode)) {
-+		r = -EINVAL;
++		r = -ENOTBLK;
 +		goto out;
 +	}
 +
@@ -4253,9 +4253,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm-table.c linux-2.4.19-dmbackport/drivers/
 +EXPORT_SYMBOL(dm_get_device);
 +EXPORT_SYMBOL(dm_put_device);
 +EXPORT_SYMBOL(dm_table_event);
-diff -ruN linux-2.4.19-dm/drivers/md/dm-target.c linux-2.4.19-dmbackport/drivers/md/dm-target.c
---- linux-2.4.19-dm/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/dm-target.c	Wed Nov 13 17:47:29 2002
+diff -ruN linux-2.4.19/drivers/md/dm-target.c linux-2.4.19-dm/drivers/md/dm-target.c
+--- linux-2.4.19/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-target.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,190 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
@@ -4447,9 +4447,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm-target.c linux-2.4.19-dmbackport/drivers
 +
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
-diff -ruN linux-2.4.19-dm/drivers/md/dm.c linux-2.4.19-dmbackport/drivers/md/dm.c
---- linux-2.4.19-dm/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/dm.c	Wed Nov 13 19:15:43 2002
+diff -ruN linux-2.4.19/drivers/md/dm.c linux-2.4.19-dm/drivers/md/dm.c
+--- linux-2.4.19/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm.c	Thu Nov 21 13:40:03 2002
 @@ -0,0 +1,868 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -5032,11 +5032,11 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm.c linux-2.4.19-dmbackport/drivers/md/dm.
 +	if (major(dev) != _major)
 +		return NULL;
 +
-+	spin_lock(_minor_lock);
++	spin_lock(&_minor_lock);
 +	md = _mds[minor(dev)];
 +	if (md)
 +		dm_get(md);
-+	spin_unlock(_minor_lock);
++	spin_unlock(&_minor_lock);
 +
 +	return md;
 +}
@@ -5319,9 +5319,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm.c linux-2.4.19-dmbackport/drivers/md/dm.
 +MODULE_DESCRIPTION(DM_NAME " driver");
 +MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 +MODULE_LICENSE("GPL");
-diff -ruN linux-2.4.19-dm/drivers/md/dm.h linux-2.4.19-dmbackport/drivers/md/dm.h
---- linux-2.4.19-dm/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/dm.h	Wed Nov 13 18:08:20 2002
+diff -ruN linux-2.4.19/drivers/md/dm.h linux-2.4.19-dm/drivers/md/dm.h
+--- linux-2.4.19/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm.h	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,150 @@
 +/*
 + * Internal header file for device mapper
@@ -5473,9 +5473,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/dm.h linux-2.4.19-dmbackport/drivers/md/dm.
 +void dm_snapshot_exit(void);
 +
 +#endif
-diff -ruN linux-2.4.19-dm/drivers/md/kcopyd.c linux-2.4.19-dmbackport/drivers/md/kcopyd.c
---- linux-2.4.19-dm/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/kcopyd.c	Wed Nov 13 17:52:16 2002
+diff -ruN linux-2.4.19/drivers/md/kcopyd.c linux-2.4.19-dm/drivers/md/kcopyd.c
+--- linux-2.4.19/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/kcopyd.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,843 @@
 +/*
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
@@ -6320,9 +6320,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/kcopyd.c linux-2.4.19-dmbackport/drivers/md
 +
 +	up(&_client_count_sem);
 +}
-diff -ruN linux-2.4.19-dm/drivers/md/kcopyd.h linux-2.4.19-dmbackport/drivers/md/kcopyd.h
---- linux-2.4.19-dm/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/drivers/md/kcopyd.h	Wed Nov 13 18:08:24 2002
+diff -ruN linux-2.4.19/drivers/md/kcopyd.h linux-2.4.19-dm/drivers/md/kcopyd.h
+--- linux-2.4.19/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/kcopyd.h	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,101 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
@@ -6425,9 +6425,9 @@ diff -ruN linux-2.4.19-dm/drivers/md/kcopyd.h linux-2.4.19-dmbackport/drivers/md
 +void kcopyd_dec_client_count(void);
 +
 +#endif
-diff -ruN linux-2.4.19-dm/include/linux/device-mapper.h linux-2.4.19-dmbackport/include/linux/device-mapper.h
---- linux-2.4.19-dm/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/include/linux/device-mapper.h	Wed Nov 13 17:54:29 2002
+diff -ruN linux-2.4.19/include/linux/device-mapper.h linux-2.4.19-dm/include/linux/device-mapper.h
+--- linux-2.4.19/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/include/linux/device-mapper.h	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,85 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6514,9 +6514,9 @@ diff -ruN linux-2.4.19-dm/include/linux/device-mapper.h linux-2.4.19-dmbackport/
 +#endif				/* __KERNEL__ */
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
-diff -ruN linux-2.4.19-dm/include/linux/dm-ioctl.h linux-2.4.19-dmbackport/include/linux/dm-ioctl.h
---- linux-2.4.19-dm/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dmbackport/include/linux/dm-ioctl.h	Wed Nov 13 17:53:50 2002
+diff -ruN linux-2.4.19/include/linux/dm-ioctl.h linux-2.4.19-dm/include/linux/dm-ioctl.h
+--- linux-2.4.19/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/include/linux/dm-ioctl.h	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,149 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6651,8 +6651,8 @@ diff -ruN linux-2.4.19-dm/include/linux/dm-ioctl.h linux-2.4.19-dmbackport/inclu
 +
 +#define DM_VERSION_MAJOR	1
 +#define DM_VERSION_MINOR	0
-+#define DM_VERSION_PATCHLEVEL	7
-+#define DM_VERSION_EXTRA	"-ioctl (2002-11-13)"
++#define DM_VERSION_PATCHLEVEL	8
++#define DM_VERSION_EXTRA	"-ioctl (2002-11-21)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	0x00000001

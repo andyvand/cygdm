@@ -131,8 +131,8 @@ enum {
 
 #define DM_VERSION_MAJOR	1
 #define DM_VERSION_MINOR	0
-#define DM_VERSION_PATCHLEVEL	7
-#define DM_VERSION_EXTRA	"-ioctl-cvs (2002-11-13)"
+#define DM_VERSION_PATCHLEVEL	8
+#define DM_VERSION_EXTRA	"-ioctl-cvs (2002-11-21)"
 
 /* Status bits */
 #define DM_READONLY_FLAG	0x00000001

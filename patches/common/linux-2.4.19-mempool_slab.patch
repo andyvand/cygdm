@@ -1,12 +1,11 @@
 diff -Nru linux-2.4.19/include/linux/mempool.h linux/include/linux/mempool.h
 --- linux-2.4.19/include/linux/mempool.h	Wed Dec 31 16:00:00 2001
 +++ linux/include/linux/mempool.h	Tue Apr 23 20:55:52 2002
-@@ -29,5 +29,13 @@
+@@ -19,5 +19,12 @@
  extern void mempool_destroy(mempool_t *pool);
  extern void * mempool_alloc(mempool_t *pool, int gfp_mask);
  extern void mempool_free(void *element, mempool_t *pool);
  
-+
 +/*
 + * A mempool_alloc_t and mempool_free_t that get the memory from
 + * a slab that is passed in through pool_data.
@@ -18,7 +17,7 @@ diff -Nru linux-2.4.19/include/linux/mempool.h linux/include/linux/mempool.h
 diff -Nru linux-2.4.19/mm/mempool.c linux/mm/mempool.c
 --- linux-2.4.19/mm/mempool.c	Wed Dec 31 16:00:00 1969
 +++ linux/mm/mempool.c	Tue Apr 23 20:55:52 2002
-@@ -268,10 +268,28 @@
+@@ -273,9 +273,26 @@
  	}
  	pool->free(element, pool->pool_data);
  }
@@ -38,7 +37,6 @@ diff -Nru linux-2.4.19/mm/mempool.c linux/mm/mempool.c
 +	kmem_cache_free(mem, element);
 +}
 +
-+
  EXPORT_SYMBOL(mempool_create);
  EXPORT_SYMBOL(mempool_resize);
  EXPORT_SYMBOL(mempool_destroy);
@@ -46,4 +44,3 @@ diff -Nru linux-2.4.19/mm/mempool.c linux/mm/mempool.c
  EXPORT_SYMBOL(mempool_free);
 +EXPORT_SYMBOL(mempool_alloc_slab);
 +EXPORT_SYMBOL(mempool_free_slab);
- 

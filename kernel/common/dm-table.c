@@ -269,7 +269,7 @@ static int lookup_device(const char *path, kdev_t *dev)
 	}
 
 	if (!S_ISBLK(inode->i_mode)) {
-		r = -EINVAL;
+		r = -ENOTBLK;
 		goto out;
 	}
 
