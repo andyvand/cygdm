@@ -1,0 +1,24 @@
+--- linux-last/drivers/md/dm-table.c	Wed Nov 28 17:09:02 2001
++++ linux/drivers/md/dm-table.c	Thu Nov 29 10:05:45 2001
+@@ -240,10 +240,8 @@
+        if (!(d->bd = bdget(kdev_t_to_nr(d->dev))))
+                return -ENOMEM;
+ 
+-       if ((err = blkdev_get(d->bd, FMODE_READ|FMODE_WRITE, 0, BDEV_FILE))) {
+-               bdput(d->bd);
++       if ((err = blkdev_get(d->bd, FMODE_READ|FMODE_WRITE, 0, BDEV_FILE)))
+                return err;
+-       }
+ 
+        return 0;
+ }
+@@ -257,8 +255,7 @@
+ 		return;
+ 
+ 	blkdev_put(d->bd, BDEV_FILE);
+-	bdput(d->bd);
+-	d->bd = 0;
++	d->bd = NULL;
+ }
+ 
+ /*
