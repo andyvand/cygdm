@@ -1,0 +1,18 @@
+Device Mapper installation
+==========================
+
+1. Run the 'configure' script to generate customised makefiles.
+   If your kernel source is not in /usr/src/linux use --with-kerneldir.
+   If you wish to use the filesystem interface instead of the ioctl 
+   interface use --with-interface=fs.
+   Other flags let you change the installation directories.
+
+      Example:  ./configure --with-kerneldir=/usr/src/linux-2.4.16
+
+2. Patch, configure and build a new kernel that contains device-mapper.
+   
+3. Build and install the shared library (libdevmapper.so) for the API.
+   Run 'make' from the top directory.
+
+      Example:  make install
+
