@@ -30,17 +30,33 @@ major=2
 #major=`ls src/.libs/lib*.so.* | \
 # awk '{if (match($$0,/\.so\.[0-9]+$$/)) print substr($$0,RSTART+4)}'`
 
-KERNEL=2.4.19
-
+# Note: header-update isn't part of the build system; it's run manually.
+KERNEL=/usr/src/kernel-source-2.4.19.tar.bz2
+PATCH=./patches/linux-2.4.19-devmapper-ioctl.patch
 header-update:
-	# This isn't actually used; it's here for my own personal reference.
+	@test -f $(KERNEL) || { \
+		echo "Error: $(KERNEL) doesn't exist!" 1>&2 && \
+		exit 1; \
+	}
+	@test -f $(PATCH) || { \
+		echo "Error: $(PATCH) doesn't exist!" 1>&2 && \
+		exit 1; \
+	}
+
+	chmod +x ./debian/scripts/*
+	if test `echo $(PATCH) | grep 'gz$$'`; then \
+		zcat $(PATCH) > debian/patch.diff; \
+	elif test `echo $(PATCH) | grep 'bz2$$'`; then \
+		bzcat $(PATCH) > debian/patch.diff; \
+	else \
+		cp $(PATCH) debian/patch.diff; \
+	fi
+	tar jxvf $(KERNEL) -C debian
 	rm -rf debian/include/*
-	cd debian && tar jxvf /usr/src/kernel-source-$(KERNEL).tar.bz2 && \
-			./scripts/strippatch.pl \
-			../patches/linux-$(KERNEL)-devmapper-ioctl.patch  | \
-			./scripts/includes.pl kernel-source-$(KERNEL)/ | \
-			patch -p1 && \
-			rm -rf kernel-source-$(KERNEL)/
+
+	cd debian && ./scripts/strippatch.pl ./patch.diff | \
+			./scripts/includes.pl ./kernel-source-* | patch -p1
+	rm -rf debian/kernel-source-* debian/patch.diff
 
 configure: configure-stamp
 configure-stamp:
