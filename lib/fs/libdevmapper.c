@@ -302,7 +302,7 @@ static char *find_mount_point(void)
 	static char mpoint[4096];
 	char fstype[30];
 
-	if (!(fp = fopen("/tmp/proc_mounts", "r"))) {
+	if (!(fp = fopen("/proc/mounts", "r"))) {
 		log("/proc/mounts: fopen failed: %s", strerror(errno));
 		return NULL;
 	}

@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Tue Dec 11 18:12:48 2001
++++ linux/drivers/md/Config.in	Fri Dec 14 13:23:12 2001
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Tue Dec 11 18:12:48 2001
++++ linux/drivers/md/Makefile	Fri Dec 14 13:23:12 2001
 @@ -4,9 +4,11 @@
  
  O_TARGET	:= mddev.o
@@ -431,7 +431,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +}
 diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 --- linux-2.4.16/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Mon Dec 10 16:31:04 2001
++++ linux/drivers/md/dm-linear.c	Thu Dec 13 12:57:39 2001
 @@ -0,0 +1,135 @@
 +/*
 + * dm-linear.c
@@ -496,7 +496,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +	start = simple_strtoul(tok, NULL, 10);
 +
 +	*context = "Cannot allocate linear context private structure";
-+	lc = kmalloc(sizeof(lc), GFP_KERNEL);
++	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
 +	if (lc == NULL)
 +		goto bad;
 +
@@ -1355,8 +1355,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +EXPORT_SYMBOL(dm_unregister_target);
 diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.16/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Mon Dec 10 16:31:57 2001
-@@ -0,0 +1,892 @@
++++ linux/drivers/md/dm.c	Fri Dec 14 13:22:46 2001
+@@ -0,0 +1,893 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
 + *
@@ -1378,7 +1378,9 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +#define DEVICE_NAME "device-mapper"
 +
 +static const char *_name = DEVICE_NAME;
-+static int _version[3] = { 0, 1, 0 };
++static const char *_version = "0.90.02-ioctl (2001-12-12)";
++static const char *_email = "lvm-devel@lists.sistina.com";
++
 +static int major = 0;
 +
 +struct io_hook {
@@ -1446,8 +1448,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +
 +	_dev_dir = devfs_mk_dir(0, DM_DIR, NULL);
 +
-+	printk(KERN_INFO "%s %d.%d.%d initialised\n", _name,
-+	       _version[0], _version[1], _version[2]);
++	printk(KERN_INFO "%s %s initialised, %s\n", _name, _version, _email);
 +	return 0;
 +
 +      err_blkdev:

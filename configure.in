@@ -163,4 +163,5 @@ dmsetup/Makefile							\
 lib/Makefile							 	\
 kernel/Makefile								\
 kernel/common/dm.c							\
+man/Makefile								\
 )

@@ -53,4 +53,5 @@ Device Mapper installation
 4) You can now use 'dmsetup' to test the API.
    If you chose the filesystem interface you will first need to mount dmfs.
    e.g. mount -t dmfs dmfs /dmfs
+   Read the dmsetup man page for more information.
 

@@ -16,3 +16,9 @@ include ../make.tmpl
 dmsetup: $(OBJECTS)
 	$(CC) -o dmsetup dmsetup.o $(LD_FLAGS) -ldevmapper
 
+install: dmsetup
+	$(INSTALL) -o $(OWNER) -g $(GROUP) -m 555 $(STRIP) $< $(sbindir)
+
+.PHONY: install 
+
+
