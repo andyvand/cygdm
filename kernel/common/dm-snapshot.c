@@ -230,6 +230,7 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 	struct buffer_head *bh;
 
 	if (reason == COPY_CB_COMPLETE) {
+
 		/* Update the metadata if we are persistent */
 		if (ex->snap->persistent)
 			update_metadata_block(ex->snap, ex->rsector_org, ex->rsector_new);
@@ -391,8 +392,8 @@ static int alloc_hash_table(struct snapshot_c *sc)
 }
 
 
-/* Read in a chunk from the origin device */
-static int read_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, int nr_sectors)
+/* READ or WRITE some blocks to/from a device */
+static int do_io(int rw, struct kiobuf *iobuf, kdev_t dev, unsigned long start, int nr_sectors)
 {
 	int i, sectors_per_block, nr_blocks;
 	int blocksize = get_hardsect_size(dev);
@@ -408,28 +409,7 @@ static int read_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, in
 
 	iobuf->length = nr_sectors << 9;
 
-	status = brw_kiovec(READ, 1, &iobuf, dev, iobuf->blocks, blocksize);
-	return (status != (nr_sectors << 9));
-}
-
-/* Write out blocks */
-static int write_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, int nr_sectors)
-{
-	int i, sectors_per_block, nr_blocks;
-	int blocksize = get_hardsect_size(dev);
-	int status;
-
-	sectors_per_block = blocksize / SECTOR_SIZE;
-
-	nr_blocks = nr_sectors / sectors_per_block;
-	start /= sectors_per_block;
-
-	for (i = 0; i < nr_blocks; i++)
-		iobuf->blocks[i] = start++;
-
-	iobuf->length = nr_sectors << 9;
-
-	status = brw_kiovec(WRITE, 1, &iobuf, dev, iobuf->blocks, blocksize);
+	status = brw_kiovec(rw, 1, &iobuf, dev, iobuf->blocks, blocksize);
 	return (status != (nr_sectors << 9));
 }
 
@@ -515,7 +495,7 @@ static int read_metadata(struct snapshot_c *lc)
 		}
 
 		first_free_sector = max(first_free_sector, cur_sector+lc->extent_size);
-		status = read_blocks(read_iobuf, lc->cow_dev->dev, cur_sector, nr_sectors);
+		status = do_io(READ, read_iobuf, lc->cow_dev->dev, cur_sector, nr_sectors);
 		if (status == 0) {
 
 			map_page = 0;
@@ -584,7 +564,7 @@ static int read_header(struct snapshot_c *lc)
 	unsigned long devsize;
 
 	/* Get it */
-	status = read_blocks(lc->cow_iobuf, lc->cow_dev->dev, 0L, blocksize/SECTOR_SIZE);
+	status = do_io(READ, lc->cow_iobuf, lc->cow_dev->dev, 0L, blocksize/SECTOR_SIZE);
 	if (status != 0) {
 		DMERR("Snapshot dev %s error reading header", kdevname(lc->cow_dev->dev));
 		return -1;
@@ -672,7 +652,7 @@ static int write_header(struct snapshot_c *lc)
 	header->start_of_exceptions = cpu_to_le64(lc->start_of_exceptions);
 
 	/* Must write at least a full block */
-	status = write_blocks(head_iobuf, lc->cow_dev->dev, 0, blocksize/SECTOR_SIZE);
+	status = do_io(WRITE, head_iobuf, lc->cow_dev->dev, 0, blocksize/SECTOR_SIZE);
 
 	unmap_kiobuf(head_iobuf);
 	free_kiovec(1, &head_iobuf);
@@ -686,7 +666,7 @@ static int write_metadata(struct snapshot_c *lc)
 	int blocksize = get_hardsect_size(lc->cow_dev->dev);
 	int writesize = blocksize/SECTOR_SIZE;
 
-	if (write_blocks(lc->cow_iobuf, lc->cow_dev->dev, lc->current_metadata_sector, writesize) != 0) {
+	if (do_io(WRITE, lc->cow_iobuf, lc->cow_dev->dev, lc->current_metadata_sector, writesize) != 0) {
 		DMERR("Error writing COW block");
 		return -1;
 	}
@@ -987,7 +967,8 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 			if (lc->next_free_sector + lc->chunk_size >= devsize) {
 				DMWARN("Snapshot %s is full", kdevname(lc->cow_dev->dev));
 				lc->full = 1;
-				write_header(lc);
+				if (lc->persistent)
+					write_header(lc);
 				up_write(&lc->origin->lock);
 				return -1;
 			}
@@ -1000,7 +981,8 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 				DMERR("Snapshot %s error adding new exception entry", kdevname(lc->cow_dev->dev));
 				/* Error here - treat it as full */
 				lc->full = 1;
-				write_header(lc);
+				if (lc->persistent)
+					write_header(lc);
 				up_write(&lc->origin->lock);
 				return -1;
 			}
@@ -1084,7 +1066,8 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 						       kdevname(snap->cow_dev->dev), snap->next_free_sector + snap->chunk_size, dev_size);
 						snap->full = 1;
 						/* Mark it full on the device */
-						write_header(snap);
+						if (snap->persistent)
+							write_header(snap);
 						continue;
 				}
 				else {
@@ -1100,7 +1083,8 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 						      kdevname(snap->cow_dev->dev));
 						/* Error here - treat it as full */
 						snap->full = 1;
-						write_header(snap);
+						if (snap->persistent)
+							write_header(snap);
 						continue;
 					}
 
