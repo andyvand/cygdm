@@ -9,6 +9,7 @@
 #ifndef DM_INTERNAL_H
 #define DM_INTERNAL_H
 
+
 #include <linux/config.h>
 #include <linux/version.h>
 #include <linux/major.h>
@@ -122,6 +123,7 @@ int dm_create(const char *name, int minor, struct dm_table *table,
 	      struct mapped_device **result);
 int dm_destroy(struct mapped_device *md);
 void dm_set_ro(struct mapped_device *md, int ro);
+int dm_set_name(struct mapped_device *md, const char *newname);
 
 /*
  * The device must be suspended before calling this method.
@@ -173,10 +175,11 @@ void dm_interface_exit(void);
 /* 
  * Targets for linear and striped mappings
  */
+
 int dm_linear_init(void);
 void dm_linear_exit(void);
+
 int dm_stripe_init(void);
 void dm_stripe_exit(void);
-
 
 #endif

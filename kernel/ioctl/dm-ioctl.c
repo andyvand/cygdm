@@ -33,8 +33,9 @@ static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
 }
 
 /*
- * check a string doesn't overrun the chunk of
+ * Check a string doesn't overrun the chunk of
  * memory we copied from userland.
+ * Returns 1 if OK.
  */
 static int valid_str(char *str, void *begin, void *end)
 {
@@ -50,7 +51,7 @@ static int first_target(struct dm_ioctl *a, void *begin, void *end,
 	*spec = (struct dm_target_spec *) (a + 1);
 	*params = (char *) (*spec + 1);
 
-	return valid_str(*params, begin, end);
+	return !valid_str(*params, begin, end);
 }
 
 static int next_target(struct dm_target_spec *last, void *begin, void *end,
@@ -60,7 +61,7 @@ static int next_target(struct dm_target_spec *last, void *begin, void *end,
 	    (((unsigned char *) last) + last->next);
 	*params = (char *) (*spec + 1);
 
-	return valid_str(*params, begin, end);
+	return !valid_str(*params, begin, end);
 }
 
 void dm_error(const char *message)
@@ -107,7 +108,7 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 		r = first ? first_target(args, begin, end, &spec, &params) :
 		    next_target(spec, begin, end, &spec, &params);
 
-		if (!r)
+		if (r)
 			PARSE_ERROR("unable to find target");
 
 		/* Look up the target type */
@@ -259,6 +260,25 @@ static int reload(struct dm_ioctl *param)
 	return r;
 }
 
+static int rename(struct dm_ioctl *param)
+{
+	char *newname = (char *) (param + 1);
+	struct mapped_device *md = dm_get(param->name);
+
+	if (!md)
+		return -ENXIO;
+
+	if (!valid_str(newname, (void *)param, 
+		       (void *)param + param->data_size) ||
+	    dm_set_name(md, newname)) {
+		dm_error("Invalid new logical volume name supplied.");
+		return -EINVAL;
+	}
+
+	dm_put(md);
+	return 0;
+}
+
 static int ctl_open(struct inode *inode, struct file *file)
 {
 	/* only root can open this */
@@ -310,6 +330,10 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 
 	case DM_INFO:
 		r = info(p->name, (struct dm_ioctl *) a);
+		break;
+
+	case DM_RENAME:
+		r = rename(p);
 		break;
 
 	default:

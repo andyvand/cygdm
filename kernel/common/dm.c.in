@@ -731,7 +731,7 @@ static struct mapped_device *__get_by_name(const char *name)
 
 static int __check_name(const char *name)
 {
-	if (strchr(name, '/')) {
+	if (strchr(name, '/') || strlen(name) > DM_NAME_LEN) {
 		DMWARN("invalid device name");
 		return -1;
 	}
@@ -844,6 +844,36 @@ void dm_set_ro(struct mapped_device *md, int ro)
 
 	dm_unlock_w();
 }
+
+/*
+ * Renames the device
+ */
+int dm_set_name(struct mapped_device *md, const char *newname)
+{
+	int r;
+
+	dm_lock_w();
+
+	if (__check_name(newname) < 0) {
+		r = -EINVAL;
+		goto err;
+	}
+
+	r = unregister_device(md);
+	if (r)
+		goto err;
+
+	strcpy(md->name, newname);
+
+	r = register_device(md);
+	if (r)
+		goto err;
+
+      err:
+	dm_unlock_w();
+	return r;
+}
+
 
 /*
  * Requeue the deferred buffer_heads by calling generic_make_request.
