@@ -8,14 +8,24 @@ Device Mapper installation
    Example:
    ./configure
 
-   If your kernel does NOT yet contain the device-mapper source
+   If your 2.4 kernel does NOT yet contain the device-mapper source
    AND you want to try patching it automatically (described 
    in step 2) then you need to tell 'configure' where your kernel 
    source directory is using --with-kernel-dir.  Otherwise, don't
    supply this parameter or you may get compilation failures.
 
    Example:  
-   ./configure --with-kernel-dir=/usr/src/linux-2.4.20
+   ./configure --with-kernel-dir=/usr/src/linux-2.4.22
+
+   2.6 kernels now already contain device-mapper patches.
+
+   The same userspace library and tools work with both 2.4 and 2.6 kernels
+   because they share the same device-mapper interface (version 4).
+   If you also still need backwards-compatibility with the obsolete
+   version 1 interface, then you must compile against 2.4 kernel 
+   headers (not 2.6 ones) and:
+
+   ./configure --enable-compat
 
    Other parameters let you change the installation & working directories.
 
@@ -66,8 +76,8 @@ Device Mapper installation
    The DESTDIR environment variable is supported (e.g. for packaging).
 
 
-4) If you are using the ioctl interface but not devfs then install 
-   scripts/devmap_mknod.sh to run either:
+4) If you are not using devfs then install scripts/devmap_mknod.sh to run
+   either:
 
       Each time the kernel boots 
         e.g. add to /etc/rc*
@@ -81,6 +91,11 @@ Device Mapper installation
    interface using the major and minor numbers that have been allocated
    dynamically.  It prints a message if it works or else it fails silently 
    with a non-zero status code (which you probably want to test for).
+
+   To clean up the /dev/mapper directory (e.g. to remove invalid entries
+   left behind after a crash) run:
+
+      dmsetup mknodes
 
 
 5) You can now boot your new kernel and use 'dmsetup' to test the API.
