@@ -34,31 +34,31 @@ static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
  * check a string doesn't overrun the chunk of
  * memory we copied from userland.
  */
-static int valid_str(char *str, void *end)
+static int valid_str(char *str, void *begin, void *end)
 {
-	while (((void *) str < end) && *str)
+	while (((void *) str >= begin) && ((void *) str < end) && *str)
 		str++;
 
 	return *str ? 0 : 1;
 }
 
-static int first_target(struct dm_ioctl *a, void *end,
+static int first_target(struct dm_ioctl *a, void *begin, void *end,
 			struct dm_target_spec **spec, char **params)
 {
 	*spec = (struct dm_target_spec *) (a + 1);
 	*params = (char *) (*spec + 1);
 
-	return valid_str(*params, end);
+	return valid_str(*params, begin, end);
 }
 
-static int next_target(struct dm_target_spec *last, void *end,
+static int next_target(struct dm_target_spec *last, void *begin, void *end,
 		       struct dm_target_spec **spec, char **params)
 {
 	*spec = (struct dm_target_spec *)
 	    (((unsigned char *) last) + last->next);
 	*params = (char *) (*spec + 1);
 
-	return valid_str(*params, end);
+	return valid_str(*params, begin, end);
 }
 
 void dm_error(const char *message)
@@ -87,7 +87,7 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 	struct dm_target_spec *spec;
 	char *params;
 	struct target_type *ttype;
-	void *context, *end;
+	void *context, *begin, *end;
 	offset_t high = 0;
 
 	if (!args->target_count) {
@@ -95,14 +95,15 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 		return -EINVAL;
 	}
 
-	end = ((void *) args) + args->data_size;
+	begin = (void *) args;
+	end = begin + args->data_size;
 
 #define PARSE_ERROR(msg) {dm_error(msg); return -EINVAL;}
 
 	for (i = 0; i < args->target_count; i++) {
 
-		r = first ? first_target(args, end, &spec, &params) :
-		    next_target(spec, end, &spec, &params);
+		r = first ? first_target(args, begin, end, &spec, &params) :
+		    next_target(spec, begin, end, &spec, &params);
 
 		if (!r)
 			PARSE_ERROR("unable to find target");
