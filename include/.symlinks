@@ -1,2 +1,3 @@
 ../lib/libdevmapper.h
+../lib/libdm-file.h
 ../po/pogen.h
