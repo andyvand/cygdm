@@ -153,7 +153,8 @@ static int core_ctr(struct dirty_log *log, sector_t dev_size,
 	clog->region_size = region_size;
 	clog->region_count = region_count;
 
-	bitset_size = dm_round_up(region_count >> 3, sizeof(*clog->clean_bits));
+	bitset_size = dm_round_up((region_count + 7) >> 3,
+				  sizeof(*clog->clean_bits));
 	clog->clean_bits = vmalloc(bitset_size);
 	if (!clog->clean_bits) {
 		DMWARN("couldn't allocate clean bitset");

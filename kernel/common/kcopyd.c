@@ -582,6 +582,12 @@ int kcopyd_client_create(unsigned int nr_pages, struct kcopyd_client **result)
 	int r = 0;
 	struct kcopyd_client *kc;
 
+	if (nr_pages * SECTORS_PER_PAGE < SUB_JOB_SIZE * SPLIT_COUNT) {
+		DMERR("kcopyd client requested %u pages: minimum is %lu",
+		      nr_pages, SUB_JOB_SIZE * SPLIT_COUNT / SECTORS_PER_PAGE);
+		return -ENOMEM;
+	}
+
 	kc = kmalloc(sizeof(*kc), GFP_KERNEL);
 	if (!kc)
 		return -ENOMEM;

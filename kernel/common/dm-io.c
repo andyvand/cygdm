@@ -204,7 +204,13 @@ static int do_page(kdev_t dev, sector_t *block, sector_t end_block,
 	sector_t b = *block;
 	sector_t blocks_per_page = PAGE_SIZE / block_size;
 	unsigned int this_size; /* holds the size of the current io */
-	unsigned int len;
+	sector_t len;
+
+	if (!blocks_per_page) {
+		DMERR("dm-io: PAGE_SIZE (%lu) < block_size (%u) unsupported",
+		      PAGE_SIZE, block_size);
+		return 0;
+	}
 
 	while ((offset < PAGE_SIZE) && (b != end_block)) {
 		bh = mempool_alloc(_buffer_pool, GFP_NOIO);
@@ -215,10 +221,20 @@ static int do_page(kdev_t dev, sector_t *block, sector_t end_block,
 		 * Block size must be a power of 2 and aligned
 		 * correctly.
 		 */
-		len = end_block - b;
-		this_size = min((sector_t) 1 << log2_floor(b), blocks_per_page);
-		if (this_size > len)
-			this_size = 1 << log2_align(len);
+
+		len = min(end_block - b, blocks_per_page);
+		len = min(len, blocks_per_page - offset / block_size);
+
+		if (!len) {
+			DMERR("dm-io: Invalid offset/block_size (%u/%u).",
+			      offset, block_size);
+			return 0;
+		}
+
+		this_size = 1 << log2_align(len);
+		if (b)
+			this_size = min(this_size,
+					(unsigned) 1 << log2_floor(b));
 
 		/*
 		 * Add in the job offset.

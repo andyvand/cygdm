@@ -720,11 +720,8 @@ static struct mirror *choose_mirror(struct mirror_set *ms, sector_t sector)
 static void map_buffer(struct mirror_set *ms,
 		       struct mirror *m, struct buffer_head *bh)
 {
-	sector_t bsize = bh->b_size >> 9;
-	sector_t rsector = bh->b_blocknr * bsize;
-
 	bh->b_rdev = m->dev->dev;
-	bh->b_rsector = m->offset + (rsector - ms->ti->begin);
+	bh->b_rsector = m->offset + (bh->b_rsector - ms->ti->begin);
 }
 
 static void do_reads(struct mirror_set *ms, struct buffer_list *reads)
@@ -1048,7 +1045,7 @@ static struct dirty_log *create_dirty_log(struct dm_target *ti,
  * For now, #log_params = 1, log_type = "core"
  *
  */
-#define DM_IO_PAGES 64
+#define DM_IO_PAGES 256
 static int mirror_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	int r;
