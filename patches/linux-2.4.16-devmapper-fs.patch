@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Mon Dec 10 17:49:45 2001
++++ linux/drivers/md/Config.in	Tue Dec 11 18:15:01 2001
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Mon Dec 10 17:49:45 2001
++++ linux/drivers/md/Makefile	Tue Dec 11 18:15:01 2001
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -3335,7 +3335,7 @@ diff -ruN linux-2.4.16/drivers/md/dmfs.h linux/drivers/md/dmfs.h
 +#endif				/* LINUX_DMFS_H */
 diff -ruN linux-2.4.16/fs/namespace.c linux/fs/namespace.c
 --- linux-2.4.16/fs/namespace.c	Thu Dec  6 15:57:56 2001
-+++ linux/fs/namespace.c	Mon Dec 10 17:49:45 2001
++++ linux/fs/namespace.c	Tue Dec 11 18:15:01 2001
 @@ -332,7 +332,7 @@
  	}
  }
@@ -3408,7 +3408,7 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
 --- linux-2.4.16/include/linux/fs.h	Thu Dec  6 15:57:58 2001
-+++ linux/include/linux/fs.h	Mon Dec 10 17:49:45 2001
++++ linux/include/linux/fs.h	Tue Dec 11 18:15:01 2001
 @@ -980,6 +980,7 @@
  extern struct vfsmount *kern_mount(struct file_system_type *);
  extern int may_umount(struct vfsmount *);
@@ -3419,7 +3419,7 @@ diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
  
 diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
 --- linux-2.4.16/include/linux/seq_file.h	Thu Dec  6 15:57:56 2001
-+++ linux/include/linux/seq_file.h	Mon Dec 10 17:49:45 2001
++++ linux/include/linux/seq_file.h	Tue Dec 11 18:15:01 2001
 @@ -12,6 +12,7 @@
  	loff_t index;
  	struct semaphore sem;
@@ -3430,7 +3430,7 @@ diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
  struct seq_operations {
 diff -ruN linux-2.4.16/kernel/ksyms.c linux/kernel/ksyms.c
 --- linux-2.4.16/kernel/ksyms.c	Thu Dec  6 15:57:56 2001
-+++ linux/kernel/ksyms.c	Mon Dec 10 17:49:45 2001
++++ linux/kernel/ksyms.c	Tue Dec 11 18:15:01 2001
 @@ -46,6 +46,7 @@
  #include <linux/tty.h>
  #include <linux/in6.h>

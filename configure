@@ -1926,7 +1926,7 @@ if test "${with_tmp_dir+set}" = set; then
   withval="$with_tmp_dir"
    tmpdir="$withval" 
 else
-   tmpdir=/tmp/kerneldiffs 
+   tmpdir=/tmp/kerndiff 
 fi
 
 if test "${with_tmp_dir+set}" = set; then

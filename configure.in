@@ -117,7 +117,7 @@ dnl -- Temporary directory for kernel diffs
 AC_ARG_WITH(tmp-dir,
   [  --with-tmp-dir=DIR      temp directory to make kernel patches [/tmp/kerndiff]],
   [ tmpdir="$withval" ],
-  [ tmpdir=/tmp/kerneldiffs ])
+  [ tmpdir=/tmp/kerndiff ])
 if test "${with_tmp_dir+set}" = set; then
    tmpdir="$with_tmp_dir"
 fi

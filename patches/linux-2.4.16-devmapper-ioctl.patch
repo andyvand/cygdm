@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Mon Dec 10 17:43:12 2001
++++ linux/drivers/md/Config.in	Tue Dec 11 18:12:48 2001
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Mon Dec 10 17:43:12 2001
++++ linux/drivers/md/Makefile	Tue Dec 11 18:12:48 2001
 @@ -4,9 +4,11 @@
  
  O_TARGET	:= mddev.o
@@ -2461,12 +2461,12 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 --- linux-2.4.16/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Mon Dec 10 17:30:36 2001
++++ linux/include/linux/dm-ioctl.h	Tue Dec 11 14:17:26 2001
 @@ -0,0 +1,56 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
-+ * This file is released under the GPL.
++ * This file is released under the LGPL.
 + */
 +
 +#ifndef _LINUX_DM_IOCTL_H
