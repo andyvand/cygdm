@@ -16,20 +16,24 @@ srcdir = @srcdir@
 top_srcdir = @top_srcdir@
 VPATH = @srcdir@
 
-SOURCES=dmsetup.c
-TARGETS=dmsetup
+ifeq ("@STATIC_LINK@", "yes")
+  TARGET = dmsetup.static
+else
+  TARGET = dmsetup
+endif
+
+SOURCES = dmsetup.c
+TARGETS = $(TARGET)
+CLEAN_TARGETS = dmsetup dmsetup.static
 
 include ../make.tmpl
 
-dmsetup: $(OBJECTS) $(interfacedir)/libdevmapper.so \
+$(TARGET): $(OBJECTS) $(interfacedir)/libdevmapper.so \
 	 $(interfacedir)/libdevmapper.a
-	$(CC) -o dmsetup $(OBJECTS) $(LD_FLAGS) \
+	$(CC) -o $@ $(OBJECTS) $(LD_FLAGS) \
 	      -L$(interfacedir) -L$(DESTDIR)/lib $(LIBS) \
 	      -ldevmapper
 
-install: dmsetup
+install: $(TARGET)
 	$(INSTALL) -D -o $(OWNER) -g $(GROUP) -m 555 $(STRIP) $< $(sbindir)/$<
-
-.PHONY: install 
-
 

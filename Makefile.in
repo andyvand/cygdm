@@ -20,16 +20,28 @@ kernelvsn = @kernelvsn@
 
 SUBDIRS = include man
 
+ifeq ("@INTL@", "yes")
+  SUBDIRS += po
+endif
+
 SUBDIRS += lib dmsetup
 
 ifeq ($(MAKECMDGOALS),distclean)
-  SUBDIRS += kernel
+  SUBDIRS += kernel po
 endif
 
 include make.tmpl
 
 lib: include
 dmsetup: lib
+po: dmsetup
+
+ifeq ("@INTL@", "yes")
+lib.pofile: include.pofile
+dmsetup.pofile: lib.pofile
+po.pofile: dmsetup.pofile
+pofile: po.pofile
+endif
 
 .PHONY: apply-patches install_static_lib
 
@@ -41,3 +53,4 @@ apply-patches:
 
 install_static_lib: all
 	$(MAKE) -C lib install_static
+

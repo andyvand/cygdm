@@ -44,6 +44,8 @@ fs=$(patsubst %,fs/%,$(FS))
 common=$(patsubst %,common/%,$(COMMON))
 ioctl=$(patsubst %,ioctl/%,$(IOCTL))
 
+.PHONY: install clean distclean all symlinks patches patches-clean
+
 all: symlinks
 
 symlinks:
@@ -121,6 +123,4 @@ clean:
 
 distclean:
 	$(RM) Makefile
-
-.PHONY: install clean distclean all
 

@@ -21,20 +21,24 @@ CC = @CC@
 RANLIB = @RANLIB@
 SHELL = /bin/sh
 INSTALL = @INSTALL@
+MSGFMT = @MSGFMT@
 LN_S = @LN_S@
 LIBS = @LIBS@
 CFLAGS += @CFLAGS@
+CLDFLAGS += @CLDFLAGS@
 LD_DEPS += @LD_DEPS@
+SOFLAG += @SOFLAG@
 
 # Setup directory variables
-prefix = $(DESTDIR)@prefix@
-exec_prefix = $(DESTDIR)@exec_prefix@
-bindir = @bindir@
-includedir = @includedir@
-libdir = @libdir@
-sbindir = @sbindir@
-infodir = @infodir@
-mandir = @mandir@
+prefix = @prefix@
+exec_prefix = @exec_prefix@
+bindir = $(DESTDIR)@bindir@
+includedir = $(DESTDIR)@includedir@
+libdir = $(DESTDIR)@libdir@
+sbindir = $(DESTDIR)@sbindir@
+infodir = $(DESTDIR)@infodir@
+mandir = $(DESTDIR)@mandir@
+localedir = $(DESTDIR)@LOCALEDIR@
 kerneldir = @kerneldir@
 interface = @interface@
 interfacedir = $(top_srcdir)/lib/$(interface)
@@ -49,55 +53,66 @@ ifndef MAKEFLAGS
 MAKEFLAGS = @JOBS@
 endif
 
-SUFFIXES=.c .d .o .so .a
+SUFFIXES = .c .d .o .so .a .po .pot .mo
 
-CFLAGS+=-fPIC -Wall -Wundef -Wshadow -Wcast-align -Wwrite-strings -Wmissing-prototypes -Wmissing-declarations -Wnested-externs -Winline
+CFLAGS += -fPIC -Wall -Wundef -Wshadow -Wcast-align -Wwrite-strings -Wmissing-prototypes -Wmissing-declarations -Wnested-externs -Winline
 
-#CFLAGS+=-W -Wconversion -Wpointer-arith -Wredundant-decls -Wbad-function-cast -Wcast-qual -Wmissing-noreturn
+#CFLAGS += -W -Wconversion -Wpointer-arith -Wredundant-decls -Wbad-function-cast -Wcast-qual -Wmissing-noreturn
 
 ifeq ("@DEBUG@", "yes")
-  CFLAGS+=-g -fno-omit-frame-pointer -DDEBUG
+  CFLAGS += -g -fno-omit-frame-pointer -DDEBUG
 else
-  CFLAGS+=-O2
+  CFLAGS += -O2
+endif
+
+ifeq ("@INTL@", "yes")
+  CFLAGS += -DINTL_PACKAGE=\"@INTL_PACKAGE@\" -DLOCALEDIR=\"@LOCALEDIR@\"
+endif
+
+LD_FLAGS += -L$(interfacedir)
+
+ifeq ("@STATIC_LINK@", "yes")
+  LD_FLAGS += -static
 endif
 
 ifeq ("@COMPAT@", "yes")
-  CFLAGS+=-DDM_COMPAT
+  CFLAGS += -DDM_COMPAT
 endif
 
-#CFLAGS+=-pg
-#LD_FLAGS+=-pg
+#CFLAGS += -pg
+#LD_FLAGS += -pg
 
 STRIP=
-#STRIP=-s
+#STRIP = -s
 
 LIB_VERSION := $(shell cat $(top_srcdir)/VERSION | \
 		 awk -F '.' '{printf "%s.%s",$$1,$$2}')
 
-INCLUDES+=-I. -I$(top_srcdir)/include
+INCLUDES += -I. -I$(top_srcdir)/include
 
 ifdef DESTDIR
-  INCLUDES+=-I$(DESTDIR)/usr/include
+  INCLUDES += -I$(DESTDIR)/usr/include
 endif
 
 ifneq ("@missingkernel@", "yes")
-  INCLUDES+=-I$(kerneldir)/include
+  INCLUDES += -I$(kerneldir)/include
 endif
 
-INC_LNS=$(top_srcdir)/include/.symlinks_created
+INC_LNS = $(top_srcdir)/include/.symlinks_created
 
-LD_FLAGS+=-L$(interfacedir)
+DEPS = $(top_srcdir)/make.tmpl $(top_srcdir)/VERSION Makefile $(INC_LNS)
 
-DEPS=$(top_srcdir)/make.tmpl $(top_srcdir)/VERSION Makefile $(INC_LNS)
-
-OBJECTS=$(SOURCES:%.c=%.o)
+OBJECTS = $(SOURCES:%.c=%.o)
+POTFILES = $(SOURCES:%.c=%.pot)
 
 SUBDIRS.install := $(SUBDIRS:=.install)
+SUBDIRS.pofile := $(SUBDIRS:=.pofile)
 SUBDIRS.clean := $(SUBDIRS:=.clean)
 SUBDIRS.distclean := $(SUBDIRS:=.distclean)
 
-.PHONY: all install distclean clean
+.PHONY: all install pofile distclean clean
 .PHONY: $(SUBDIRS) $(SUBDIRS.install) $(SUBDIRS.clean) $(SUBDIRS.distclean)
+.PHONY: $(SUBDIRS.pofile)
 
 all: $(SUBDIRS) $(TARGETS)
 
@@ -115,35 +130,54 @@ $(SUBDIRS.clean):
 $(SUBDIRS.distclean):
 	-$(MAKE) -C $(@:.distclean=) distclean
 
+ifeq ("@INTL@", "yes")
+pofile: $(SUBDIRS.pofile) $(POTFILES)
+
+$(SUBDIRS.pofile):
+	$(MAKE) -C $(@:.pofile=) pofile
+endif
+
 $(TARGETS): $(OBJECTS)
 
 %.o: %.c
 	$(CC) -c $(INCLUDES) $(CFLAGS) $< -o $@
 
+%.pot: %.c Makefile
+	$(CC) -E $(INCLUDES) -include $(top_srcdir)/include/pogen.h \
+		$(CFLAGS) $< > $@
+
+%.so: %.o
+	$(CC) -c $(INCLUDES) $(CFLAGS) $< -o $@
+
 $(LIB_SHARED): $(OBJECTS) $(LD_DEPS)
-	$(CC) -shared -Wl,-soname,$(notdir $@).$(LIB_VERSION) \
-	-Wl,--version-script,.export.sym $(OBJECTS) -o $@
+	$(CC) $(SOFLAG) -Wl,-soname,$(notdir $@).$(LIB_VERSION) \
+	$(CLDFLAGS) $(OBJECTS) -o $@
 
 $(LIB_STATIC): $(OBJECTS)
 	$(RM) $@
-	$(AR) r $@ $(OBJECTS)
-	$(RANLIB) $@
+	$(AR) rs $@ $(OBJECTS)
 
 %.d: %.c
 	set -e; \
 	FILE=`echo $@ | sed 's/\\//\\\\\\//g;s/\\.d//g'`; \
 	DEPS=`echo $(DEPS) | sed -e 's/\\//\\\\\\//g'`; \
 	$(CC) -MM $(INCLUDES) $(CFLAGS) $< | \
-	sed "s/\(.*\)\.o[ :]*/$$FILE.o $$FILE.d : $$DEPS /g" > $@; \
-		[ -s $@ ] || $(RM) $@
+	sed "s/\(.*\)\.o[ :]*/$$FILE.o $$FILE.d $$FILE.pot: $$DEPS /g" > $@; \
+	[ -s $@ ] || $(RM) $@
+
+%.mo: %.po
+	$(MSGFMT) -o $@ $<
 
 clean: $(SUBDIRS.clean)
-	$(RM) $(OBJECTS) $(TARGETS) $(CLEAN_TARGETS) $(SOURCES:%.c=%.d)
+	$(RM) $(OBJECTS) $(TARGETS) $(CLEAN_TARGETS) $(SOURCES:%.c=%.d) \
+	      $(SOURCES:%.c=%.pot) $(LD_DEPS)
 
 distclean: $(SUBDIRS.distclean)
 	$(RM) $(OBJECTS) $(TARGETS) $(CLEAN_TARGETS) $(SOURCES:%.c=%.d) \
+	      $(SOURCES:%.c=%.pot) $(LD_DEPS) \
 	      config.cache config.log config.status \
-	      Makefile make.tmpl core
+	      Makefile make.tmpl core \
+	      device-mapper.po
 
 .export.sym: .exported_symbols
 	set -e; (echo "Base {"; echo "	global:"; \
