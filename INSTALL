@@ -11,7 +11,7 @@ Device Mapper installation
    Other flags let you change the installation & working directories.
 
    Example:  
-   ./configure --with-kernel-dir=/usr/src/linux-2.4.19-rc1
+   ./configure --with-kernel-dir=/usr/src/linux-2.4.19
 
 
 2) Patch, configure and build a new kernel containing device-mapper.
@@ -30,10 +30,12 @@ Device Mapper installation
    on the 'ioctl' interface.  (Use CVS to get the older 'fs' patches if
    you want.)  
 
-   patches/common holds the constituent patches - see patches/common/README.
+   patches/common holds the constituent patches.
+   You may need to use these if some of the patches (e.g. mempool)
+   have already been applied to your kernel.  See patches/common/README.
 
    Running 'make symlinks' from the 'kernel' subdirectory will put symbolic 
-   links into your kernel tree pointing back at the source files.
+   links into your kernel tree pointing back at the device-mapper source files.
    
 
 3) Build and install the shared library (libdevmapper.so) that
@@ -57,7 +59,7 @@ Device Mapper installation
 	     and use modprobe dm-mod to load the module
 	post-install dm-mod /etc/init.d/devmap_mknod.sh
 	
-   The script creates the /dev/device-mapper/control device for the ioctl
+   The script creates the /dev/mapper/control device for the ioctl
    interface using the major and minor numbers that have been allocated
    dynamically.  It prints a message if it works or else it fails silently 
    with a non-zero status code (which you probably want to test for).
@@ -73,6 +75,10 @@ Device Mapper installation
    Or proceed to install a beta version of the new LVM2 tools.
 
 
+Note if you are upgrading
+=========================
+   /dev/mapper was called /dev/device-mapper prior to 0.96.04.
+   Consequently scripts/devmap_mknod.sh has been updated.
 
 Notes about the 'proof of concept' filesystem interface
 =======================================================

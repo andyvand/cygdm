@@ -1,5 +1,5 @@
-diff -Nru linux-2.4.19-rc1/include/linux/mempool.h linux/include/linux/mempool.h
---- linux-2.4.19-rc1/include/linux/mempool.h	Wed Dec 31 16:00:00 2001
+diff -Nru linux-2.4.19/include/linux/mempool.h linux/include/linux/mempool.h
+--- linux-2.4.19/include/linux/mempool.h	Wed Dec 31 16:00:00 2001
 +++ linux/include/linux/mempool.h	Tue Apr 23 20:55:52 2002
 @@ -29,5 +29,13 @@
  extern void mempool_destroy(mempool_t *pool);
@@ -15,8 +15,8 @@ diff -Nru linux-2.4.19-rc1/include/linux/mempool.h linux/include/linux/mempool.h
 +void mempool_free_slab(void *element, void *pool_data);
 +
  #endif /* _LINUX_MEMPOOL_H */
-diff -Nru linux-2.4.19-rc1/mm/mempool.c linux/mm/mempool.c
---- linux-2.4.19-rc1/mm/mempool.c	Wed Dec 31 16:00:00 1969
+diff -Nru linux-2.4.19/mm/mempool.c linux/mm/mempool.c
+--- linux-2.4.19/mm/mempool.c	Wed Dec 31 16:00:00 1969
 +++ linux/mm/mempool.c	Tue Apr 23 20:55:52 2002
 @@ -268,10 +268,28 @@
  	}

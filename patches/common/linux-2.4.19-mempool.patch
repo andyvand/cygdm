@@ -1,4 +1,4 @@
-diff -Nru linux-2.4.19-rc1/include/linux/mempool.h linux/include/linux/mempool.h
+diff -Nru linux-2.4.19/include/linux/mempool.h linux/include/linux/mempool.h
 --- /dev/null	Wed Dec 31 16:00:00 1969
 +++ linux/include/linux/mempool.h	Tue Apr 23 20:55:52 2002
 @@ -0,0 +1,33 @@
@@ -35,8 +35,8 @@ diff -Nru linux-2.4.19-rc1/include/linux/mempool.h linux/include/linux/mempool.h
 +extern void mempool_free(void *element, mempool_t *pool);
 +
 +#endif /* _LINUX_MEMPOOL_H */
-diff -Nru linux-2.4.19-rc1/mm/Makefile linux/mm/Makefile
---- linux-2.4.19-rc1/mm/Makefile	Mon Mar 25 14:40:15 2002
+diff -Nru linux-2.4.19/mm/Makefile linux/mm/Makefile
+--- linux-2.4.19/mm/Makefile	Mon Mar 25 14:40:15 2002
 +++ linux/mm/Makefile	Mon Mar 25 14:40:15 2002
 @@ -9,12 +9,12 @@
  
@@ -53,7 +53,7 @@ diff -Nru linux-2.4.19-rc1/mm/Makefile linux/mm/Makefile
  
  obj-$(CONFIG_HIGHMEM) += highmem.o
  
-diff -Nru linux-2.4.19-rc1/mm/mempool.c b/mm/mempool.c
+diff -Nru linux-2.4.19/mm/mempool.c b/mm/mempool.c
 --- /dev/null	Wed Dec 31 16:00:00 1969
 +++ linux/mm/mempool.c	Tue Apr 23 20:55:52 2002
 @@ -0,0 +1,277 @@

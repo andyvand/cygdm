@@ -1,5 +1,4 @@
-This directory contains a beta release of the proposed device-mapper 
-for the linux kernel.
+This directory contains the device-mapper for the linux kernel.
 
 For more information about the device mapper read the INTRO file.
 Installation instructions are in INSTALL.
@@ -10,6 +9,9 @@ To access the CVS tree use:
   cvs -d :pserver:cvs@tech.sistina.com:/data/cvs login
   CVS password: cvs1
   cvs -d :pserver:cvs@tech.sistina.com:/data/cvs checkout device-mapper
+
+The kernel components are also available from the BitKeeper tree at:
+  http://device-mapper.bkbits.net:8080/2.4-stable/
 
 Mailing list for discussion/bug reports etc.
   lvm-devel@sistina.com
