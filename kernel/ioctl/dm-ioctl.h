@@ -297,4 +297,9 @@ typedef char ioctl_struct[308];
  */
 #define DM_BUFFER_FULL_FLAG	(1 << 8) /* Out */
 
+/*
+ * Set this to improve performance when you aren't going to use open_count
+ */
+#define DM_SKIP_BDGET_FLAG	(1 << 9) /* In */
+
 #endif				/* _LINUX_DM_IOCTL_H */
