@@ -122,7 +122,7 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad_put;
 	}
 
-	if (argc > 4) {
+	if (argc > 5) {
 		priority = simple_strtoul(argv[5], &value, 10);
 		if (value == NULL) {
 			*context = "Invalid priority value";
