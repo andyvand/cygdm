@@ -71,7 +71,6 @@ struct snapshot_c {
 	int    current_metadata_number;/* Index into mythical extent array */
 	int    highest_metadata_entry; /* Number of metadata entries in the disk_cow array */
 	int    md_entries_per_block;   /* Number of metadata entries per hard disk block */
- 	struct kiobuf *iobuf;          /* kiobuf for doing I/O to chunks and cows */
 	struct kiobuf *cow_iobuf;      /* kiobuf for doing I/O to header & metadata */
 	struct list_head *hash_table;  /* Hash table for looking up COW data */
 	struct origin_list *origin;    /* So we can get at the locking rwsem */
@@ -236,14 +235,15 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 		/* Submit any pending write BHs */
 		down_write(&ex->snap->origin->lock);
 		bh = ex->bh;
+		ex->bh = NULL;
+		up_write(&ex->snap->origin->lock);
+
 		while (bh) {
 			struct buffer_head *nextbh = bh->b_reqnext;
 			bh->b_reqnext = NULL;
 			generic_make_request(WRITE, bh);
 			bh = nextbh;
 		}
-		ex->bh = NULL;
-		up_write(&ex->snap->origin->lock);
 	}
 
 	/* Read/write error - snapshot is unusable */
@@ -850,15 +850,6 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	if (alloc_hash_table(lc) == -1)
 		goto bad_putdev;
 
-	/* Allocate and set up iobuf */
-	*context = "Unable to allocate iovec";
-	if (alloc_kiovec(1, &lc->iobuf))
-		goto bad_free1;
-
-	*context = "Unable to allocate I/O buffer space";
-	if (alloc_iobuf_pages(lc->iobuf, chunk_size))
-		goto bad_free2;
-
 	/* Check the persistent flag - done here because we need the iobuf
 	   to check the LV header */
 	if ((*persistent & 0x5f) == 'P') {
@@ -871,7 +862,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	/* For a persistent snapshot allocate the COW iobuf and set associated variables */
 	if (lc->persistent) {
 		if (setup_persistent_snapshot(lc, blocksize, context))
-			goto bad_free3;
+			goto bad_free1;
 	}
 
 	/* Flush IO to the origin device */
@@ -886,20 +877,16 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	r = -EINVAL;
 	*context = "Cannot register snapshot origin";
 	if (!register_snapshot(lc->origin_dev->dev, lc))
-	    goto bad_free4;
+	    goto bad_free2;
 
 	*context = lc;
 	return 0;
 
- bad_free4:
+ bad_free2:
 	if (lc->persistent) {
 		unmap_kiobuf(lc->cow_iobuf);
 		free_kiovec(1, &lc->cow_iobuf);
 	}
- bad_free3:
-	unmap_kiobuf(lc->iobuf);
- bad_free2:
-	free_kiovec(1, &lc->iobuf);
  bad_free1:
 	vfree(lc->hash_table);
  bad_putdev:
@@ -920,8 +907,6 @@ static void snapshot_dtr(struct dm_table *t, void *c)
 
 	/* Deallocate memory used */
 	free_exception_table(lc);
-	unmap_kiobuf(lc->iobuf);
-	free_kiovec(1, &lc->iobuf);
 	if (lc->persistent) {
 		unmap_kiobuf(lc->cow_iobuf);
 		free_kiovec(1, &lc->cow_iobuf);
