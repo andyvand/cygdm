@@ -12,17 +12,16 @@
 #include <linux/blkpg.h>
 #include <linux/mempool.h>
 #include <linux/slab.h>
+#include <linux/major.h>
 #include <linux/kdev_t.h>
 #include <linux/lvm.h>
 
 #include <asm/uaccess.h>
 
 static const char *_name = DM_NAME;
-#define MAX_DEVICES (1 << MINORBITS)
+#define MAX_TRANSIENT 128	/* Max number of transient majors we allow */
+#define MAX_MINORS (1 << MINORBITS)
 #define DEFAULT_READ_AHEAD 64
-
-static int major = 0;
-static int _major = 0;
 
 struct dm_io {
 	struct mapped_device *md;
@@ -74,18 +73,93 @@ struct mapped_device {
 #define MIN_IOS 256
 static kmem_cache_t *_io_cache;
 
-/* block device arrays */
-static int _block_size[MAX_DEVICES];
-static int _blksize_size[MAX_DEVICES];
-static int _hardsect_size[MAX_DEVICES];
-
 static struct mapped_device *get_kdev(kdev_t dev);
 static int dm_request(request_queue_t *q, int rw, struct buffer_head *bh);
 static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb);
 
-static __init int local_init(void)
+/* Index of allocated mapped_device structs by (major, minor) */
+static struct mapped_device *(*_mds[MAX_BLKDEV + 1])[MAX_MINORS];
+
+/* List of major numbers allocated for non-persistent devices */
+static uint _trans_majors[MAX_TRANSIENT + 1];
+
+/* All major/minor entries in front of this one are known to be in use */
+static uint _next_maj_ix = 0;	/* Index into _trans_majors */
+static uint _next_min = 0;
+
+static struct rw_semaphore _dev_lock;
+
+static void free_major(uint major)
+{
+	read_ahead[major] = 0;
+	blk_size[major] = NULL;
+	blksize_size[major] = NULL;
+	hardsect_size[major] = NULL;
+
+	kfree(_mds[major]);
+
+	if (unregister_blkdev(major, _name) < 0)
+		DMERR("devfs_unregister_blkdev failed");
+}
+
+static void free_all_majors(void)
+{
+	uint major;
+
+	for (major = 0; major < ARRAY_SIZE(_mds); major++) {
+		if (_mds[major]) {
+			free_major(major);
+			_mds[major] = NULL;
+		}
+	}
+}
+
+static int alloc_major(uint * major)
 {
 	int r;
+	struct {
+		struct mapped_device *mds[MAX_MINORS];
+		int blk_size[MAX_MINORS];
+		int blksize_size[MAX_MINORS];
+		int hardsect_size[MAX_MINORS];
+	} *maj;
+
+	/* Major already allocated? */
+	if (*major && _mds[*major])
+		return 0;
+
+	maj = kmalloc(sizeof(*maj), GFP_KERNEL);
+	if (!maj)
+		return -ENOMEM;
+
+	memset(maj, 0, sizeof(*maj));
+
+	r = register_blkdev(*major, _name, &dm_blk_dops);
+	if (r < 0) {
+		DMERR("register_blkdev failed for %d", *major);
+		kfree(maj);
+		return r;
+	}
+	if (r > 0)
+		*major = r;
+
+	_mds[*major] = &maj->mds;
+
+	blk_size[*major] = maj->blk_size;
+	blksize_size[*major] = maj->blksize_size;
+	hardsect_size[*major] = maj->hardsect_size;
+	read_ahead[*major] = DEFAULT_READ_AHEAD;
+
+	blk_queue_make_request(BLK_DEFAULT_QUEUE(*major), dm_request);
+
+	return 0;
+}
+
+static __init int local_init(void)
+{
+	memset(&_mds, 0, sizeof(_mds));
+	memset(&_trans_majors, 0, sizeof(_trans_majors));
+	init_rwsem(&_dev_lock);
 
 	/* allocate a slab for the dm_ios */
 	_io_cache = kmem_cache_create("dm io",
@@ -94,40 +168,13 @@ static __init int local_init(void)
 	if (!_io_cache)
 		return -ENOMEM;
 
-	_major = major;
-	r = register_blkdev(_major, _name, &dm_blk_dops);
-	if (r < 0) {
-		DMERR("register_blkdev failed");
-		kmem_cache_destroy(_io_cache);
-		return r;
-	}
-
-	if (!_major)
-		_major = r;
-
-	/* set up the arrays */
-	read_ahead[_major] = DEFAULT_READ_AHEAD;
-	blk_size[_major] = _block_size;
-	blksize_size[_major] = _blksize_size;
-	hardsect_size[_major] = _hardsect_size;
-
-	blk_queue_make_request(BLK_DEFAULT_QUEUE(_major), dm_request);
-
 	return 0;
 }
 
 static void local_exit(void)
 {
 	kmem_cache_destroy(_io_cache);
-
-	if (unregister_blkdev(_major, _name) < 0)
-		DMERR("devfs_unregister_blkdev failed");
-
-	read_ahead[_major] = 0;
-	blk_size[_major] = NULL;
-	blksize_size[_major] = NULL;
-	hardsect_size[_major] = NULL;
-	_major = 0;
+	free_all_majors();
 
 	DMINFO("cleaned up");
 }
@@ -226,17 +273,14 @@ static inline void free_deferred(struct deferred_io *di)
 }
 
 /* In 512-byte units */
-#define VOLUME_SIZE(minor) (_block_size[(minor)] << 1)
+#define VOLUME_SIZE(dev) (blk_size[major((dev))][minor((dev))] << 1)
 
 /* FIXME: check this */
 static int dm_blk_ioctl(struct inode *inode, struct file *file,
 			uint command, unsigned long a)
 {
-	int minor = MINOR(inode->i_rdev);
+	kdev_t dev = inode->i_rdev;
 	long size;
-
-	if (minor >= MAX_DEVICES)
-		return -ENXIO;
 
 	switch (command) {
 	case BLKROSET:
@@ -251,17 +295,17 @@ static int dm_blk_ioctl(struct inode *inode, struct file *file,
 	case BLKELVSET:
 	case BLKBSZGET:
 	case BLKBSZSET:
-		return blk_ioctl(inode->i_rdev, command, a);
+		return blk_ioctl(dev, command, a);
 		break;
 
 	case BLKGETSIZE:
-		size = VOLUME_SIZE(minor);
+		size = VOLUME_SIZE(dev);
 		if (copy_to_user((void *) a, &size, sizeof(long)))
 			return -EFAULT;
 		break;
 
 	case BLKGETSIZE64:
-		size = VOLUME_SIZE(minor);
+		size = VOLUME_SIZE(dev);
 		if (put_user((u64) ((u64) size) << 9, (u64 *) a))
 			return -EFAULT;
 		break;
@@ -396,7 +440,7 @@ static inline int __deferring(struct mapped_device *md, int rw,
 			return r;
 
 		if (r == 0)
-			return 1; /* deferred successfully */
+			return 1;	/* deferred successfully */
 
 	}
 
@@ -443,10 +487,12 @@ static int dm_request(request_queue_t *q, int rw, struct buffer_head *bh)
 
 static int check_dev_size(kdev_t dev, unsigned long block)
 {
+	uint major = major(dev);
+	uint minor = minor(dev);
+
 	/* FIXME: check this */
-	int minor = MINOR(dev);
-	unsigned long max_sector = (_block_size[minor] << 1) + 1;
-	unsigned long sector = (block + 1) * (_blksize_size[minor] >> 9);
+	unsigned long max_sector = (blk_size[major][minor] << 1) + 1;
+	unsigned long sector = (block + 1) * (blksize_size[major][minor] >> 9);
 
 	return (sector > max_sector) ? 0 : 1;
 }
@@ -474,7 +520,7 @@ static int __bmap(struct mapped_device *md, kdev_t dev, unsigned long block,
 	memset(&bh, 0, sizeof(bh));
 	bh.b_blocknr = block;
 	bh.b_dev = bh.b_rdev = dev;
-	bh.b_size = _blksize_size[MINOR(dev)];
+	bh.b_size = blksize_size[major(dev)][minor(dev)];
 	bh.b_rsector = block * (bh.b_size >> 9);
 
 	/* find target */
@@ -521,79 +567,160 @@ static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb)
 	return r;
 }
 
-/*-----------------------------------------------------------------
- * A bitset is used to keep track of allocated minor numbers.
- *---------------------------------------------------------------*/
-static spinlock_t _minor_lock = SPIN_LOCK_UNLOCKED;
-static struct mapped_device *_mds[MAX_DEVICES];
-
-static void free_minor(int minor)
+static void free_dev_entry(kdev_t dev)
 {
-	spin_lock(&_minor_lock);
-	_mds[minor] = NULL;
-	spin_unlock(&_minor_lock);
+	uint major = major(dev);
+	uint minor = minor(dev);
+	uint i;
+
+	down_write(&_dev_lock);
+	(*_mds[major])[minor] = NULL;
+	for (i = 0; i <= _next_maj_ix; i++) {
+		if (major == _trans_majors[i]) {
+			if (i < _next_maj_ix) {
+				_next_maj_ix = i;
+				_next_min = minor;
+				break;
+			}
+			if (minor < _next_min)
+				_next_min = minor;
+			break;
+		}
+	}
+	up_write(&_dev_lock);
 }
 
 /*
- * See if the device with a specific minor # is free.
+ * See if requested kdev_t is available
  */
-static int specific_minor(int minor, struct mapped_device *md)
+static int specific_dev(kdev_t dev, struct mapped_device *md)
 {
-	int r = -EBUSY;
+	int r;
+	uint major = major(dev);
+	uint minor = minor(dev);
+	struct mapped_device *(*mds)[MAX_MINORS];
 
-	if (minor >= MAX_DEVICES) {
-		DMWARN("request for a mapped_device beyond MAX_DEVICES (%d)",
-		       MAX_DEVICES);
+	if (!major || (major > MAX_BLKDEV) || (minor >= MAX_MINORS)) {
+		DMWARN("device number requested out of range (%d, %d)",
+		       major, minor);
 		return -EINVAL;
 	}
 
-	spin_lock(&_minor_lock);
-	if (!_mds[minor]) {
-		_mds[minor] = md;
-		r = minor;
+	down_write(&_dev_lock);
+	mds = _mds[major];
+
+	/* Register requested major? */
+	if (!mds) {
+		r = alloc_major(&major);
+		if (r)
+			goto error;
+		mds = _mds[major];
 	}
-	spin_unlock(&_minor_lock);
+
+	if (!(*mds)[minor]) {
+		(*mds)[minor] = md;
+		md->dev = mk_kdev(major, minor);
+		r = 0;
+	} else
+		r = -EBUSY;
+
+      error:
+	up_write(&_dev_lock);
 
 	return r;
 }
 
-static int next_free_minor(struct mapped_device *md)
+static int alloc_trans_major(uint transient_slot)
 {
-	int i;
+	int r;
+	uint major = 0;
 
-	spin_lock(&_minor_lock);
-	for (i = 0; i < MAX_DEVICES; i++) {
-		if (!_mds[i]) {
-			_mds[i] = md;
-			break;
+	r = alloc_major(&major);
+	if (r)
+		return r;
+
+	while (_trans_majors[transient_slot])
+		transient_slot++;
+	if (transient_slot >= MAX_TRANSIENT)
+		r = -EBUSY;
+	else
+		_trans_majors[transient_slot] = major;
+
+	return r;
+}
+
+/*
+ * Find first unused major/minor, requesting a new major number if required
+ */
+static int next_free_dev(struct mapped_device *md)
+{
+	int r = 0;
+	struct mapped_device *(*mds)[MAX_MINORS];
+
+	down_write(&_dev_lock);
+
+	for (; _next_maj_ix < MAX_TRANSIENT; _next_maj_ix++) {
+		if (!_trans_majors[_next_maj_ix]) {
+			r = alloc_trans_major(_next_maj_ix);
+			if (r)
+				goto out;
+			_next_min = 0;
 		}
-	}
-	spin_unlock(&_minor_lock);
 
-	return (i < MAX_DEVICES) ? i : -EBUSY;
+		mds = _mds[_trans_majors[_next_maj_ix]];
+
+		for (; _next_min < MAX_MINORS; _next_min++) {
+			if (!(*mds)[_next_min]) {
+				(*mds)[_next_min] = md;
+				md->dev = mk_kdev(_trans_majors[_next_maj_ix],
+						  _next_min);
+				goto out;
+			}
+		}
+		_next_min = 0;
+	}
+
+	r = -EBUSY;
+
+      out:
+	up_write(&_dev_lock);
+
+	return r;
 }
 
 static struct mapped_device *get_kdev(kdev_t dev)
 {
 	struct mapped_device *md;
+	struct mapped_device *(*mds)[MAX_MINORS];
 
-	if (major(dev) != _major)
-		return NULL;
-
-	spin_lock(&_minor_lock);
-	md = _mds[minor(dev)];
+	down_read(&_dev_lock);
+	mds = _mds[major(dev)];
+	if (!mds) {
+		md = NULL;
+		goto out;
+	}
+	md = (*mds)[minor(dev)];
 	if (md)
 		dm_get(md);
-	spin_unlock(&_minor_lock);
+      out:
+	up_read(&_dev_lock);
 
 	return md;
+}
+
+static void free_dev(struct mapped_device *md)
+{
+	free_dev_entry(md->dev);
+	mempool_destroy(md->io_pool);
+	kfree(md);
 }
 
 /*
  * Allocate and initialise a blank device with a given minor.
  */
-static struct mapped_device *alloc_dev(int minor)
+static struct mapped_device *alloc_dev(kdev_t dev)
 {
+	int r;
 	struct mapped_device *md = kmalloc(sizeof(*md), GFP_KERNEL);
 
 	if (!md) {
@@ -601,37 +728,33 @@ static struct mapped_device *alloc_dev(int minor)
 		return NULL;
 	}
 
-	/* get a minor number for the dev */
-	minor = (minor < 0) ? next_free_minor(md) : specific_minor(minor, md);
-	if (minor < 0) {
+	memset(md, 0, sizeof(*md));
+
+	/* Allocate suitable device number */
+	if (!dev)
+		r = next_free_dev(md);
+	else
+		r = specific_dev(dev, md);
+
+	if (r) {
 		kfree(md);
 		return NULL;
 	}
-
-	memset(md, 0, sizeof(*md));
 
 	md->io_pool = mempool_create(MIN_IOS, mempool_alloc_slab,
 				     mempool_free_slab, _io_cache);
 	if (!md->io_pool) {
-		free_minor(minor);
+		free_dev(md);
 		kfree(md);
 		return NULL;
 	}
 
-	md->dev = mk_kdev(_major, minor);
 	init_rwsem(&md->lock);
 	atomic_set(&md->holders, 1);
 	atomic_set(&md->pending, 0);
 	init_waitqueue_head(&md->wait);
 
 	return md;
-}
-
-static void free_dev(struct mapped_device *md)
-{
-	free_minor(minor(md->dev));
-	mempool_destroy(md->io_pool);
-	kfree(md);
 }
 
 /*
@@ -658,14 +781,16 @@ static int __find_hardsect_size(struct list_head *devices)
  */
 static int __bind(struct mapped_device *md, struct dm_table *t)
 {
-	int minor = minor(md->dev);
+	uint minor = minor(md->dev);
+	uint major = major(md->dev);
 	md->map = t;
 
 	/* in k */
-	_block_size[minor] = dm_table_get_size(t) >> 1;
-	_blksize_size[minor] = BLOCK_SIZE;
-	_hardsect_size[minor] = __find_hardsect_size(dm_table_get_devices(t));
-	register_disk(NULL, md->dev, 1, &dm_blk_dops, _block_size[minor]);
+	blk_size[major][minor] = dm_table_get_size(t) >> 1;
+	blksize_size[major][minor] = BLOCK_SIZE;
+	hardsect_size[major][minor] =
+	    __find_hardsect_size(dm_table_get_devices(t));
+	register_disk(NULL, md->dev, 1, &dm_blk_dops, blk_size[major][minor]);
 
 	dm_table_get(t);
 	return 0;
@@ -673,25 +798,26 @@ static int __bind(struct mapped_device *md, struct dm_table *t)
 
 static void __unbind(struct mapped_device *md)
 {
-	int minor = minor(md->dev);
+	uint minor = minor(md->dev);
+	uint major = major(md->dev);
 
 	dm_table_put(md->map);
 	md->map = NULL;
 
-	_block_size[minor] = 0;
-	_blksize_size[minor] = 0;
-	_hardsect_size[minor] = 0;
+	blk_size[major][minor] = 0;
+	blksize_size[major][minor] = 0;
+	hardsect_size[major][minor] = 0;
 }
 
 /*
  * Constructor for a new device.
  */
-int dm_create(int minor, struct dm_table *table, struct mapped_device **result)
+int dm_create(kdev_t dev, struct dm_table *table, struct mapped_device **result)
 {
 	int r;
 	struct mapped_device *md;
 
-	md = alloc_dev(minor);
+	md = alloc_dev(dev);
 	if (!md)
 		return -ENXIO;
 
@@ -812,8 +938,7 @@ int dm_resume(struct mapped_device *md)
 	struct deferred_io *def;
 
 	down_write(&md->lock);
-	if (!test_bit(DMF_SUSPENDED, &md->flags) ||
-	    !dm_table_get_size(md->map)) {
+	if (!test_bit(DMF_SUSPENDED, &md->flags) || !dm_table_get_size(md->map)) {
 		up_write(&md->lock);
 		return -EINVAL;
 	}
@@ -871,8 +996,6 @@ struct block_device_operations dm_blk_dops = {
 module_init(dm_init);
 module_exit(dm_exit);
 
-MODULE_PARM(major, "i");
-MODULE_PARM_DESC(major, "The major number of the device mapper");
 MODULE_DESCRIPTION(DM_NAME " driver");
 MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 MODULE_LICENSE("GPL");

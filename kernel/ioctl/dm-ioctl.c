@@ -560,10 +560,9 @@ static int check_name(const char *name)
 static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 {
 	int r;
-	kdev_t dev;
+	kdev_t dev = 0;
 	struct dm_table *t;
 	struct mapped_device *md;
-	int minor;
 
 	r = check_name(param->name);
 	if (r)
@@ -579,18 +578,17 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 		return r;
 	}
 
-	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
-	    minor(to_kdev_t(param->dev)) : -1;
+	if (param->flags & DM_PERSISTENT_DEV_FLAG)
+		dev = to_kdev_t(param->dev);
 
-	r = dm_create(minor, t, &md);
+	r = dm_create(dev, t, &md);
 	if (r) {
 		dm_table_put(t);
 		return r;
 	}
 	dm_table_put(t);	/* md will have grabbed its own reference */
 
-	dev = dm_kdev(md);
-	set_device_ro(dev, (param->flags & DM_READONLY_FLAG));
+	set_device_ro(dm_kdev(md), (param->flags & DM_READONLY_FLAG));
 	r = dm_hash_insert(param->name, *param->uuid ? param->uuid : NULL, md);
 	dm_put(md);
 
