@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Thu Dec 20 20:11:26 2001
++++ linux/drivers/md/Config.in	Fri Dec 21 20:26:01 2001
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Thu Dec 20 20:11:27 2001
++++ linux/drivers/md/Makefile	Fri Dec 21 20:26:01 2001
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -41,7 +41,7 @@ diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 +
 diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper.h
 --- linux-2.4.16/drivers/md/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/device-mapper.h	Wed Dec 19 19:42:09 2001
++++ linux/drivers/md/device-mapper.h	Fri Dec 21 18:44:59 2001
 @@ -0,0 +1,58 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -67,7 +67,7 @@ diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 + * Prototypes for functions for a target
 + */
 +typedef int (*dm_ctr_fn)(struct dm_table *t, offset_t b, offset_t l,
-+			 const char *args, void **context);
++			 int argc, char **argv, void **context);
 +typedef void (*dm_dtr_fn)(struct dm_table *t, void *c);
 +typedef int (*dm_map_fn)(struct buffer_head *bh, int rw, void *context);
 +typedef int (*dm_err_fn)(struct buffer_head *bh, int rw, void *context);
@@ -76,8 +76,8 @@ diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +void dm_error(const char *message);
 +
 +/*
-+ * Contructors should call these functions to ensure destination devices 
-+ * are opened/closed correctly 
++ * Constructors should call these functions to ensure destination devices
++ * are opened/closed correctly
 + */
 +int dm_table_get_device(struct dm_table *t, const char *path,
 +			offset_t start, offset_t len, struct dm_dev **result);
@@ -103,11 +103,9 @@ diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 --- linux-2.4.16/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Thu Dec 20 12:23:38 2001
-@@ -0,0 +1,118 @@
++++ linux/drivers/md/dm-linear.c	Fri Dec 21 19:38:40 2001
+@@ -0,0 +1,117 @@
 +/*
-+ * dm-linear.c
-+ *
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
 + * This file is released under the GPL.
@@ -135,13 +133,16 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 + * Construct a linear mapping: <dev_path> <offset>
 + */
 +static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
-+		      const char *args, void **context)
++		      int argc, char **argv, void **context)
 +{
 +	struct linear_c *lc;
-+	unsigned long start;	/* FIXME: unsigned long long with sscanf fix */
++	unsigned long start;	/* FIXME: unsigned long long */
++	char *end;
 +
-+	int r = -EINVAL;
-+	char path[4096];
++	if (argc != 2) {
++		*context = "dm-linear: Not enough arguments";
++		return -EINVAL;
++	}
 +
 +	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
 +	if (lc == NULL) {
@@ -149,15 +150,14 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +		return -ENOMEM;
 +	}
 +
-+	if (sscanf(args, "%4096s %lu", path, &start) != 2) {
-+		*context = "dm-linear: Missing target parms: dev_path sector";
-+		return -ENOMEM;
-+        }
++	start = simple_strtoul(argv[1], &end, 10);
++	if (*end) {
++		*context = "dm-linear: Invalid device sector";
++		goto bad;
++	}
 +
-+	r = dm_table_get_device(t, path, start, l, &lc->dev);
-+	if (r) {
++	if (dm_table_get_device(t, argv[0], start, l, &lc->dev)) {
 +		*context = "dm-linear: Device lookup failed";
-+		r = -ENXIO;
 +		goto bad;
 +	}
 +
@@ -167,7 +167,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +
 +      bad:
 +	kfree(lc);
-+	return r;
++	return -EINVAL;
 +}
 +
 +static void linear_dtr(struct dm_table *t, void *c)
@@ -194,7 +194,6 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +	ctr:	linear_ctr,
 +	dtr:	linear_dtr,
 +	map:	linear_map,
-+	err:	NULL
 +};
 +
 +static int __init linear_init(void)
@@ -202,8 +201,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +	int r = dm_register_target(&linear_target);
 +
 +	if (r < 0)
-+		printk(KERN_ERR
-+		       "Device mapper: Linear: register failed %d\n", r);
++		printk(KERN_ERR "Device mapper: Linear: "
++		       "register failed %d\n", r);
 +
 +	return r;
 +}
@@ -213,8 +212,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +	int r = dm_unregister_target(&linear_target);
 +
 +	if (r < 0)
-+		printk(KERN_ERR
-+		       "Device mapper: Linear: unregister failed %d\n", r);
++		printk(KERN_ERR "Device mapper: Linear: "
++		       "unregister failed %d\n", r);
 +}
 +
 +module_init(linear_init);
@@ -225,8 +224,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +MODULE_LICENSE("GPL");
 diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 --- linux-2.4.16/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Wed Dec 19 20:33:01 2001
-@@ -0,0 +1,192 @@
++++ linux/drivers/md/dm-stripe.c	Fri Dec 21 19:09:00 2001
+@@ -0,0 +1,210 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -274,22 +273,21 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 + * Parse a single <dev> <sector> pair
 + */
 +static int get_stripe(struct dm_table *t, struct stripe_c *sc,
-+		      int stripe, const char *args)
++		      int stripe, char **argv)
 +{
-+	int n, r;
-+	char path[4096];
++	char *end;
 +	unsigned long start;
 +
-+	if (sscanf(args, "%4096s %lu %n", path, &start, &n) != 2)
++	start = simple_strtoul(argv[1], &end, 10);
++	if (*end)
 +		return -EINVAL;
 +
-+	r = dm_table_get_device(t, path, start, sc->stripe_width,
-+				&sc->stripe[stripe].dev);
-+	if (r)
++	if (dm_table_get_device(t, argv[0], start, sc->stripe_width,
++				&sc->stripe[stripe].dev))
 +		return -ENXIO;
 +
 +	sc->stripe[stripe].physical_start = start;
-+	return n;
++	return 0;
 +}
 +
 +/*
@@ -297,15 +295,28 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 + * <number of stripes> <chunk size (2^^n)> [<dev_path> <offset>]+
 + */
 +static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
-+		      const char *args, void **context)
++		      int argc, char **argv, void **context)
 +{
 +	struct stripe_c *sc;
 +	uint32_t stripes;
 +	uint32_t chunk_size;
-+	int n, i;
++	char *end;
++	int r, i;
 +
-+	if (sscanf(args, "%u %u %n", &stripes, &chunk_size, &n) != 2) {
-+		*context = "dm-stripe: Couldn't parse <stripes> <chunk size>";
++	if (argc < 2) {
++		*context = "dm-stripe: Not enough arguments";
++		return -EINVAL;
++	}
++
++	stripes = simple_strtoul(argv[0], &end, 10);
++	if (*end) {
++		*context = "dm-stripe: Invalid stripe count";
++		return -EINVAL;
++	}
++
++	chunk_size =simple_strtoul(argv[1], &end, 10);
++	if (*end) {
++		*context = "dm-stripe: Invalid chunk_size";
 +		return -EINVAL;
 +	}
 +
@@ -317,7 +328,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +
 +	sc = alloc_context(stripes);
 +	if (!sc) {
-+		*context = "dm-stripe: Memory allocation for striped context"
++		*context = "dm-stripe: Memory allocation for striped context "
 +			   "failed";
 +		return -ENOMEM;
 +	}
@@ -329,7 +340,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +	/*
 +	 * chunk_size is a power of two
 +	 */
-+	if (!chunk_size || chunk_size & (chunk_size - 1)) {
++	if (!chunk_size || (chunk_size & (chunk_size - 1))) {
 +		*context = "dm-stripe: Invalid chunk size";
 +		kfree(sc);
 +		return -EINVAL;
@@ -344,14 +355,21 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +	 * Get the stripe destinations.
 +	 */
 +	for (i = 0; i < stripes; i++) {
-+		args += n;
-+		n = get_stripe(t, sc, i, args);
++		if (argc < 2) {
++			*context = "dm-stripe: Not enough destinations "
++				   "specified";
++			kfree(sc);
++			return -EINVAL;
++		}
 +
-+		if (n < 0) {
++		argv += 2;
++
++		r = get_stripe(t, sc, i, argv);
++		if (r < 0) {
 +			*context = "dm-stripe: Couldn't parse stripe "
 +				   "destination";
 +			kfree(sc);
-+			return n;
++			return r;
 +		}
 +	}
 +
@@ -391,7 +409,6 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +	ctr:	stripe_ctr,
 +	dtr:	stripe_dtr,
 +	map:	stripe_map,
-+	err:	NULL
 +};
 +
 +static int __init stripe_init(void)
@@ -825,8 +842,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +EXPORT_SYMBOL(dm_table_put_device);
 diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 --- linux-2.4.16/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-target.c	Wed Dec 19 19:57:41 2001
-@@ -0,0 +1,190 @@
++++ linux/drivers/md/dm-target.c	Fri Dec 21 19:29:01 2001
+@@ -0,0 +1,237 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
 + *
@@ -847,6 +864,54 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +static rwlock_t _lock = RW_LOCK_UNLOCKED;
 +
 +#define DM_MOD_NAME_SIZE 32
++
++/*
++ * Destructively splits up the argument list to pass to ctr.
++ */
++int split_args(int max, int *argc, char **argv, char *input)
++{
++	char *start, *end = input, *out;
++	*argc = 0;
++
++	while (1) {
++		start = end;
++
++		/* Skip whitespace */
++		while(*start && isspace(*start))
++			start++;
++
++		if (!*start)
++			break; /* success, we hit the end */
++
++		/* 'out' is used to remove any back-quotes */
++		end = out = start;
++		while(*end) {
++			/* Everything apart from '\0' can be quoted */
++			if (*end == '\\' && *(end + 1)) {
++				*out++ = *(end + 1);
++				end += 2;
++				continue;
++			}
++
++			if (isspace(*end))
++				break; /* end of token */
++
++			*out++ = *end++;
++		}
++
++		/* have we already filled the array ? */
++		if ((*argc + 1) > max)
++			return -EINVAL;
++
++		/* terminate the string and put it in the array */
++		*out = '\0';
++		end++;
++		argv[*argc] = start;
++		(*argc)++;
++	}
++
++	return 0;
++}
 +
 +static inline struct tt_internal *__find_target_type(const char *name)
 +{
@@ -978,7 +1043,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 + * up LV's that have holes in them.
 + */
 +static int io_err_ctr(struct dm_table *t, offset_t b, offset_t l,
-+		      const char *args, void **context)
++		      int argc, char **args, void **context)
 +{
 +	*context = NULL;
 +	return 0;
@@ -1001,7 +1066,6 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +	ctr:	io_err_ctr,
 +	dtr:	io_err_dtr,
 +	map:	io_err_map,
-+	err:	NULL
 +};
 +
 +int dm_target_init(void)
@@ -1019,7 +1083,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +EXPORT_SYMBOL(dm_unregister_target);
 diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.16/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Thu Dec 20 20:10:49 2001
++++ linux/drivers/md/dm.c	Fri Dec 21 20:25:17 2001
 @@ -0,0 +1,921 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -1040,7 +1104,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +#define DEVICE_NAME "device-mapper"	/* Name for messaging */
 +
 +static const char *_name = DEVICE_NAME;
-+static const char *_version = "0.90.03-fs (2001-12-20)";
++static const char *_version = "0.90.04-fs (2001-12-21)";
 +static const char *_email = "lvm-devel@lists.sistina.com";
 +
 +static int _major = 0;
@@ -1129,7 +1193,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	return 0;
 +}
 +
-+static void __exit local_exit(void)
++static void local_exit(void)
 +{
 +	if (kmem_cache_destroy(_io_hook_cache))
 +		WARN("it looks like there are still some io_hooks allocated");
@@ -1944,8 +2008,8 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +MODULE_LICENSE("GPL");
 diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 --- linux-2.4.16/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Wed Dec 19 19:42:58 2001
-@@ -0,0 +1,157 @@
++++ linux/drivers/md/dm.h	Fri Dec 21 19:28:50 2001
+@@ -0,0 +1,164 @@
 +/*
 + * Internal header file for device mapper
 + *
@@ -1975,6 +2039,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +#define NODE_SIZE L1_CACHE_BYTES
 +#define KEYS_PER_NODE (NODE_SIZE / sizeof(offset_t))
 +#define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
++#define MAX_ARGS 32
 +
 +/*
 + * List of devices that a metadevice uses and should open/close.
@@ -2050,6 +2115,12 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +struct target_type *dm_get_target_type(const char *name);
 +void dm_put_target_type(struct target_type *t);
 +void dm_target_exit(void);
++
++/*
++ * Destructively splits argument list to pass to ctr.
++ */
++int split_args(int max, int *argc, char **argv, char *input);
++
 +
 +/* dm.c */
 +struct mapped_device *dm_get(const char *name);
@@ -3013,8 +3084,8 @@ diff -ruN linux-2.4.16/drivers/md/dmfs-suspend.c linux/drivers/md/dmfs-suspend.c
 +}
 diff -ruN linux-2.4.16/drivers/md/dmfs-table.c linux/drivers/md/dmfs-table.c
 --- linux-2.4.16/drivers/md/dmfs-table.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dmfs-table.c	Thu Dec 20 18:59:15 2001
-@@ -0,0 +1,381 @@
++++ linux/drivers/md/dmfs-table.c	Fri Dec 21 19:27:52 2001
+@@ -0,0 +1,388 @@
 +/*
 + * dmfs-table.c
 + *
@@ -3063,6 +3134,8 @@ diff -ruN linux-2.4.16/drivers/md/dmfs-table.c linux/drivers/md/dmfs-table.c
 +	char *msg;
 +	int pos = 0;
 +	char target[33];
++	char *argv[MAX_ARGS];
++	int argc;
 +
 +	static char *err_table[] = {
 +		"Missing/Invalid start argument",
@@ -3086,8 +3159,13 @@ diff -ruN linux-2.4.16/drivers/md/dmfs-table.c linux/drivers/md/dmfs-table.c
 +	msg = "Target type unknown";
 +	ttype = dm_get_target_type(target);
 +	if (ttype) {
++		msg = "Too many arguments";
++		rv = split_args(MAX_ARGS, &argc, argv, str);
++		if (rv < 0)
++			goto out;
++
 +		msg = "This message should never appear (constructor error)";
-+		rv = ttype->ctr(t, start, size, str, &context);
++		rv = ttype->ctr(t, start, size, argc, argv, &context);
 +		msg = context;
 +		if (rv == 0) {
 +			msg = "Error adding target to table";
@@ -3423,7 +3501,7 @@ diff -ruN linux-2.4.16/drivers/md/dmfs.h linux/drivers/md/dmfs.h
 +#endif				/* LINUX_DMFS_H */
 diff -ruN linux-2.4.16/fs/namespace.c linux/fs/namespace.c
 --- linux-2.4.16/fs/namespace.c	Thu Dec  6 15:57:56 2001
-+++ linux/fs/namespace.c	Thu Dec 20 20:11:27 2001
++++ linux/fs/namespace.c	Fri Dec 21 20:26:01 2001
 @@ -332,7 +332,7 @@
  	}
  }
@@ -3435,7 +3513,7 @@ diff -ruN linux-2.4.16/fs/namespace.c linux/fs/namespace.c
  	int retval = 0;
 diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-mapper.h
 --- linux-2.4.16/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Wed Dec 19 19:42:09 2001
++++ linux/include/linux/device-mapper.h	Fri Dec 21 18:44:59 2001
 @@ -0,0 +1,58 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -3461,7 +3539,7 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 + * Prototypes for functions for a target
 + */
 +typedef int (*dm_ctr_fn)(struct dm_table *t, offset_t b, offset_t l,
-+			 const char *args, void **context);
++			 int argc, char **argv, void **context);
 +typedef void (*dm_dtr_fn)(struct dm_table *t, void *c);
 +typedef int (*dm_map_fn)(struct buffer_head *bh, int rw, void *context);
 +typedef int (*dm_err_fn)(struct buffer_head *bh, int rw, void *context);
@@ -3470,8 +3548,8 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +void dm_error(const char *message);
 +
 +/*
-+ * Contructors should call these functions to ensure destination devices 
-+ * are opened/closed correctly 
++ * Constructors should call these functions to ensure destination devices
++ * are opened/closed correctly
 + */
 +int dm_table_get_device(struct dm_table *t, const char *path,
 +			offset_t start, offset_t len, struct dm_dev **result);
@@ -3497,7 +3575,7 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
 --- linux-2.4.16/include/linux/fs.h	Thu Dec  6 15:57:58 2001
-+++ linux/include/linux/fs.h	Thu Dec 20 20:11:27 2001
++++ linux/include/linux/fs.h	Fri Dec 21 20:26:01 2001
 @@ -980,6 +980,7 @@
  extern struct vfsmount *kern_mount(struct file_system_type *);
  extern int may_umount(struct vfsmount *);
@@ -3508,7 +3586,7 @@ diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
  
 diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
 --- linux-2.4.16/include/linux/seq_file.h	Thu Dec  6 15:57:56 2001
-+++ linux/include/linux/seq_file.h	Thu Dec 20 20:11:27 2001
++++ linux/include/linux/seq_file.h	Fri Dec 21 20:26:01 2001
 @@ -12,6 +12,7 @@
  	loff_t index;
  	struct semaphore sem;
@@ -3519,7 +3597,7 @@ diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
  struct seq_operations {
 diff -ruN linux-2.4.16/kernel/ksyms.c linux/kernel/ksyms.c
 --- linux-2.4.16/kernel/ksyms.c	Thu Dec  6 15:57:56 2001
-+++ linux/kernel/ksyms.c	Thu Dec 20 20:11:27 2001
++++ linux/kernel/ksyms.c	Fri Dec 21 20:26:01 2001
 @@ -46,6 +46,7 @@
  #include <linux/tty.h>
  #include <linux/in6.h>
