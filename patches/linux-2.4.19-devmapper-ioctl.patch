@@ -1,16 +1,18 @@
-diff -ruN linux-2.4.19-rc1/Documentation/Configure.help linux/Documentation/Configure.help
---- linux-2.4.19-rc1/Documentation/Configure.help	Tue Jun 25 14:14:05 2002
-+++ linux/Documentation/Configure.help	Tue Jun 25 21:33:16 2002
-@@ -1775,6 +1775,18 @@
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/Documentation/Configure.help linux-2.4.19-dm/Documentation/Configure.help
+--- linux-2.4.19/Documentation/Configure.help	Wed Aug 14 11:49:48 2002
++++ linux-2.4.19-dm/Documentation/Configure.help	Wed Aug 14 17:42:52 2002
+@@ -1775,6 +1775,20 @@
    want), say M here and read <file:Documentation/modules.txt>.  The
    module will be called lvm-mod.o.
  
 +Device-mapper support
 +CONFIG_BLK_DEV_DM
-+  This option lets you create logical block devices dynamically by
-+  joining together segments of existing block devices.  This mechanism
-+  is used by the new version of the logical volume manager under
-+  development, LVM2.
++  Device-mapper is a low level volume manager.  It works by allowing
++  people to specify mappings for ranges of logical sectors.  Various
++  mapping types are available, in addition people may write their own
++  modules containing custom mappings if they wish.
++
++  Higher level volume managers such as LVM2 use this driver.
 +
 +  If you want to compile this as a module, say M here and read 
 +  <file:Documentation/modules.txt>.  The module will be called dm-mod.o.
@@ -20,9 +22,26 @@ diff -ruN linux-2.4.19-rc1/Documentation/Configure.help linux/Documentation/Conf
  Multiple devices driver support (RAID and LVM)
  CONFIG_MD
    Support multiple physical spindles through a single logical device.
-diff -ruN linux-2.4.19-rc1/drivers/md/Config.in linux/drivers/md/Config.in
---- linux-2.4.19-rc1/drivers/md/Config.in	Tue Jun 25 14:14:54 2002
-+++ linux/drivers/md/Config.in	Tue Jun 25 21:33:15 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/MAINTAINERS linux-2.4.19-dm/MAINTAINERS
+--- linux-2.4.19/MAINTAINERS	Wed Aug 14 11:49:45 2002
++++ linux-2.4.19-dm/MAINTAINERS	Wed Aug 14 17:42:52 2002
+@@ -426,6 +426,13 @@
+ W:	http://www.debian.org/~dz/i8k/
+ S:	Maintained
+ 
++DEVICE MAPPER
++P:	Joe Thornber
++M:	dm@uk.sistina.com
++L:	linux-LVM@sistina.com
++W:	http://www.sistina.com/lvm
++S:	Maintained
++
+ DEVICE NUMBER REGISTRY
+ P:	H. Peter Anvin
+ M:	hpa@zytor.com
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/Config.in linux-2.4.19-dm/drivers/md/Config.in
+--- linux-2.4.19/drivers/md/Config.in	Wed Aug 14 11:51:06 2002
++++ linux-2.4.19-dm/drivers/md/Config.in	Wed Aug 14 17:42:52 2002
 @@ -14,5 +14,8 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -32,9 +51,9 @@ diff -ruN linux-2.4.19-rc1/drivers/md/Config.in linux/drivers/md/Config.in
 +fi
  
  endmenu
-diff -ruN linux-2.4.19-rc1/drivers/md/Makefile linux/drivers/md/Makefile
---- linux-2.4.19-rc1/drivers/md/Makefile	Tue Jun 25 14:14:54 2002
-+++ linux/drivers/md/Makefile	Tue Jun 25 21:33:16 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/Makefile linux-2.4.19-dm/drivers/md/Makefile
+--- linux-2.4.19/drivers/md/Makefile	Wed Aug 14 11:51:06 2002
++++ linux-2.4.19-dm/drivers/md/Makefile	Wed Aug 14 17:45:33 2002
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -45,7 +64,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/Makefile linux/drivers/md/Makefile
  lvm-mod-objs	:= lvm.o lvm-snap.o lvm-fs.o
 +dm-mod-objs	:= dm.o dm-table.o dm-target.o dm-ioctl.o \
 +		   dm-linear.o dm-stripe.o dm-snapshot.o dm-exception-store.o \
-+		   kcopyd.o dm-mirror.o
++		   kcopyd.o
  
  # Note: link order is important.  All raid personalities
  # and xor.o must come before md.o, as they each initialise 
@@ -62,9 +81,9 @@ diff -ruN linux-2.4.19-rc1/drivers/md/Makefile linux/drivers/md/Makefile
 +
 +dm-mod.o: $(dm-mod-objs)
 +	$(LD) -r -o $@ $(dm-mod-objs)
-diff -ruN linux-2.4.19-rc1/drivers/md/dm-exception-store.c linux/drivers/md/dm-exception-store.c
---- linux-2.4.19-rc1/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-exception-store.c	Thu Jun 13 14:58:15 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-exception-store.c linux-2.4.19-dm/drivers/md/dm-exception-store.c
+--- linux-2.4.19/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-exception-store.c	Wed Aug 14 17:42:59 2002
 @@ -0,0 +1,698 @@
 +/*
 + * dm-snapshot.c
@@ -764,10 +783,10 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-exception-store.c linux/drivers/md/dm-e
 +
 +	return 0;
 +}
-diff -ruN linux-2.4.19-rc1/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
---- linux-2.4.19-rc1/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Wed Jun 19 13:16:33 2002
-@@ -0,0 +1,807 @@
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-ioctl.c linux-2.4.19-dm/drivers/md/dm-ioctl.c
+--- linux-2.4.19/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-ioctl.c	Wed Aug 14 17:42:59 2002
+@@ -0,0 +1,830 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -1022,13 +1041,23 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	return results_to_user(user, param, NULL, 0);
 +}
 +
++static inline int get_mode(struct dm_ioctl *param)
++{
++	int mode = FMODE_READ | FMODE_WRITE;
++
++	if (param->flags & DM_READONLY_FLAG)
++		mode = FMODE_READ;
++
++	return mode;
++}
++
 +static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 +{
 +	int r, ro;
 +	struct dm_table *t;
 +	int minor;
 +
-+	r = dm_table_create(&t);
++	r = dm_table_create(&t, get_mode(param));
 +	if (r)
 +		return r;
 +
@@ -1293,7 +1322,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	struct mapped_device *md;
 +	struct dm_table *t;
 +
-+	r = dm_table_create(&t);
++	r = dm_table_create(&t, get_mode(param));
 +	if (r)
 +		return r;
 +
@@ -1446,6 +1475,10 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +static int validate_params(uint cmd, struct dm_ioctl *param)
 +{
++	/* Ignores parameters */
++	if (cmd == DM_REMOVE_ALL_CMD)
++		return 0;
++
 +	/* Unless creating, either name of uuid but not both */
 +	if (cmd != DM_DEV_CREATE_CMD) {
 +		if ((!*param->uuid && !*param->name) ||
@@ -1529,17 +1562,9 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	fops:  &_ctl_fops
 +};
 +
-+/* Create misc character device and link to DM_DIR/control */
-+int __init dm_interface_init(void)
-+{
++static int __init dm_devfs_init(void) {
 +	int r;
 +	char rname[64];
-+
-+	r = misc_register(&_dm_misc);
-+	if (r) {
-+		DMERR("misc_register failed for control device");
-+		return r;
-+	}
 +
 +	r = devfs_generate_path(_dm_misc.devfs_handle, rname + 3,
 +				sizeof rname - 3);
@@ -1548,7 +1573,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +	if (r < 0) {
 +		DMERR("devfs_generate_path failed for control device");
-+		goto failed;
++		return r;
 +	}
 +
 +	strncpy(rname + r, "../", 3);
@@ -1556,18 +1581,35 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +			     DEVFS_FL_DEFAULT, rname + r, &_ctl_handle, NULL);
 +	if (r) {
 +		DMERR("devfs_mk_symlink failed for control device");
-+		goto failed;
++		return r;
 +	}
 +	devfs_auto_unregister(_dm_misc.devfs_handle, _ctl_handle);
++
++	return 0;
++}
++
++/* Create misc character device and link to DM_DIR/control */
++int __init dm_interface_init(void)
++{
++	int r;
++
++	r = misc_register(&_dm_misc);
++	if (r) {
++		DMERR("misc_register failed for control device");
++		return r;
++	}
++
++	r = dm_devfs_init();
++	if (r) {
++		misc_deregister(&_dm_misc);
++		return r;
++	}
 +
 +	DMINFO("%d.%d.%d%s initialised: %s", DM_VERSION_MAJOR,
 +	       DM_VERSION_MINOR, DM_VERSION_PATCHLEVEL, DM_VERSION_EXTRA,
 +	       DM_DRIVER_EMAIL);
-+	return 0;
 +
-+      failed:
-+	misc_deregister(&_dm_misc);
-+	return r;
++	return 0;
 +}
 +
 +void dm_interface_exit(void)
@@ -1575,9 +1617,9 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	if (misc_deregister(&_dm_misc) < 0)
 +		DMERR("misc_deregister failed for control device");
 +}
-diff -ruN linux-2.4.19-rc1/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
---- linux-2.4.19-rc1/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Thu Jun 13 14:59:09 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-linear.c linux-2.4.19-dm/drivers/md/dm-linear.c
+--- linux-2.4.19/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-linear.c	Wed Aug 14 17:42:59 2002
 @@ -0,0 +1,125 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -1627,7 +1669,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +		goto bad;
 +	}
 +
-+	if (dm_table_get_device(t, argv[0], start, l, &lc->dev)) {
++	if (dm_table_get_device(t, argv[0], start, l, t->mode, &lc->dev)) {
 +		*context = "dm-linear: Device lookup failed";
 +		goto bad;
 +	}
@@ -1704,357 +1746,10 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +	if (r < 0)
 +		DMERR("linear: unregister failed %d", r);
 +}
-diff -ruN linux-2.4.19-rc1/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
---- linux-2.4.19-rc1/drivers/md/dm-mirror.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-mirror.c	Wed Jun 19 13:28:45 2002
-@@ -0,0 +1,343 @@
-+/*
-+ * Copyright (C) 2002 Sistina Software (UK) Limited.
-+ *
-+ * This file is released under the GPL.
-+ */
-+
-+#include "dm.h"
-+#include "kcopyd.h"
-+
-+#include <linux/module.h>
-+#include <linux/init.h>
-+#include <linux/blkdev.h>
-+
-+/* kcopyd priority of mirror operations */
-+#define MIRROR_COPY_PRIORITY 5
-+
-+/*
-+ * The percentage increment we will wake up users at
-+ */
-+#define WAKE_UP_PERCENT 5
-+
-+/*
-+ * Mirror: maps a mirror range of a device.
-+ */
-+struct mirror_c {
-+	struct dm_dev *fromdev;
-+	struct dm_dev *todev;
-+
-+	unsigned long from_delta;
-+	unsigned long to_delta;
-+
-+	unsigned long frompos;
-+	unsigned long topos;
-+
-+	unsigned int chunksize;
-+	unsigned long got_to;
-+	unsigned long size;
-+	struct rw_semaphore lock;
-+	struct buffer_head *bhstring;
-+
-+	struct dm_table *table;
-+
-+	int last_percent;
-+
-+	int error;
-+};
-+
-+/* Called when a duplicating I/O has finished */
-+static void mirror_callback(int err, void *context)
-+{
-+	struct mirror_c *lc = (struct mirror_c *) context;
-+
-+	/* Flag error if it failed */
-+	if (err) {
-+		DMERR("Mirror copy to %s failed", kdevname(lc->todev->dev));
-+		lc->error = 1;
-+		dm_table_event(lc->table);
-+	}
-+}
-+
-+static void mirror_bh(struct mirror_c *mc, struct buffer_head *bh)
-+{
-+	struct kcopyd_region dest;
-+
-+	dest.dev = mc->todev->dev;
-+	dest.sector = bh->b_rsector - mc->from_delta + mc->to_delta;
-+	dest.count = bh->b_size / 512;
-+	kcopyd_write_pages(&dest, 1, &bh->b_page,
-+			   ((long) bh->b_data -
-+			    (long) page_address(bh->b_page)) / 512,
-+			   mirror_callback, mc);
-+}
-+
-+/* Called when the copy I/O has finished */
-+static void copy_callback(int err, void *context)
-+{
-+	struct mirror_c *lc = (struct mirror_c *) context;
-+	struct buffer_head *bh;
-+
-+	/* Submit, and mirror any pending BHs */
-+	down_write(&lc->lock);
-+
-+	bh = lc->bhstring;
-+	lc->bhstring = NULL;
-+	up_write(&lc->lock);
-+
-+	while (bh) {
-+		struct buffer_head *nextbh = bh->b_reqnext;
-+		bh->b_reqnext = NULL;
-+		mirror_bh(lc, bh);
-+		generic_make_request(WRITE, bh);
-+		bh = nextbh;
-+	}
-+
-+	if (err) {
-+		DMERR("Mirror block IO failed"); /* More detail to follow... */
-+		lc->error = 1;
-+		return;
-+	}
-+	if (lc->got_to + lc->chunksize < lc->size) {
-+		int pc = (lc->got_to - lc->from_delta) * 100 / lc->size;
-+		struct kcopyd_region src, dest;
-+
-+		/* Wake up any listeners if we've reached a milestone percentage */
-+		if (pc >= lc->last_percent + WAKE_UP_PERCENT) {
-+			dm_table_event(lc->table);
-+			lc->last_percent = pc - pc % WAKE_UP_PERCENT;
-+		}
-+
-+		/* Do next chunk */
-+		lc->got_to += lc->chunksize;
-+
-+		src.dev = lc->fromdev->dev;
-+		src.sector = lc->frompos + lc->got_to;
-+		src.count = min((unsigned long) lc->chunksize, 
-+				lc->size - lc->got_to);
-+
-+		dest.dev = lc->todev->dev;
-+		dest.sector = lc->topos + lc->got_to;
-+		dest.count = src.count;
-+
-+		if (kcopyd_copy(&src, &dest, copy_callback, lc)) {
-+			lc->error = 1;
-+			return;
-+		}
-+	} else {
-+		/* Finished */
-+		dm_table_event(lc->table);
-+		lc->got_to = lc->size;
-+	}
-+}
-+
-+/*
-+ * Construct a mirror mapping: <dev_path1> <offset> <dev_path2> <offset> <chunk-size> [<priority>]
-+ */
-+static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
-+		      int argc, char **argv, void **context)
-+{
-+	struct mirror_c *lc;
-+	unsigned long offset1, offset2;
-+	char *value;
-+	int priority = MIRROR_COPY_PRIORITY;
-+	int chunksize;
-+	struct kcopyd_region src, dest;
-+
-+	if (argc <= 4) {
-+		*context = "dm-mirror: Not enough arguments";
-+		return -EINVAL;
-+	}
-+
-+	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
-+	if (lc == NULL) {
-+		*context = "dm-mirror: Cannot allocate mirror context";
-+		return -ENOMEM;
-+	}
-+
-+	if (dm_table_get_device(t, argv[0], 0, l, &lc->fromdev)) {
-+		*context = "dm-mirror: Device lookup failed";
-+		goto bad;
-+	}
-+
-+	offset1 = simple_strtoul(argv[1], &value, 10);
-+	if (value == NULL) {
-+		*context = "Invalid offset for dev1";
-+		dm_table_put_device(t, lc->fromdev);
-+		goto bad;
-+	}
-+
-+	if (dm_table_get_device(t, argv[2], 0, l, &lc->todev)) {
-+		*context = "dm-mirror: Device lookup failed";
-+		dm_table_put_device(t, lc->fromdev);
-+		goto bad;
-+	}
-+
-+	offset2 = simple_strtoul(argv[3], &value, 10);
-+	if (value == NULL) {
-+		*context = "Invalid offset for dev2";
-+		goto bad_put;
-+	}
-+
-+	chunksize = simple_strtoul(argv[4], &value, 10);
-+	if (value == NULL || chunksize == 16) {
-+		*context = "Invalid chunk size value";
-+		goto bad_put;
-+	}
-+
-+	if (argc > 5) {
-+		priority = simple_strtoul(argv[5], &value, 10);
-+		if (value == NULL) {
-+			*context = "Invalid priority value";
-+			goto bad_put;
-+		}
-+	}
-+
-+	lc->from_delta = (int) offset1 - (int) b;
-+	lc->to_delta = (int) offset2 - (int) b;
-+	lc->frompos = offset1;
-+	lc->topos = offset2;
-+	lc->error = 0;
-+	lc->bhstring = NULL;
-+	lc->size = l - offset1;
-+	lc->last_percent = 0;
-+	lc->got_to = 0;
-+	lc->chunksize = chunksize;
-+	lc->table = t;
-+	init_rwsem(&lc->lock);
-+	*context = lc;
-+
-+	/* Tell kcopyd to do the biz */
-+	src.dev = lc->fromdev->dev;
-+	src.sector = offset1;
-+	src.count = min((unsigned long) chunksize, lc->size);
-+
-+	dest.dev = lc->todev->dev;
-+	dest.sector = offset2;
-+	dest.count = src.count;
-+
-+	kcopyd_inc_client_count();
-+
-+	if (kcopyd_copy(&src, &dest, copy_callback, lc)) {
-+		DMERR("block copy call failed");
-+		dm_table_put_device(t, lc->fromdev);
-+		dm_table_put_device(t, lc->todev);
-+		kcopyd_dec_client_count();
-+		goto bad;
-+	}
-+	return 0;
-+
-+      bad_put:
-+	dm_table_put_device(t, lc->fromdev);
-+	dm_table_put_device(t, lc->todev);
-+      bad:
-+	kfree(lc);
-+	return -EINVAL;
-+}
-+
-+static void mirror_dtr(struct dm_table *t, void *c)
-+{
-+	struct mirror_c *lc = (struct mirror_c *) c;
-+
-+	dm_table_put_device(t, lc->fromdev);
-+	dm_table_put_device(t, lc->todev);
-+	kfree(c);
-+	kcopyd_dec_client_count();
-+}
-+
-+static int mirror_map(struct buffer_head *bh, int rw, void *context)
-+{
-+	struct mirror_c *lc = (struct mirror_c *) context;
-+
-+	bh->b_rdev = lc->fromdev->dev;
-+	bh->b_rsector = bh->b_rsector + lc->from_delta;
-+
-+	if (rw == WRITE) {
-+		down_write(&lc->lock);
-+
-+		/*
-+		 * If this area is in flight then save it until it's
-+		 * committed to the mirror disk and then submit it and
-+		 * its mirror.
-+		 */
-+		if (bh->b_rsector > lc->got_to &&
-+		    bh->b_rsector <= lc->got_to + lc->chunksize) {
-+			bh->b_reqnext = lc->bhstring;
-+			lc->bhstring = bh;
-+			up_write(&lc->lock);
-+			return 0;
-+		}
-+
-+		/*
-+		 * If we've already copied this block then duplicate
-+		 * it to the mirror device
-+		 */
-+		if (bh->b_rsector < lc->got_to) {
-+			mirror_bh(lc, bh);
-+		}
-+		up_write(&lc->lock);
-+	}
-+	return 1;
-+}
-+
-+static int mirror_status(status_type_t sts_type, char *result, int maxlen,
-+			 void *context)
-+{
-+	struct mirror_c *mc = (struct mirror_c *) context;
-+
-+	switch (sts_type) {
-+	case STATUSTYPE_INFO:
-+		if (mc->error)
-+			snprintf(result, maxlen, "Error");
-+		else
-+			snprintf(result, maxlen, "%ld%%",
-+				 (mc->got_to -
-+				  mc->from_delta) * 100 / mc->size);
-+		break;
-+
-+	case STATUSTYPE_TABLE:
-+		snprintf(result, maxlen, "%s %ld %s %ld %d",
-+			 kdevname(mc->fromdev->dev), mc->frompos,
-+			 kdevname(mc->todev->dev), mc->topos, mc->chunksize);
-+		break;
-+	}
-+	return 0;
-+}
-+
-+static struct target_type mirror_target = {
-+	name:	"mirror",
-+	module:	THIS_MODULE,
-+	ctr:	mirror_ctr,
-+	dtr:	mirror_dtr,
-+	map:	mirror_map,
-+	status:	mirror_status,
-+};
-+
-+int __init dm_mirror_init(void)
-+{
-+	int r;
-+
-+	r = dm_register_target(&mirror_target);
-+	if (r < 0) {
-+		DMERR("mirror: register failed %d", r);
-+	}
-+	return r;
-+}
-+
-+void dm_mirror_exit(void)
-+{
-+	int r = dm_unregister_target(&mirror_target);
-+
-+	if (r < 0)
-+		DMERR("mirror: unregister failed %d", r);
-+}
-+
-+/*
-+ * Overrides for Emacs so that we follow Linus's tabbing style.
-+ * Emacs will notice this stuff at the end of the file and automatically
-+ * adjust the settings for this buffer only.  This must remain at the end
-+ * of the file.
-+ * ---------------------------------------------------------------------------
-+ * Local variables:
-+ * c-file-style: "linux"
-+ * End:
-+ */
-diff -ruN linux-2.4.19-rc1/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
---- linux-2.4.19-rc1/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.c	Thu Jun 13 15:12:59 2002
-@@ -0,0 +1,1182 @@
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-snapshot.c linux-2.4.19-dm/drivers/md/dm-snapshot.c
+--- linux-2.4.19/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-snapshot.c	Wed Aug 14 17:42:59 2002
+@@ -0,0 +1,1169 @@
 +/*
 + * dm-snapshot.c
 + *
@@ -2437,15 +2132,23 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot
 +}
 +
 +/*
-+ * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n>
-+ * <chunk-size>
++ * Round a number up to the nearest 'size' boundary.  size must
++ * be a power of 2.
++ */
++static inline ulong round_up(ulong n, ulong size)
++{
++	size--;
++	return (n + size) & ~size;
++}
++
++/*
++ * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n> <chunk-size>
 + */
 +static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 +			int argc, char **argv, void **context)
 +{
 +	struct dm_snapshot *s;
 +	unsigned long chunk_size;
-+	unsigned long extent_size = 0L;
 +	int r = -EINVAL;
 +	char *persistent;
 +	char *origin_path;
@@ -2454,7 +2157,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot
 +	int blocksize;
 +
 +	if (argc < 4) {
-+		*context = "dm-snapshot: Not enough arguments";
++		*context = "dm-snapshot: requires exactly 4 arguments";
 +		r = -EINVAL;
 +		goto bad;
 +	}
@@ -2476,22 +2179,6 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot
 +		goto bad;
 +	}
 +
-+	/* Get the extent size for persistent snapshots */
-+	if ((*persistent & 0x5f) == 'P') {
-+		if (argc < 5) {
-+			*context = "No extent size specified";
-+			r = -EINVAL;
-+			goto bad;
-+		}
-+
-+		extent_size = simple_strtoul(argv[4], &value, 10);
-+		if (extent_size == 0 || value == NULL) {
-+			*context = "Invalid extent size";
-+			r = -EINVAL;
-+			goto bad;
-+		}
-+	}
-+
 +	s = kmalloc(sizeof(*s), GFP_KERNEL);
 +	if (s == NULL) {
 +		*context = "Cannot allocate snapshot context private structure";
@@ -2499,20 +2186,27 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot
 +		goto bad;
 +	}
 +
-+	r = dm_table_get_device(t, origin_path, 0, 0, &s->origin);
++	r = dm_table_get_device(t, origin_path, 0, 0, FMODE_READ, &s->origin);
 +	if (r) {
 +		*context = "Cannot get origin device";
 +		goto bad_free;
 +	}
 +
-+	r = dm_table_get_device(t, cow_path, 0, 0, &s->cow);
++	r = dm_table_get_device(t, cow_path, 0, 0,
++				FMODE_READ | FMODE_WRITE, &s->cow);
 +	if (r) {
 +		dm_table_put_device(t, s->origin);
 +		*context = "Cannot get COW device";
 +		goto bad_free;
 +	}
 +
-+	/* Validate the extent and chunk sizes against the device block size */
++	/*
++	 * Chunk size must be multiple of page size.  Silently
++	 * round up if it's not.
++	 */
++	chunk_size = round_up(chunk_size, PAGE_SIZE / SECTOR_SIZE);
++
++	/* Validate the chunk size against the device block size */
 +	blocksize = get_hardsect_size(s->cow->dev);
 +	if (chunk_size % (blocksize / SECTOR_SIZE)) {
 +		*context = "Chunk size is not a multiple of device blocksize";
@@ -2520,21 +2214,9 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot
 +		goto bad_putdev;
 +	}
 +
-+	if (extent_size % (blocksize / SECTOR_SIZE)) {
-+		*context = "Extent size is not a multiple of device blocksize";
-+		r = -EINVAL;
-+		goto bad_putdev;
-+	}
-+
 +	/* Check the sizes are small enough to fit in one kiovec */
 +	if (chunk_size > KIO_MAX_SECTORS) {
 +		*context = "Chunk size is too big";
-+		r = -EINVAL;
-+		goto bad_putdev;
-+	}
-+
-+	if (extent_size > KIO_MAX_SECTORS) {
-+		*context = "Extent size is too big";
 +		r = -EINVAL;
 +		goto bad_putdev;
 +	}
@@ -3079,7 +2761,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot
 +		return -EINVAL;
 +	}
 +
-+	r = dm_table_get_device(t, argv[0], 0, l, &dev);
++	r = dm_table_get_device(t, argv[0], 0, l, t->mode, &dev);
 +	if (r) {
 +		*context = "Cannot get target device";
 +		return r;
@@ -3237,9 +2919,9 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot
 + * c-file-style: "linux"
 + * End:
 + */
-diff -ruN linux-2.4.19-rc1/drivers/md/dm-snapshot.h linux/drivers/md/dm-snapshot.h
---- linux-2.4.19-rc1/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.h	Thu Jun 13 16:52:31 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-snapshot.h linux-2.4.19-dm/drivers/md/dm-snapshot.h
+--- linux-2.4.19/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-snapshot.h	Wed Aug 14 17:42:59 2002
 @@ -0,0 +1,147 @@
 +/*
 + * dm-snapshot.c
@@ -3388,9 +3070,9 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-snapshot.h linux/drivers/md/dm-snapshot
 +}
 +
 +#endif
-diff -ruN linux-2.4.19-rc1/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
---- linux-2.4.19-rc1/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Thu Jun 13 15:07:43 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-stripe.c linux-2.4.19-dm/drivers/md/dm-stripe.c
+--- linux-2.4.19/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-stripe.c	Wed Aug 14 17:42:59 2002
 @@ -0,0 +1,234 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -3450,7 +3132,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +		return -EINVAL;
 +
 +	if (dm_table_get_device(t, argv[0], start, sc->stripe_width,
-+				&sc->stripe[stripe].dev))
++				t->mode, &sc->stripe[stripe].dev))
 +		return -ENXIO;
 +
 +	sc->stripe[stripe].physical_start = start;
@@ -3626,10 +3308,10 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +
 +	return;
 +}
-diff -ruN linux-2.4.19-rc1/drivers/md/dm-table.c linux/drivers/md/dm-table.c
---- linux-2.4.19-rc1/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-table.c	Thu Jun 13 17:09:46 2002
-@@ -0,0 +1,421 @@
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-table.c linux-2.4.19-dm/drivers/md/dm-table.c
+--- linux-2.4.19/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-table.c	Wed Aug 14 17:42:59 2002
+@@ -0,0 +1,452 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -3736,7 +3418,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +	return 0;
 +}
 +
-+int dm_table_create(struct dm_table **result)
++int dm_table_create(struct dm_table **result, int mode)
 +{
 +	struct dm_table *t = kmalloc(sizeof(*t), GFP_NOIO);
 +
@@ -3754,6 +3436,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +	}
 +
 +	init_waitqueue_head(&t->eventq);
++	t->mode = mode;
 +	*result = t;
 +	return 0;
 +}
@@ -3876,7 +3559,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +	if (!(d->bd = bdget(kdev_t_to_nr(d->dev))))
 +		return -ENOMEM;
 +
-+	if ((err = blkdev_get(d->bd, FMODE_READ | FMODE_WRITE, 0, BDEV_FILE)))
++	if ((err = blkdev_get(d->bd, d->mode, 0, BDEV_FILE)))
 +		return err;
 +
 +	return 0;
@@ -3916,11 +3599,35 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +}
 +
 +/*
++ * This upgrades the mode on an already open dm_dev.  Being
++ * careful to leave things as they were if we fail to reopen the
++ * device.
++ */
++static int upgrade_mode(struct dm_dev *dd, int new_mode)
++{
++	int r;
++	struct dm_dev dd_copy;
++
++	memcpy(&dd_copy, dd, sizeof(dd_copy));
++
++	dd->mode |= new_mode;
++	dd->bd = NULL;
++	r = open_dev(dd);
++	if (!r)
++		close_dev(&dd_copy);
++	else
++		memcpy(dd, &dd_copy, sizeof(dd_copy));
++
++	return r;
++}
++
++/*
 + * Add a device to the list, or just increment the usage count
 + * if it's already present.
 + */
 +int dm_table_get_device(struct dm_table *t, const char *path,
-+			offset_t start, offset_t len, struct dm_dev **result)
++			offset_t start, offset_t len, int mode,
++			struct dm_dev **result)
 +{
 +	int r;
 +	kdev_t dev;
@@ -3942,6 +3649,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +		if (!dd)
 +			return -ENOMEM;
 +
++		dd->mode = mode;
 +		dd->dev = dev;
 +		dd->bd = NULL;
 +
@@ -3952,6 +3660,11 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +
 +		atomic_set(&dd->count, 0);
 +		list_add(&dd->list, &t->devices);
++
++	} else if (dd->mode != (mode | dd->mode)) {
++		r = upgrade_mode(dd, mode);
++		if (r)
++			return r;
 +	}
 +	atomic_inc(&dd->count);
 +
@@ -4051,9 +3764,9 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +EXPORT_SYMBOL(dm_table_get_device);
 +EXPORT_SYMBOL(dm_table_put_device);
 +EXPORT_SYMBOL(dm_table_event);
-diff -ruN linux-2.4.19-rc1/drivers/md/dm-target.c linux/drivers/md/dm-target.c
---- linux-2.4.19-rc1/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-target.c	Thu Jun 13 15:07:55 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-target.c linux-2.4.19-dm/drivers/md/dm-target.c
+--- linux-2.4.19/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm-target.c	Wed Aug 14 17:42:59 2002
 @@ -0,0 +1,242 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
@@ -4297,10 +4010,10 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
-diff -ruN linux-2.4.19-rc1/drivers/md/dm.c linux/drivers/md/dm.c
---- linux-2.4.19-rc1/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Tue Jun 18 18:29:48 2002
-@@ -0,0 +1,1174 @@
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm.c linux-2.4.19-dm/drivers/md/dm.c
+--- linux-2.4.19/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm.c	Wed Aug 14 17:42:59 2002
+@@ -0,0 +1,1173 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -4308,7 +4021,6 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.c linux/drivers/md/dm.c
 + */
 +
 +#include "dm.h"
-+#include "kcopyd.h"
 +
 +#include <linux/blk.h>
 +#include <linux/blkpg.h>
@@ -4573,7 +4285,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.c linux/drivers/md/dm.c
 +	xx(dm_linear)
 +	xx(dm_stripe)
 +	xx(dm_snapshot)
-+	xx(dm_mirror)
++/*	xx(dm_mirror) */
 +	xx(dm_interface)
 +#undef xx
 +};
@@ -4740,7 +4452,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.c linux/drivers/md/dm.c
 + */
 +static void dec_pending(struct buffer_head *bh, int uptodate)
 +{
-+	struct io_hook *ih = bh->b_bdev_private;
++	struct io_hook *ih = bh->b_private;
 +
 +	if (!uptodate && call_err_fn(ih, bh))
 +		return;
@@ -4750,7 +4462,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.c linux/drivers/md/dm.c
 +		wake_up(&ih->md->wait);
 +
 +	bh->b_end_io = ih->end_io;
-+	bh->b_bdev_private = ih->context;
++	bh->b_private = ih->context;
 +	free_io_hook(ih);
 +
 +	bh->b_end_io(bh, uptodate);
@@ -4813,7 +4525,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.c linux/drivers/md/dm.c
 +	ih->rw = rw;
 +	ih->target = ti;
 +	ih->end_io = bh->b_end_io;
-+	ih->context = bh->b_bdev_private;
++	ih->context = bh->b_private;
 +
 +	r = fn(bh, rw, context);
 +
@@ -4821,7 +4533,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.c linux/drivers/md/dm.c
 +		/* hook the end io request fn */
 +		atomic_inc(&md->pending);
 +		bh->b_end_io = dec_pending;
-+		bh->b_bdev_private = ih;
++		bh->b_private = ih;
 +
 +	} else if (r == 0)
 +		/* we don't need to hook */
@@ -5475,10 +5187,10 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.c linux/drivers/md/dm.c
 +MODULE_DESCRIPTION(DM_NAME " driver");
 +MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 +MODULE_LICENSE("GPL");
-diff -ruN linux-2.4.19-rc1/drivers/md/dm.h linux/drivers/md/dm.h
---- linux-2.4.19-rc1/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Tue Jun 18 20:05:34 2002
-@@ -0,0 +1,233 @@
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm.h linux-2.4.19-dm/drivers/md/dm.h
+--- linux-2.4.19/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/dm.h	Wed Aug 14 17:42:59 2002
+@@ -0,0 +1,242 @@
 +/*
 + * Internal header file for device mapper
 + *
@@ -5522,6 +5234,8 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.h linux/drivers/md/dm.h
 +	atomic_t count;
 +	struct list_head list;
 +
++	int mode;
++
 +	kdev_t dev;
 +	struct block_device *bd;
 +};
@@ -5556,6 +5270,13 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.h linux/drivers/md/dm.h
 +	int num_allocated;
 +	offset_t *highs;
 +	struct target *targets;
++
++	/*
++	 * Indicates the rw permissions for the new logical
++	 * device.  This should be a combination of FMODE_READ
++	 * and FMODE_WRITE.
++	 */
++	int mode;
 +
 +	/* a list of devices used by this table */
 +	struct list_head devices;
@@ -5648,7 +5369,7 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.h linux/drivers/md/dm.h
 +int dm_resume(struct mapped_device *md);
 +
 +/* dm-table.c */
-+int dm_table_create(struct dm_table **result);
++int dm_table_create(struct dm_table **result, int mode);
 +void dm_table_destroy(struct dm_table *t);
 +
 +int dm_table_add_target(struct dm_table *t, offset_t highs,
@@ -5659,14 +5380,6 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.h linux/drivers/md/dm.h
 + * Event handling
 + */
 +void dm_table_event(struct dm_table *t);
-+
-+/* Snapshots */
-+int dm_snapshot_init(void);
-+void dm_snapshot_exit(void);
-+
-+/* dm-mirror.c */
-+int dm_mirror_init(void);
-+void dm_mirror_exit(void);
 +
 +#define DMWARN(f, x...) printk(KERN_WARNING DM_NAME ": " f "\n" , ## x)
 +#define DMERR(f, x...) printk(KERN_ERR DM_NAME ": " f "\n" , ## x)
@@ -5695,27 +5408,35 @@ diff -ruN linux-2.4.19-rc1/drivers/md/dm.h linux/drivers/md/dm.h
 +}
 +
 +/*
-+ * The device-mapper can be driven through one of two interfaces;
-+ * ioctl or filesystem, depending which patch you have applied.
++ * Targets
 + */
-+int __init dm_interface_init(void);
-+void dm_interface_exit(void);
-+
-+/*
-+ * Targets for linear and striped mappings
-+ */
-+
 +int dm_linear_init(void);
 +void dm_linear_exit(void);
 +
 +int dm_stripe_init(void);
 +void dm_stripe_exit(void);
 +
++int dm_snapshot_init(void);
++void dm_snapshot_exit(void);
++
++/* Future */
++/* int dm_mirror_init(void); */
++/* void dm_mirror_exit(void); */
++
++/*
++ * Init functions for the user interface to device-mapper.  At
++ * the moment an ioctl interface on a special char device is
++ * used.  A filesystem based interface would be a nicer way to
++ * go.
++ */
++int __init dm_interface_init(void);
++void dm_interface_exit(void);
++
 +#endif
-diff -ruN linux-2.4.19-rc1/drivers/md/kcopyd.c linux/drivers/md/kcopyd.c
---- linux-2.4.19-rc1/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.c	Thu Jun 13 15:18:21 2002
-@@ -0,0 +1,832 @@
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/kcopyd.c linux-2.4.19-dm/drivers/md/kcopyd.c
+--- linux-2.4.19/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/kcopyd.c	Wed Aug 14 17:42:59 2002
+@@ -0,0 +1,841 @@
 +/*
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
 + *
@@ -5897,12 +5618,21 @@ diff -ruN linux-2.4.19-rc1/drivers/md/kcopyd.c linux/drivers/md/kcopyd.c
 + */
 +static void free_buffer(struct buffer_head *bh)
 +{
-+	int flags;
++	int flags, was_empty;
 +
 +	spin_lock_irqsave(&_buffer_lock, flags);
++	was_empty = (_free_buffers == NULL) ? 1 : 0;
 +	bh->b_reqnext = _free_buffers;
 +	_free_buffers = bh;
 +	spin_unlock_irqrestore(&_buffer_lock, flags);
++
++	/*
++	 * If the buffer list was empty then kcopyd probably went
++	 * to sleep because it ran out of buffer heads, so let's
++	 * wake it up.
++	 */
++	if (was_empty)
++		wake_kcopyd();
 +}
 +
 +/*-----------------------------------------------------------------
@@ -6548,9 +6278,9 @@ diff -ruN linux-2.4.19-rc1/drivers/md/kcopyd.c linux/drivers/md/kcopyd.c
 +
 +	up(&_client_count_sem);
 +}
-diff -ruN linux-2.4.19-rc1/drivers/md/kcopyd.h linux/drivers/md/kcopyd.h
---- linux-2.4.19-rc1/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.h	Thu Jun 13 16:52:29 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/kcopyd.h linux-2.4.19-dm/drivers/md/kcopyd.h
+--- linux-2.4.19/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/drivers/md/kcopyd.h	Wed Aug 14 17:42:59 2002
 @@ -0,0 +1,101 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
@@ -6653,10 +6383,137 @@ diff -ruN linux-2.4.19-rc1/drivers/md/kcopyd.h linux/drivers/md/kcopyd.h
 +void kcopyd_dec_client_count(void);
 +
 +#endif
-diff -ruN linux-2.4.19-rc1/include/linux/device-mapper.h linux/include/linux/device-mapper.h
---- linux-2.4.19-rc1/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Thu Jun 13 15:01:29 2002
-@@ -0,0 +1,62 @@
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/fs/buffer.c linux-2.4.19-dm/fs/buffer.c
+--- linux-2.4.19/fs/buffer.c	Wed Aug 14 11:51:40 2002
++++ linux-2.4.19-dm/fs/buffer.c	Wed Aug 14 17:42:49 2002
+@@ -587,9 +587,10 @@
+ void buffer_insert_inode_queue(struct buffer_head *bh, struct inode *inode)
+ {
+ 	spin_lock(&lru_list_lock);
+-	if (bh->b_inode)
++	if (buffer_inode(bh))
+ 		list_del(&bh->b_inode_buffers);
+-	bh->b_inode = inode;
++	else
++		set_buffer_inode(bh);
+ 	list_add(&bh->b_inode_buffers, &inode->i_dirty_buffers);
+ 	spin_unlock(&lru_list_lock);
+ }
+@@ -597,9 +598,10 @@
+ void buffer_insert_inode_data_queue(struct buffer_head *bh, struct inode *inode)
+ {
+ 	spin_lock(&lru_list_lock);
+-	if (bh->b_inode)
++	if (buffer_inode(bh))
+ 		list_del(&bh->b_inode_buffers);
+-	bh->b_inode = inode;
++	else
++		set_buffer_inode(bh);
+ 	list_add(&bh->b_inode_buffers, &inode->i_dirty_data_buffers);
+ 	spin_unlock(&lru_list_lock);
+ }
+@@ -608,13 +610,13 @@
+    remove_inode_queue functions.  */
+ static void __remove_inode_queue(struct buffer_head *bh)
+ {
+-	bh->b_inode = NULL;
++	clear_buffer_inode(bh);
+ 	list_del(&bh->b_inode_buffers);
+ }
+ 
+ static inline void remove_inode_queue(struct buffer_head *bh)
+ {
+-	if (bh->b_inode)
++	if (buffer_inode(bh))
+ 		__remove_inode_queue(bh);
+ }
+ 
+@@ -746,6 +748,7 @@
+ 	bh->b_list = BUF_CLEAN;
+ 	bh->b_end_io = handler;
+ 	bh->b_private = private;
++	bh->b_journal_head = NULL;
+ }
+ 
+ static void end_buffer_io_async(struct buffer_head * bh, int uptodate)
+@@ -843,9 +846,9 @@
+ 		bh = BH_ENTRY(list->next);
+ 		list_del(&bh->b_inode_buffers);
+ 		if (!buffer_dirty(bh) && !buffer_locked(bh))
+-			bh->b_inode = NULL;
++			clear_buffer_inode(bh);
+ 		else {
+-			bh->b_inode = &tmp;
++			set_buffer_inode(bh);
+ 			list_add(&bh->b_inode_buffers, &tmp.i_dirty_buffers);
+ 			if (buffer_dirty(bh)) {
+ 				get_bh(bh);
+@@ -1138,7 +1141,7 @@
+  */
+ static void __put_unused_buffer_head(struct buffer_head * bh)
+ {
+-	if (bh->b_inode)
++	if (buffer_inode(bh))
+ 		BUG();
+ 	if (nr_unused_buffer_heads >= MAX_UNUSED_BUFFERS) {
+ 		kmem_cache_free(bh_cachep, bh);
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/fs/jbd/journal.c linux-2.4.19-dm/fs/jbd/journal.c
+--- linux-2.4.19/fs/jbd/journal.c	Wed Aug 14 11:51:43 2002
++++ linux-2.4.19-dm/fs/jbd/journal.c	Wed Aug 14 17:42:49 2002
+@@ -1625,8 +1625,8 @@
+  *
+  * Whenever a buffer has an attached journal_head, its ->b_state:BH_JBD bit
+  * is set.  This bit is tested in core kernel code where we need to take
+- * JBD-specific actions.  Testing the zeroness of ->b_private is not reliable
+- * there.
++ * JBD-specific actions.  Testing the zeroness of ->b_journal_head is not
++ * reliable there.
+  *
+  * When a buffer has its BH_JBD bit set, its ->b_count is elevated by one.
+  *
+@@ -1681,9 +1681,9 @@
+ 
+ 		if (buffer_jbd(bh)) {
+ 			/* Someone did it for us! */
+-			J_ASSERT_BH(bh, bh->b_private != NULL);
++			J_ASSERT_BH(bh, bh->b_journal_head != NULL);
+ 			journal_free_journal_head(jh);
+-			jh = bh->b_private;
++			jh = bh->b_journal_head;
+ 		} else {
+ 			/*
+ 			 * We actually don't need jh_splice_lock when
+@@ -1691,7 +1691,7 @@
+ 			 */
+ 			spin_lock(&jh_splice_lock);
+ 			set_bit(BH_JBD, &bh->b_state);
+-			bh->b_private = jh;
++			bh->b_journal_head = jh;
+ 			jh->b_bh = bh;
+ 			atomic_inc(&bh->b_count);
+ 			spin_unlock(&jh_splice_lock);
+@@ -1700,7 +1700,7 @@
+ 	}
+ 	jh->b_jcount++;
+ 	spin_unlock(&journal_datalist_lock);
+-	return bh->b_private;
++	return bh->b_journal_head;
+ }
+ 
+ /*
+@@ -1733,7 +1733,7 @@
+ 			J_ASSERT_BH(bh, jh2bh(jh) == bh);
+ 			BUFFER_TRACE(bh, "remove journal_head");
+ 			spin_lock(&jh_splice_lock);
+-			bh->b_private = NULL;
++			bh->b_journal_head = NULL;
+ 			jh->b_bh = NULL;	/* debug, really */
+ 			clear_bit(BH_JBD, &bh->b_state);
+ 			__brelse(bh);
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/include/linux/device-mapper.h linux-2.4.19-dm/include/linux/device-mapper.h
+--- linux-2.4.19/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/include/linux/device-mapper.h	Wed Aug 14 17:42:59 2002
+@@ -0,0 +1,63 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -6666,7 +6523,7 @@ diff -ruN linux-2.4.19-rc1/include/linux/device-mapper.h linux/include/linux/dev
 +#ifndef _LINUX_DEVICE_MAPPER_H
 +#define _LINUX_DEVICE_MAPPER_H
 +
-+#define DM_DIR "device-mapper"	/* Slashes not supported */
++#define DM_DIR "mapper"	/* Slashes not supported */
 +#define DM_MAX_TYPE_NAME 16
 +#define DM_NAME_LEN 128
 +#define DM_UUID_LEN 129
@@ -6697,7 +6554,8 @@ diff -ruN linux-2.4.19-rc1/include/linux/device-mapper.h linux/include/linux/dev
 + * are opened/closed correctly
 + */
 +int dm_table_get_device(struct dm_table *t, const char *path,
-+			offset_t start, offset_t len, struct dm_dev **result);
++			offset_t start, offset_t len,
++			int mode, struct dm_dev **result);
 +void dm_table_put_device(struct dm_table *table, struct dm_dev *d);
 +
 +/*
@@ -6719,9 +6577,9 @@ diff -ruN linux-2.4.19-rc1/include/linux/device-mapper.h linux/include/linux/dev
 +#endif				/* __KERNEL__ */
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
-diff -ruN linux-2.4.19-rc1/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
---- linux-2.4.19-rc1/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Tue Jun 25 17:40:32 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/include/linux/dm-ioctl.h linux-2.4.19-dm/include/linux/dm-ioctl.h
+--- linux-2.4.19/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/include/linux/dm-ioctl.h	Wed Aug 14 17:42:59 2002
 @@ -0,0 +1,145 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6852,8 +6710,8 @@ diff -ruN linux-2.4.19-rc1/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl
 +
 +#define DM_VERSION_MAJOR	1
 +#define DM_VERSION_MINOR	0
-+#define DM_VERSION_PATCHLEVEL	1
-+#define DM_VERSION_EXTRA	"-ioctl (2002-06-26)"
++#define DM_VERSION_PATCHLEVEL	3
++#define DM_VERSION_EXTRA	"-ioctl (2002-08-14)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	0x00000001
@@ -6868,24 +6726,67 @@ diff -ruN linux-2.4.19-rc1/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl
 +#define DM_STATUS_TABLE_FLAG	0x00000010
 +
 +#endif				/* _LINUX_DM_IOCTL_H */
-diff -ruN linux-2.4.19-rc1/include/linux/fs.h linux/include/linux/fs.h
---- linux-2.4.19-rc1/include/linux/fs.h	Tue Jun 25 14:15:42 2002
-+++ linux/include/linux/fs.h	Tue Jun 25 21:33:16 2002
-@@ -260,7 +260,10 @@
- 	char * b_data;			/* pointer to data block */
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/include/linux/fs.h linux-2.4.19-dm/include/linux/fs.h
+--- linux-2.4.19/include/linux/fs.h	Wed Aug 14 11:52:06 2002
++++ linux-2.4.19-dm/include/linux/fs.h	Wed Aug 14 17:42:49 2002
+@@ -219,6 +219,7 @@
+ 	BH_Wait_IO,	/* 1 if we should write out this buffer */
+ 	BH_Launder,	/* 1 if we can throttle on this buffer */
+ 	BH_JBD,		/* 1 if it has an attached journal_head */
++	BH_Inode,	/* 1 if it is attached to i_dirty[_data]_buffers */
+ 
+ 	BH_PrivateStart,/* not a state bit, but the first bit available
+ 			 * for private allocation by other entities
+@@ -261,11 +262,10 @@
  	struct page *b_page;		/* the page this bh is mapped to */
  	void (*b_end_io)(struct buffer_head *bh, int uptodate); /* I/O completion */
-- 	void *b_private;		/* reserved for b_end_io */
-+ 	void *b_private;		/* reserved for b_end_io, also used by ext3 */
-+	void *b_bdev_private;	        /* a hack to get around ext3 using b_private
-+					 * after handing the buffer_head to the
-+					 * block layer */
- 
+  	void *b_private;		/* reserved for b_end_io */
+-
++ 	void *b_journal_head;		/* ext3 journal_heads */
  	unsigned long b_rsector;	/* Real buffer location on disk */
  	wait_queue_head_t b_wait;
-diff -ruN linux-2.4.19-rc1/include/linux/mempool.h linux/include/linux/mempool.h
---- linux-2.4.19-rc1/include/linux/mempool.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/mempool.h	Tue Jun 25 21:33:16 2002
+ 
+-	struct inode *	     b_inode;
+ 	struct list_head     b_inode_buffers;	/* doubly linked list of inode dirty buffers */
+ };
+ 
+@@ -1179,6 +1179,21 @@
+ 		set_bit(BH_Async, &bh->b_state);
+ 	else
+ 		clear_bit(BH_Async, &bh->b_state);
++}
++
++static inline void set_buffer_inode(struct buffer_head *bh)
++{
++	set_bit(BH_Inode, &bh->b_state);
++}
++
++static inline void clear_buffer_inode(struct buffer_head *bh)
++{
++	clear_bit(BH_Inode, &bh->b_state);
++}
++
++static inline int buffer_inode(struct buffer_head *bh)
++{
++	return test_bit(BH_Inode, &bh->b_state);
+ }
+ 
+ /*
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/include/linux/jbd.h linux-2.4.19-dm/include/linux/jbd.h
+--- linux-2.4.19/include/linux/jbd.h	Wed Aug 14 11:52:07 2002
++++ linux-2.4.19-dm/include/linux/jbd.h	Wed Aug 14 17:42:49 2002
+@@ -246,7 +246,7 @@
+ 
+ static inline struct journal_head *bh2jh(struct buffer_head *bh)
+ {
+-	return bh->b_private;
++	return bh->b_journal_head;
+ }
+ 
+ struct jbd_revoke_table_s;
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/include/linux/mempool.h linux-2.4.19-dm/include/linux/mempool.h
+--- linux-2.4.19/include/linux/mempool.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/include/linux/mempool.h	Wed Aug 14 17:43:19 2002
 @@ -0,0 +1,41 @@
 +/*
 + * memory buffer pool support
@@ -6928,9 +6829,9 @@ diff -ruN linux-2.4.19-rc1/include/linux/mempool.h linux/include/linux/mempool.h
 +void mempool_free_slab(void *element, void *pool_data);
 +
 +#endif /* _LINUX_MEMPOOL_H */
-diff -ruN linux-2.4.19-rc1/include/linux/vmalloc.h linux/include/linux/vmalloc.h
---- linux-2.4.19-rc1/include/linux/vmalloc.h	Tue Jun 25 14:15:45 2002
-+++ linux/include/linux/vmalloc.h	Tue Jun 25 21:33:16 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/include/linux/vmalloc.h linux-2.4.19-dm/include/linux/vmalloc.h
+--- linux-2.4.19/include/linux/vmalloc.h	Wed Aug 14 11:52:09 2002
++++ linux-2.4.19-dm/include/linux/vmalloc.h	Wed Aug 14 17:43:23 2002
 @@ -25,6 +25,7 @@
  extern void vmfree_area_pages(unsigned long address, unsigned long size);
  extern int vmalloc_area_pages(unsigned long address, unsigned long size,
@@ -6939,9 +6840,20 @@ diff -ruN linux-2.4.19-rc1/include/linux/vmalloc.h linux/include/linux/vmalloc.h
  
  /*
   *	Allocate any pages
-diff -ruN linux-2.4.19-rc1/mm/Makefile linux/mm/Makefile
---- linux-2.4.19-rc1/mm/Makefile	Tue Jun 25 14:15:47 2002
-+++ linux/mm/Makefile	Tue Jun 25 21:33:16 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/kernel/ksyms.c linux-2.4.19-dm/kernel/ksyms.c
+--- linux-2.4.19/kernel/ksyms.c	Wed Aug 14 11:52:12 2002
++++ linux-2.4.19-dm/kernel/ksyms.c	Wed Aug 14 17:43:23 2002
+@@ -109,6 +109,7 @@
+ EXPORT_SYMBOL(vfree);
+ EXPORT_SYMBOL(__vmalloc);
+ EXPORT_SYMBOL(vmalloc_to_page);
++EXPORT_SYMBOL(vcalloc);
+ EXPORT_SYMBOL(mem_map);
+ EXPORT_SYMBOL(remap_page_range);
+ EXPORT_SYMBOL(max_mapnr);
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/mm/Makefile linux-2.4.19-dm/mm/Makefile
+--- linux-2.4.19/mm/Makefile	Wed Aug 14 11:52:12 2002
++++ linux-2.4.19-dm/mm/Makefile	Wed Aug 14 17:43:15 2002
 @@ -9,12 +9,12 @@
  
  O_TARGET := mm.o
@@ -6957,9 +6869,9 @@ diff -ruN linux-2.4.19-rc1/mm/Makefile linux/mm/Makefile
  
  obj-$(CONFIG_HIGHMEM) += highmem.o
  
-diff -ruN linux-2.4.19-rc1/mm/mempool.c linux/mm/mempool.c
---- linux-2.4.19-rc1/mm/mempool.c	Thu Jan  1 01:00:00 1970
-+++ linux/mm/mempool.c	Tue Jun 25 21:33:16 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/mm/mempool.c linux-2.4.19-dm/mm/mempool.c
+--- linux-2.4.19/mm/mempool.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dm/mm/mempool.c	Wed Aug 14 17:43:19 2002
 @@ -0,0 +1,295 @@
 +/*
 + *  linux/mm/mempool.c
@@ -7256,9 +7168,9 @@ diff -ruN linux-2.4.19-rc1/mm/mempool.c linux/mm/mempool.c
 +EXPORT_SYMBOL(mempool_alloc_slab);
 +EXPORT_SYMBOL(mempool_free_slab);
 +
-diff -ruN linux-2.4.19-rc1/mm/vmalloc.c linux/mm/vmalloc.c
---- linux-2.4.19-rc1/mm/vmalloc.c	Tue Jun 25 14:15:47 2002
-+++ linux/mm/vmalloc.c	Tue Jun 25 21:33:16 2002
+diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/mm/vmalloc.c linux-2.4.19-dm/mm/vmalloc.c
+--- linux-2.4.19/mm/vmalloc.c	Wed Aug 14 11:52:13 2002
++++ linux-2.4.19-dm/mm/vmalloc.c	Wed Aug 14 17:43:23 2002
 @@ -321,3 +321,22 @@
  	read_unlock(&vmlist_lock);
  	return buf - buf_start;
@@ -7282,14 +7194,3 @@ diff -ruN linux-2.4.19-rc1/mm/vmalloc.c linux/mm/vmalloc.c
 +
 +	return addr;
 +}
-diff -Nru linux-2.4.19-rc1/kernel/ksyms.c linux/kernel/ksyms.c
---- linux-2.4.19-rc1/kernel/ksyms.c	Wed Jun 26 18:42:28 2002
-+++ linux/kernel/ksyms.c	Wed Jun 26 18:37:01 2002
-@@ -109,6 +109,7 @@
- EXPORT_SYMBOL(vfree);
- EXPORT_SYMBOL(__vmalloc);
- EXPORT_SYMBOL(vmalloc_to_page);
-+EXPORT_SYMBOL(vcalloc);
- EXPORT_SYMBOL(mem_map);
- EXPORT_SYMBOL(remap_page_range);
- EXPORT_SYMBOL(max_mapnr);
