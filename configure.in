@@ -58,6 +58,15 @@ AC_ARG_WITH(group,
   [ GROUP="$withval" ],
   [ GROUP="root" ])
 
+AC_ARG_ENABLE(jobs, [  --enable-jobs=NUM       Number of jobs to run simultaneously], JOBS=-j$enableval, JOBS=)
+
+dnl Checks for library functions.
+AC_PROG_GCC_TRADITIONAL
+AC_TYPE_SIGNAL
+AC_FUNC_VPRINTF
+AC_CHECK_FUNCS(mkdir rmdir uname)
+
+echo $ac_n "checking for kernel directory""... $ac_c" 1>&6
 dnl -- Where the linux src tree is
 AC_ARG_WITH(kerneldir,
   [  --with-kernel-dir=DIR   linux kernel source in DIR [/usr/src/linux]],
@@ -78,12 +87,16 @@ fi
 if test "${with_kernel+set}" = set; then
    kerneldir="$with_kernel"
 fi
+echo "$ac_t""$kerneldir" 1>&6
 
+test -d $kerneldir || { echo "configure: error: kernel directory $kerneldir not found" 1>&2; exit 1; }
+
+echo $ac_n "checking for kernel version""... $ac_c" 1>&6
 dnl -- Kernel version string
 AC_ARG_WITH(kernel-version,
-  [  --with-kernel-version=VERSION   linux kernel version [2.4.16]],
+  [  --with-kernel-version=VERSION   linux kernel version],
   [ kernelvsn="$withval" ],
-  [ kernelvsn=2.4.16 ])
+  [ kernelvsn=`awk -F ' = ' '/^VERSION/ {v=$2} /^PATCH/ {p=$2} /^SUBLEVEL/ {s=$2} END {printf "%d.%d.%d",v,p,s}' $kerneldir/Makefile` ])
 if test "${with_kernelvsn+set}" = set; then
    kernelvsn="$with_kernelvsn"
 fi
@@ -94,7 +107,11 @@ if test "${with_kernelversion+set}" = set; then
    kernelvsn="$with_kernelversion"
 fi
 
-echo "using kernel version $kernelvsn in $kerneldir"
+if test "x$kernelvsn" = x; then
+   echo "configure: error: kernel version not found"
+   exit 1
+fi
+echo "$ac_t""$kernelvsn" 1>&6
 
 dnl -- Temporary directory for kernel diffs
 AC_ARG_WITH(tmp-dir,
@@ -108,6 +125,7 @@ if test "${with_tmpdir+set}" = set; then
    tmpdir="$with_tmpdir"
 fi
 
+echo $ac_n "checking for kernel interface choice""... $ac_c" 1>&6
 dnl -- which kernel interface to use (ioctl or fs)
 AC_ARG_WITH(interface,
   [  --with-interface=IFACE  Choose kernel interface (ioctl or fs) [ioctl]],
@@ -115,20 +133,10 @@ AC_ARG_WITH(interface,
   [ interface=ioctl ])
 if [[ "x$interface" != xfs -a "x$interface" != xioctl ]];
 then
-  echo
-  echo "Please specify either  --with-interface=ioctl  or --with-interface=fs"
+  echo "configure: error: --with-interface=ioctl or --with-interface=fs required" 1>&2
   exit 1;
-else
-  echo "using $interface interface"
 fi
-
-AC_ARG_ENABLE(jobs, [  --enable-jobs=NUM       Number of jobs to run simultaneously], JOBS=-j$enableval, JOBS=)
-
-dnl Checks for library functions.
-AC_PROG_GCC_TRADITIONAL
-AC_TYPE_SIGNAL
-AC_FUNC_VPRINTF
-AC_CHECK_FUNCS(mkdir rmdir uname)
+echo "$ac_t""$interface" 1>&6
 
 AC_SUBST(JOBS)
 AC_SUBST(OWNER)
