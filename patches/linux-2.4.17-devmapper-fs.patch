@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.17/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Thu Jan  3 19:32:49 2002
++++ linux/drivers/md/Config.in	Fri Jan  4 15:07:40 2002
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.17/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.17/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Thu Jan  3 19:32:49 2002
++++ linux/drivers/md/Makefile	Fri Jan  4 15:07:40 2002
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -41,7 +41,7 @@ diff -ruN linux-2.4.17/drivers/md/Makefile linux/drivers/md/Makefile
 +
 diff -ruN linux-2.4.17/drivers/md/device-mapper.h linux/drivers/md/device-mapper.h
 --- linux-2.4.17/drivers/md/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/device-mapper.h	Fri Dec 21 18:44:59 2001
++++ linux/drivers/md/device-mapper.h	Fri Jan  4 13:17:14 2002
 @@ -0,0 +1,58 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -52,7 +52,7 @@ diff -ruN linux-2.4.17/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +#ifndef _LINUX_DEVICE_MAPPER_H
 +#define _LINUX_DEVICE_MAPPER_H
 +
-+#define DM_DIR "device-mapper"
++#define DM_DIR "device-mapper"	/* Slashes not supported */
 +#define DM_MAX_TYPE_NAME 16
 +#define DM_NAME_LEN 128
 +
@@ -832,8 +832,8 @@ diff -ruN linux-2.4.17/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +EXPORT_SYMBOL(dm_table_put_device);
 diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 --- linux-2.4.17/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-target.c	Thu Jan  3 18:48:56 2002
-@@ -0,0 +1,238 @@
++++ linux/drivers/md/dm-target.c	Fri Jan  4 14:50:49 2002
+@@ -0,0 +1,241 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
 + *
@@ -868,15 +868,15 @@ diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +		start = end;
 +
 +		/* Skip whitespace */
-+		while(*start && isspace(*start))
++		while (*start && isspace(*start))
 +			start++;
 +
 +		if (!*start)
-+			break; /* success, we hit the end */
++			break;	/* success, we hit the end */
 +
 +		/* 'out' is used to remove any back-quotes */
 +		end = out = start;
-+		while(*end) {
++		while (*end) {
 +			/* Everything apart from '\0' can be quoted */
 +			if (*end == '\\' && *(end + 1)) {
 +				*out++ = *(end + 1);
@@ -885,7 +885,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +			}
 +
 +			if (isspace(*end))
-+				break; /* end of token */
++				break;	/* end of token */
 +
 +			*out++ = *end++;
 +		}
@@ -894,9 +894,12 @@ diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +		if ((*argc + 1) > max)
 +			return -EINVAL;
 +
++		/* we know this is whitespace */
++		if (*end)
++			end++;
++
 +		/* terminate the string and put it in the array */
 +		*out = '\0';
-+		end++;
 +		argv[*argc] = start;
 +		(*argc)++;
 +	}
@@ -1074,7 +1077,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +EXPORT_SYMBOL(dm_unregister_target);
 diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.17/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Thu Jan  3 19:32:22 2002
++++ linux/drivers/md/dm.c	Fri Jan  4 15:07:17 2002
 @@ -0,0 +1,931 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -1094,7 +1097,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +#define DEFAULT_READ_AHEAD 64
 +
 +static const char *_name = DM_NAME;
-+static const char *_version = "0.91.01-fs (2002-01-02)";
++static const char *_version = "0.91.02-fs (2002-01-04)";
 +static const char *_email = "lvm-devel@lists.sistina.com";
 +
 +static int _major = 0;
@@ -2009,7 +2012,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +MODULE_LICENSE("GPL");
 diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 --- linux-2.4.17/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Thu Jan  3 18:49:35 2002
++++ linux/drivers/md/dm.h	Fri Jan  4 14:54:11 2002
 @@ -0,0 +1,170 @@
 +/*
 + * Internal header file for device mapper
@@ -3492,7 +3495,7 @@ diff -ruN linux-2.4.17/drivers/md/dmfs.h linux/drivers/md/dmfs.h
 +#endif				/* LINUX_DMFS_H */
 diff -ruN linux-2.4.17/fs/namespace.c linux/fs/namespace.c
 --- linux-2.4.17/fs/namespace.c	Wed Jan  2 19:10:48 2002
-+++ linux/fs/namespace.c	Thu Jan  3 19:32:49 2002
++++ linux/fs/namespace.c	Fri Jan  4 15:07:40 2002
 @@ -289,7 +289,7 @@
  	}
  }
@@ -3504,7 +3507,7 @@ diff -ruN linux-2.4.17/fs/namespace.c linux/fs/namespace.c
  	int retval = 0;
 diff -ruN linux-2.4.17/include/linux/device-mapper.h linux/include/linux/device-mapper.h
 --- linux-2.4.17/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Fri Dec 21 18:44:59 2001
++++ linux/include/linux/device-mapper.h	Fri Jan  4 13:17:14 2002
 @@ -0,0 +1,58 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -3515,7 +3518,7 @@ diff -ruN linux-2.4.17/include/linux/device-mapper.h linux/include/linux/device-
 +#ifndef _LINUX_DEVICE_MAPPER_H
 +#define _LINUX_DEVICE_MAPPER_H
 +
-+#define DM_DIR "device-mapper"
++#define DM_DIR "device-mapper"	/* Slashes not supported */
 +#define DM_MAX_TYPE_NAME 16
 +#define DM_NAME_LEN 128
 +
@@ -3566,7 +3569,7 @@ diff -ruN linux-2.4.17/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.17/include/linux/fs.h linux/include/linux/fs.h
 --- linux-2.4.17/include/linux/fs.h	Wed Jan  2 19:10:48 2002
-+++ linux/include/linux/fs.h	Thu Jan  3 19:32:49 2002
++++ linux/include/linux/fs.h	Fri Jan  4 15:07:40 2002
 @@ -983,6 +983,7 @@
  extern struct vfsmount *kern_mount(struct file_system_type *);
  extern int may_umount(struct vfsmount *);
@@ -3577,7 +3580,7 @@ diff -ruN linux-2.4.17/include/linux/fs.h linux/include/linux/fs.h
  
 diff -ruN linux-2.4.17/include/linux/seq_file.h linux/include/linux/seq_file.h
 --- linux-2.4.17/include/linux/seq_file.h	Thu Dec  6 15:57:56 2001
-+++ linux/include/linux/seq_file.h	Thu Jan  3 19:32:49 2002
++++ linux/include/linux/seq_file.h	Fri Jan  4 15:07:40 2002
 @@ -12,6 +12,7 @@
  	loff_t index;
  	struct semaphore sem;
@@ -3588,7 +3591,7 @@ diff -ruN linux-2.4.17/include/linux/seq_file.h linux/include/linux/seq_file.h
  struct seq_operations {
 diff -ruN linux-2.4.17/kernel/ksyms.c linux/kernel/ksyms.c
 --- linux-2.4.17/kernel/ksyms.c	Wed Jan  2 19:10:49 2002
-+++ linux/kernel/ksyms.c	Thu Jan  3 19:32:49 2002
++++ linux/kernel/ksyms.c	Fri Jan  4 15:07:40 2002
 @@ -324,6 +324,7 @@
  EXPORT_SYMBOL(register_filesystem);
  EXPORT_SYMBOL(unregister_filesystem);
