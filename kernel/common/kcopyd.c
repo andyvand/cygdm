@@ -204,11 +204,11 @@ static int write_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, i
 /* This is where all the real work happens */
 static int copy_kthread(void *unused)
 {
-	copy_task = current;
 	daemonize();
 	down(&run_lock);
 
 	strcpy(current->comm, "kcopyd");
+	copy_task = current;
 	wake_up_interruptible(&start_waitq);
 
 	do {
@@ -352,7 +352,8 @@ int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_se
 			set_task_state(tsk, TASK_INTERRUPTIBLE);
 			add_wait_queue(&start_waitq, &wq);
 
-			schedule();
+			if (copy_task == NULL)
+				schedule();
 
 			set_task_state(tsk, TASK_RUNNING);
 			remove_wait_queue(&start_waitq, &wq);
