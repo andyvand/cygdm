@@ -101,7 +101,7 @@ static struct target_type origin_target = {
 	err:	NULL
 };
 
-static int __init origin_init(void)
+int __init dm_origin_init(void)
 {
 	int r = dm_register_target(&origin_target);
 
@@ -111,16 +111,13 @@ static int __init origin_init(void)
 	return r;
 }
 
-static void origin_exit(void)
+void dm_origin_exit(void)
 {
 	int r = dm_unregister_target(&origin_target);
 
 	if (r < 0)
 		DMERR("Device mapper: Origin: unregister failed %d\n", r);
 }
-
-module_init(origin_init);
-module_exit(origin_exit);
 
 MODULE_AUTHOR("Patrick Caulfield <caulfield@sistina.com>");
 MODULE_DESCRIPTION("Device Mapper: Snapshot origin driver");

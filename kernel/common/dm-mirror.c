@@ -208,7 +208,7 @@ static struct target_type mirror_target = {
 	map:	mirror_map,
 };
 
-static int __init mirror_init(void)
+int __init dm_mirror_init(void)
 {
 	int r = dm_register_target(&mirror_target);
 	if (r < 0)
@@ -224,10 +224,6 @@ void dm_mirror_exit(void)
 	if (r < 0)
 		DMERR("mirror: unregister failed %d", r);
 }
-
-
-module_init(mirror_init);
-module_exit(dm_mirror_exit);
 
 /*
  * Overrides for Emacs so that we follow Linus's tabbing style.

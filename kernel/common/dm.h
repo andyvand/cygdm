@@ -169,7 +169,18 @@ int dm_blockcopy(unsigned long fromsec, unsigned long tosec,
 		 unsigned long nr_sectors,
 		 kdev_t fromdev, kdev_t todev,
 		 int priority, int throttle, void (*callback)(copy_cb_reason_t, void *, long), void *context);
+int kcopyd_init(void);
+void kcopyd_exit(void);
 
+/* Snapshots */
+int dm_snapshot_init(void);
+void dm_snapshot_exit(void);
+int dm_origin_init(void);
+void dm_origin_exit(void);
+
+/* dm-mirror.c */
+int dm_mirror_init(void);
+void dm_mirror_exit(void);
 
 #define DMWARN(f, x...) printk(KERN_WARNING DM_NAME ": " f "\n" , ## x)
 #define DMERR(f, x...) printk(KERN_ERR DM_NAME ": " f "\n" , ## x)

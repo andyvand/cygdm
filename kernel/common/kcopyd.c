@@ -401,7 +401,7 @@ static int allocate_free_list(void)
 	return i;
 }
 
-static int __init kcopyd_init(void)
+int __init kcopyd_init(void)
 {
 	init_rwsem(&work_list_lock);
 	init_rwsem(&free_list_lock);
@@ -441,7 +441,7 @@ static int __init kcopyd_init(void)
 	return 0;
 }
 
-static void kcopyd_exit(void)
+void kcopyd_exit(void)
 {
 	struct list_head *entry, *temp;
 
@@ -463,10 +463,6 @@ static void kcopyd_exit(void)
 	if (entry_cachep)
 		kmem_cache_destroy(entry_cachep);
 }
-
-/* These are only here until it gets added to dm.c */
-module_init(kcopyd_init);
-module_exit(kcopyd_exit);
 
 MODULE_AUTHOR("Patrick Caulfield <caulfield@sistina.com>");
 MODULE_DESCRIPTION("Device Mapper: Copy thread");

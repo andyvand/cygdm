@@ -1129,7 +1129,7 @@ static struct target_type snapshot_target = {
 	err:	NULL
 };
 
-static int __init snapshot_init(void)
+int __init dm_snapshot_init(void)
 {
 	int r = dm_register_target(&snapshot_target);
 
@@ -1153,7 +1153,7 @@ static int __init snapshot_init(void)
 	return r;
 }
 
-static void snapshot_exit(void)
+void dm_snapshot_exit(void)
 {
 	int r = dm_unregister_target(&snapshot_target);
 
@@ -1163,9 +1163,6 @@ static void snapshot_exit(void)
 	if (snapshot_origins)
 		kfree(snapshot_origins);
 }
-
-module_init(snapshot_init);
-module_exit(snapshot_exit);
 
 MODULE_AUTHOR("Patrick Caulfield <caulfield@sistina.com>");
 MODULE_DESCRIPTION("Device Mapper: Snapshots");
