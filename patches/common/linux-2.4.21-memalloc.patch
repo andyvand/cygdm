@@ -1,15 +1,6 @@
-diff -ru linux-2.4.21/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
---- linux-2.4.21/drivers/md/dm-ioctl.c	Mon Jun  2 21:13:42 2003
-+++ linux/drivers/md/dm-ioctl.c	Mon Jun  9 14:22:43 2003
-@@ -244,6 +244,7 @@
- 	list_del(&hc->name_list);
- 	unregister_with_devfs(hc);
- 	dm_put(hc->md);
-+	free_cell(hc);
- }
- 
- void dm_hash_remove_all(void)
-@@ -1076,19 +1077,11 @@
+--- linux-2.4.21/drivers/md/dm-ioctl.c	Wed Aug 20 14:41:38 2003
++++ linux/drivers/md/dm-ioctl.c	Wed Aug 20 14:42:58 2003
+@@ -1178,19 +1178,11 @@
  	}
  
  	/*
@@ -30,7 +21,7 @@ diff -ru linux-2.4.21/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
  
  	r = validate_params(cmd, param);
  	if (r)
-@@ -1104,7 +1097,6 @@
+@@ -1208,7 +1200,6 @@
  
   out:
  	free_params(param);
@@ -38,9 +29,8 @@ diff -ru linux-2.4.21/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
  	return r;
  }
  
-diff -ru linux-2.4.21/include/asm-alpha/mman.h linux/include/asm-alpha/mman.h
---- linux-2.4.21/include/asm-alpha/mman.h	Mon Jun  2 13:59:25 2003
-+++ linux/include/asm-alpha/mman.h	Mon Jun  9 14:40:05 2003
+--- linux-2.4.21/include/asm-alpha/mman.h	Fri Jan 10 16:35:33 2003
++++ linux/include/asm-alpha/mman.h	Wed Aug 20 14:42:58 2003
 @@ -30,6 +30,7 @@
  
  #define MCL_CURRENT	 8192		/* lock all currently mapped pages */
@@ -49,9 +39,8 @@ diff -ru linux-2.4.21/include/asm-alpha/mman.h linux/include/asm-alpha/mman.h
  
  #define MADV_NORMAL	0		/* no further special treatment */
  #define MADV_RANDOM	1		/* expect random page references */
-diff -ru linux-2.4.21/include/asm-arm/mman.h linux/include/asm-arm/mman.h
---- linux-2.4.21/include/asm-arm/mman.h	Mon Jun  2 14:00:57 2003
-+++ linux/include/asm-arm/mman.h	Mon Jun  9 14:40:00 2003
+--- linux-2.4.21/include/asm-arm/mman.h	Fri Jan 10 16:35:33 2003
++++ linux/include/asm-arm/mman.h	Wed Aug 20 14:42:58 2003
 @@ -24,6 +24,7 @@
  
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -60,9 +49,8 @@ diff -ru linux-2.4.21/include/asm-arm/mman.h linux/include/asm-arm/mman.h
  
  #define MADV_NORMAL	0x0		/* default page-in behavior */
  #define MADV_RANDOM	0x1		/* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-cris/mman.h linux/include/asm-cris/mman.h
---- linux-2.4.21/include/asm-cris/mman.h	Mon Jun  2 14:03:10 2003
-+++ linux/include/asm-cris/mman.h	Mon Jun  9 14:40:21 2003
+--- linux-2.4.21/include/asm-cris/mman.h	Fri Jan 10 16:35:36 2003
++++ linux/include/asm-cris/mman.h	Wed Aug 20 14:42:58 2003
 @@ -26,6 +26,7 @@
  
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -71,9 +59,8 @@ diff -ru linux-2.4.21/include/asm-cris/mman.h linux/include/asm-cris/mman.h
  
  #define MADV_NORMAL	0x0		/* default page-in behavior */
  #define MADV_RANDOM	0x1		/* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-i386/mman.h linux/include/asm-i386/mman.h
---- linux-2.4.21/include/asm-i386/mman.h	Mon Jun  2 13:59:54 2003
-+++ linux/include/asm-i386/mman.h	Mon Jun  9 14:40:26 2003
+--- linux-2.4.21/include/asm-i386/mman.h	Fri Jan 10 16:35:37 2003
++++ linux/include/asm-i386/mman.h	Wed Aug 20 14:42:58 2003
 @@ -24,6 +24,7 @@
  
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -82,9 +69,8 @@ diff -ru linux-2.4.21/include/asm-i386/mman.h linux/include/asm-i386/mman.h
  
  #define MADV_NORMAL	0x0		/* default page-in behavior */
  #define MADV_RANDOM	0x1		/* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-ia64/mman.h linux/include/asm-ia64/mman.h
---- linux-2.4.21/include/asm-ia64/mman.h	Mon Jun  2 14:01:56 2003
-+++ linux/include/asm-ia64/mman.h	Mon Jun  9 14:40:31 2003
+--- linux-2.4.21/include/asm-ia64/mman.h	Fri Jan 10 16:35:38 2003
++++ linux/include/asm-ia64/mman.h	Wed Aug 20 14:42:58 2003
 @@ -32,6 +32,7 @@
  
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -93,9 +79,8 @@ diff -ru linux-2.4.21/include/asm-ia64/mman.h linux/include/asm-ia64/mman.h
  
  #define MADV_NORMAL	0x0		/* default page-in behavior */
  #define MADV_RANDOM	0x1		/* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-m68k/mman.h linux/include/asm-m68k/mman.h
---- linux-2.4.21/include/asm-m68k/mman.h	Mon Jun  2 14:00:09 2003
-+++ linux/include/asm-m68k/mman.h	Mon Jun  9 14:40:35 2003
+--- linux-2.4.21/include/asm-m68k/mman.h	Fri Jan 10 16:35:43 2003
++++ linux/include/asm-m68k/mman.h	Wed Aug 20 14:42:58 2003
 @@ -24,6 +24,7 @@
  
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -104,9 +89,8 @@ diff -ru linux-2.4.21/include/asm-m68k/mman.h linux/include/asm-m68k/mman.h
  
  #define MADV_NORMAL	0x0		/* default page-in behavior */
  #define MADV_RANDOM	0x1		/* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-mips/mman.h linux/include/asm-mips/mman.h
---- linux-2.4.21/include/asm-mips/mman.h	Mon Jun  2 14:00:51 2003
-+++ linux/include/asm-mips/mman.h	Mon Jun  9 14:40:53 2003
+--- linux-2.4.21/include/asm-mips/mman.h	Fri Jan 10 16:35:44 2003
++++ linux/include/asm-mips/mman.h	Wed Aug 20 14:42:58 2003
 @@ -55,6 +55,7 @@
   */
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -115,9 +99,8 @@ diff -ru linux-2.4.21/include/asm-mips/mman.h linux/include/asm-mips/mman.h
  
  #define MADV_NORMAL	0x0		/* default page-in behavior */
  #define MADV_RANDOM	0x1		/* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-mips64/mman.h linux/include/asm-mips64/mman.h
---- linux-2.4.21/include/asm-mips64/mman.h	Mon Jun  2 14:01:41 2003
-+++ linux/include/asm-mips64/mman.h	Mon Jun  9 14:40:43 2003
+--- linux-2.4.21/include/asm-mips64/mman.h	Fri Jan 10 16:35:45 2003
++++ linux/include/asm-mips64/mman.h	Wed Aug 20 14:42:58 2003
 @@ -53,6 +53,7 @@
   */
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -126,9 +109,8 @@ diff -ru linux-2.4.21/include/asm-mips64/mman.h linux/include/asm-mips64/mman.h
  
  #define MADV_NORMAL	0x0		/* default page-in behavior */
  #define MADV_RANDOM	0x1		/* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-parisc/mman.h linux/include/asm-parisc/mman.h
---- linux-2.4.21/include/asm-parisc/mman.h	Mon Jun  2 13:59:36 2003
-+++ linux/include/asm-parisc/mman.h	Mon Jun  9 14:40:59 2003
+--- linux-2.4.21/include/asm-parisc/mman.h	Fri Jan 10 16:35:47 2003
++++ linux/include/asm-parisc/mman.h	Wed Aug 20 14:42:58 2003
 @@ -24,6 +24,7 @@
  
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -137,9 +119,8 @@ diff -ru linux-2.4.21/include/asm-parisc/mman.h linux/include/asm-parisc/mman.h
  
  #define MADV_NORMAL     0               /* no further special treatment */
  #define MADV_RANDOM     1               /* expect random page references */
-diff -ru linux-2.4.21/include/asm-ppc/mman.h linux/include/asm-ppc/mman.h
---- linux-2.4.21/include/asm-ppc/mman.h	Mon Jun  2 14:03:23 2003
-+++ linux/include/asm-ppc/mman.h	Mon Jun  9 14:41:48 2003
+--- linux-2.4.21/include/asm-ppc/mman.h	Fri Jun 13 16:32:50 2003
++++ linux/include/asm-ppc/mman.h	Wed Aug 20 14:42:58 2003
 @@ -25,6 +25,7 @@
  
  #define MCL_CURRENT     0x2000          /* lock all currently mapped pages */
@@ -148,9 +129,8 @@ diff -ru linux-2.4.21/include/asm-ppc/mman.h linux/include/asm-ppc/mman.h
  
  #define MADV_NORMAL	0x0		/* default page-in behavior */
  #define MADV_RANDOM	0x1		/* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-ppc64/mman.h linux/include/asm-ppc64/mman.h
---- linux-2.4.21/include/asm-ppc64/mman.h	Mon Jun  2 14:01:16 2003
-+++ linux/include/asm-ppc64/mman.h	Mon Jun  9 14:41:19 2003
+--- linux-2.4.21/include/asm-ppc64/mman.h	Fri Jan 10 16:35:49 2003
++++ linux/include/asm-ppc64/mman.h	Wed Aug 20 14:42:58 2003
 @@ -31,6 +31,7 @@
  
  #define MCL_CURRENT     0x2000          /* lock all currently mapped pages */
@@ -159,9 +139,8 @@ diff -ru linux-2.4.21/include/asm-ppc64/mman.h linux/include/asm-ppc64/mman.h
  
  #define MADV_NORMAL	0x0		/* default page-in behavior */
  #define MADV_RANDOM	0x1		/* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-s390/mman.h linux/include/asm-s390/mman.h
---- linux-2.4.21/include/asm-s390/mman.h	Mon Jun  2 13:59:39 2003
-+++ linux/include/asm-s390/mman.h	Mon Jun  9 14:41:57 2003
+--- linux-2.4.21/include/asm-s390/mman.h	Fri Jan 10 16:35:49 2003
++++ linux/include/asm-s390/mman.h	Wed Aug 20 14:42:58 2003
 @@ -32,6 +32,7 @@
  
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -170,9 +149,8 @@ diff -ru linux-2.4.21/include/asm-s390/mman.h linux/include/asm-s390/mman.h
  
  #define MADV_NORMAL    0x0              /* default page-in behavior */
  #define MADV_RANDOM    0x1              /* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-s390x/mman.h linux/include/asm-s390x/mman.h
---- linux-2.4.21/include/asm-s390x/mman.h	Mon Jun  2 14:00:33 2003
-+++ linux/include/asm-s390x/mman.h	Mon Jun  9 14:42:02 2003
+--- linux-2.4.21/include/asm-s390x/mman.h	Fri Jan 10 16:35:50 2003
++++ linux/include/asm-s390x/mman.h	Wed Aug 20 14:42:58 2003
 @@ -32,6 +32,7 @@
  
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -181,9 +159,8 @@ diff -ru linux-2.4.21/include/asm-s390x/mman.h linux/include/asm-s390x/mman.h
  
  #define MADV_NORMAL    0x0              /* default page-in behavior */
  #define MADV_RANDOM    0x1              /* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-sh/mman.h linux/include/asm-sh/mman.h
---- linux-2.4.21/include/asm-sh/mman.h	Mon Jun  2 14:02:52 2003
-+++ linux/include/asm-sh/mman.h	Mon Jun  9 14:42:06 2003
+--- linux-2.4.21/include/asm-sh/mman.h	Fri Jan 10 16:35:52 2003
++++ linux/include/asm-sh/mman.h	Wed Aug 20 14:42:58 2003
 @@ -24,6 +24,7 @@
  
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -192,9 +169,8 @@ diff -ru linux-2.4.21/include/asm-sh/mman.h linux/include/asm-sh/mman.h
  
  #define MADV_NORMAL	0x0		/* default page-in behavior */
  #define MADV_RANDOM	0x1		/* page-in minimum required */
-diff -ru linux-2.4.21/include/asm-sparc/mman.h linux/include/asm-sparc/mman.h
---- linux-2.4.21/include/asm-sparc/mman.h	Mon Jun  2 14:03:09 2003
-+++ linux/include/asm-sparc/mman.h	Mon Jun  9 14:42:26 2003
+--- linux-2.4.21/include/asm-sparc/mman.h	Fri Jun 13 16:32:51 2003
++++ linux/include/asm-sparc/mman.h	Wed Aug 20 14:42:58 2003
 @@ -30,6 +30,7 @@
  
  #define MCL_CURRENT     0x2000          /* lock all currently mapped pages */
@@ -203,9 +179,8 @@ diff -ru linux-2.4.21/include/asm-sparc/mman.h linux/include/asm-sparc/mman.h
  
  /* XXX Need to add flags to SunOS's mctl, mlockall, and madvise system
   * XXX calls.
-diff -ru linux-2.4.21/include/asm-sparc64/mman.h linux/include/asm-sparc64/mman.h
---- linux-2.4.21/include/asm-sparc64/mman.h	Mon Jun  2 14:01:47 2003
-+++ linux/include/asm-sparc64/mman.h	Mon Jun  9 14:42:18 2003
+--- linux-2.4.21/include/asm-sparc64/mman.h	Fri Jun 13 16:32:51 2003
++++ linux/include/asm-sparc64/mman.h	Wed Aug 20 14:42:58 2003
 @@ -30,6 +30,7 @@
  
  #define MCL_CURRENT     0x2000          /* lock all currently mapped pages */
@@ -214,9 +189,8 @@ diff -ru linux-2.4.21/include/asm-sparc64/mman.h linux/include/asm-sparc64/mman.
  
  /* XXX Need to add flags to SunOS's mctl, mlockall, and madvise system
   * XXX calls.
-diff -ru linux-2.4.21/include/asm-x86_64/mman.h linux/include/asm-x86_64/mman.h
---- linux-2.4.21/include/asm-x86_64/mman.h	Mon Jun  2 14:01:24 2003
-+++ linux/include/asm-x86_64/mman.h	Mon Jun  9 14:42:35 2003
+--- linux-2.4.21/include/asm-x86_64/mman.h	Fri Jan 10 16:35:53 2003
++++ linux/include/asm-x86_64/mman.h	Wed Aug 20 14:42:58 2003
 @@ -25,6 +25,7 @@
  
  #define MCL_CURRENT	1		/* lock all current mappings */
@@ -225,9 +199,8 @@ diff -ru linux-2.4.21/include/asm-x86_64/mman.h linux/include/asm-x86_64/mman.h
  
  #define MADV_NORMAL	0x0		/* default page-in behavior */
  #define MADV_RANDOM	0x1		/* page-in minimum required */
-diff -ru linux-2.4.21/mm/mlock.c linux/mm/mlock.c
---- linux-2.4.21/mm/mlock.c	Mon Jun  2 13:59:36 2003
-+++ linux/mm/mlock.c	Mon Jun  9 14:33:17 2003
+--- linux-2.4.21/mm/mlock.c	Fri Jan 10 16:36:03 2003
++++ linux/mm/mlock.c	Wed Aug 20 14:42:58 2003
 @@ -244,6 +244,11 @@
  	if (!capable(CAP_IPC_LOCK))
  		return -EPERM;
@@ -249,9 +222,8 @@ diff -ru linux-2.4.21/mm/mlock.c linux/mm/mlock.c
  		goto out;
  
  	lock_limit = current->rlim[RLIMIT_MEMLOCK].rlim_cur;
-diff -ru linux-2.4.21/mm/oom_kill.c linux/mm/oom_kill.c
---- linux-2.4.21/mm/oom_kill.c	Mon Jun  2 13:59:13 2003
-+++ linux/mm/oom_kill.c	Mon Jun  9 14:12:39 2003
+--- linux-2.4.21/mm/oom_kill.c	Fri Jan 10 16:36:03 2003
++++ linux/mm/oom_kill.c	Wed Aug 20 14:42:58 2003
 @@ -61,6 +61,13 @@
  
  	if (!p->mm)
@@ -266,9 +238,8 @@ diff -ru linux-2.4.21/mm/oom_kill.c linux/mm/oom_kill.c
  	/*
  	 * The memory size of the process is the basis for the badness.
  	 */
-diff -ru linux-2.4.21/mm/page_alloc.c linux/mm/page_alloc.c
---- linux-2.4.21/mm/page_alloc.c	Mon Jun  2 13:59:38 2003
-+++ linux/mm/page_alloc.c	Mon Jun  9 14:19:37 2003
+--- linux-2.4.21/mm/page_alloc.c	Fri Jan 10 16:36:03 2003
++++ linux/mm/page_alloc.c	Wed Aug 20 14:42:58 2003
 @@ -254,6 +254,7 @@
  {
  	struct page * page = NULL;
