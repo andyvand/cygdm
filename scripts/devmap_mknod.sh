@@ -10,8 +10,8 @@ DM_NAME="device-mapper"
 
 set -e
 
-dir="/dev/$DM_DIR"
-control="$dir/control"
+DIR="/dev/$DM_DIR"
+CONTROL="$DIR/control"
 
 # Check for devfs, procfs
 if test -e /dev/.devfsd ; then
@@ -20,22 +20,22 @@ if test -e /dev/.devfsd ; then
 fi
 
 if test ! -e /proc/devices ; then
-	echo "procfs not found: please create $control manually."
+	echo "procfs not found: please create $CONTROL manually."
 	exit 1
 fi
 
 # Get major, minor, and mknod
-major=$(sed -n 's/^[ ]*\([0-9]\+\)[ ]\+misc$/\1/p' /proc/devices)
-minor=$(sed -n "s/^[ ]*\([0-9]\+\)[ ]\+$DM_NAME\$/\1/p" /proc/misc)
+MAJOR=$(sed -n 's/^ *\([0-9]\+\) \+misc$/\1/p' /proc/devices)
+MINOR=$(sed -n "s/^ *\([0-9]\+\) \+$DM_NAME\$/\1/p" /proc/misc)
 
-if test -z "$major" -o -z "$minor" ; then
-	echo "$DM_NAME kernel module not loaded: can't create $control."
+if test -z "$MAJOR" -o -z "$MINOR" ; then
+	echo "$DM_NAME kernel module not loaded: can't create $CONTROL."
 	exit 1
 fi
 
-mkdir -p --mode=755 $dir
-test -e $control && rm -f $control
+mkdir -p --mode=755 $DIR
+test -e $CONTROL && rm -f $CONTROL
 
-echo "Creating $control character device with major:$major minor:$minor."
-mknod --mode=600 $control c $major $minor
+echo "Creating $CONTROL character device with major:$MAJOR minor:$MINOR."
+mknod --mode=600 $CONTROL c $MAJOR $MINOR
 
