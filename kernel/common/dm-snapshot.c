@@ -762,7 +762,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad_free;
 
 	*context = "Cannot get COW device";
-	r = dm_table_get_device(t, cow_path, 0, l, &lc->cow_dev);
+	r = dm_table_get_device(t, cow_path, 0, 0, &lc->cow_dev);
 	if (r) {
 		dm_table_put_device(t, lc->origin_dev);
 		goto bad_free;
