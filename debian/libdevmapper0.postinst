@@ -11,7 +11,7 @@ modprobe dm-mod >/dev/null 2>&1
 
 # Create necessary files in /dev for device-mapper
 if test -e /usr/share/doc/libdevmapper0/devmap_mknod.sh; then
-	sh /usr/share/doc/devmap_mknod.sh
+	sh /usr/share/doc/libdevmapper0/devmap_mknod.sh
 fi
 
 #DEBHELPER#
