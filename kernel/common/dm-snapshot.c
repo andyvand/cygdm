@@ -1153,10 +1153,6 @@ void dm_snapshot_exit(void)
 		kfree(snapshot_origins);
 }
 
-MODULE_AUTHOR("Patrick Caulfield <caulfield@sistina.com>");
-MODULE_DESCRIPTION("Device Mapper: Snapshots");
-MODULE_LICENSE("GPL");
-
 /*
  * Overrides for Emacs so that we follow Linus's tabbing style.
  * Emacs will notice this stuff at the end of the file and automatically

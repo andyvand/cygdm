@@ -119,10 +119,6 @@ void dm_origin_exit(void)
 		DMERR("Device mapper: Origin: unregister failed %d\n", r);
 }
 
-MODULE_AUTHOR("Patrick Caulfield <caulfield@sistina.com>");
-MODULE_DESCRIPTION("Device Mapper: Snapshot origin driver");
-MODULE_LICENSE("GPL");
-
 /*
  * Overrides for Emacs so that we follow Linus's tabbing style.
  * Emacs will notice this stuff at the end of the file and automatically
