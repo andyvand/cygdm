@@ -12,7 +12,7 @@
 
 static void free_params(struct dm_ioctl *param)
 {
-	/*vfree(param); */
+	vfree(param);
 }
 
 static int version(struct dm_ioctl *user)
@@ -40,7 +40,7 @@ static int copy_params(struct dm_ioctl *user, struct dm_ioctl **param)
 		return -ENOMEM;
 
 	if (copy_from_user(dmi, user, tmp.data_size)) {
-		/*vfree(dmi);*/
+		vfree(dmi);
 		return -EFAULT;
 	}
 
