@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.17/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Mon Jan 14 14:34:08 2002
++++ linux/drivers/md/Config.in	Tue Jan 15 15:37:51 2002
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.17/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.17/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Mon Jan 14 14:34:08 2002
++++ linux/drivers/md/Makefile	Tue Jan 15 15:37:51 2002
 @@ -4,9 +4,11 @@
  
  O_TARGET	:= mddev.o
@@ -101,8 +101,8 @@ diff -ruN linux-2.4.17/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 --- linux-2.4.17/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Mon Jan 14 13:46:17 2002
-@@ -0,0 +1,419 @@
++++ linux/drivers/md/dm-ioctl.c	Tue Jan 15 14:22:17 2002
+@@ -0,0 +1,433 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -119,12 +119,22 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	vfree(p);
 +}
 +
++static int version(struct dm_ioctl *user)
++{
++        return copy_to_user(user, DM_IOCTL_VERSION, sizeof(DM_IOCTL_VERSION));
++}
++
 +static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
 +{
 +	struct dm_ioctl tmp, *dmi;
 +
 +	if (copy_from_user(&tmp, user, sizeof(tmp)))
 +		return -EFAULT;
++
++	if (strcmp(DM_IOCTL_VERSION, tmp.version)) {
++		DMWARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
++		return -EINVAL;
++	}
 +
 +	if (tmp.data_size < sizeof(tmp))
 +		return -EINVAL;
@@ -133,8 +143,10 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	if (!dmi)
 +		return -ENOMEM;
 +
-+	if (copy_from_user(dmi, user, tmp.data_size))
++	if (copy_from_user(dmi, user, tmp.data_size)) {
++		vfree(dmi);
 +		return -EFAULT;
++	}
 +
 +	*result = dmi;
 +	return 0;
@@ -153,20 +165,12 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	return -EINVAL;
 +}
 +
-+static int first_target(struct dm_ioctl *a, void *begin, void *end,
-+			struct dm_target_spec **spec, char **params)
-+{
-+	*spec = (struct dm_target_spec *) (a + 1);
-+	*params = (char *) (*spec + 1);
-+
-+	return valid_str(*params, begin, end);
-+}
-+
-+static int next_target(struct dm_target_spec *last, void *begin, void *end,
++static int next_target(struct dm_target_spec *last, unsigned long next,
++		       void *begin, void *end,
 +		       struct dm_target_spec **spec, char **params)
 +{
 +	*spec = (struct dm_target_spec *)
-+		(((unsigned char *) last) + last->next);
++		((unsigned char *) last + next);
 +	*params = (char *) (*spec + 1);
 +
 +	if (*spec < (last + 1) || ((void *)*spec > end))
@@ -216,8 +220,11 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +	for (i = 0; i < args->target_count; i++) {
 +
-+		r = first ? first_target(args, begin, end, &spec, &params) :
-+		    next_target(spec, begin, end, &spec, &params);
++		r = first ? next_target((struct dm_target_spec *)args, 
++					args->data_start,
++					begin, end, &spec, &params) :
++			    next_target(spec, spec->next, 
++					begin, end, &spec, &params);
 +
 +		if (r)
 +			PARSE_ERROR("unable to find target");
@@ -264,19 +271,25 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	struct dm_ioctl param;
 +	struct mapped_device *md = dm_get(name);
 +
-+	if (!md) {
-+		param.exists = 0;
++	param.flags = 0;
++
++	strncpy(param.version, DM_IOCTL_VERSION, sizeof(param.version));
++
++	if (!md)
 +		goto out;
-+	}
++
++	param.flags |= DM_EXISTS_FLAG;
++	if (md->suspended)
++		param.flags |= DM_SUSPEND_FLAG;
++	if (md->read_only)
++		param.flags |= DM_READONLY_FLAG;
 +
 +	param.data_size = 0;
 +	strncpy(param.name, md->name, sizeof(param.name));
 +	param.name[sizeof(param.name) - 1] = '\0';
-+	param.exists = 1;
-+	param.suspend = md->suspended;
++
 +	param.open_count = md->use_count;
-+	param.major = MAJOR(md->dev);
-+	param.minor = MINOR(md->dev);
++	param.dev = kdev_t_to_nr(md->dev);
 +	param.target_count = md->map->num_targets;
 +
 +	dm_put(md);
@@ -290,6 +303,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	int r;
 +	struct mapped_device *md;
 +	struct dm_table *t;
++	int minor;
 +
 +	r = dm_table_create(&t);
 +	if (r)
@@ -299,11 +313,14 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	if (r)
 +		goto bad;
 +
-+	r = dm_create(param->name, param->minor, t, &md);
++	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
++		minor = MINOR(to_kdev_t(param->dev)) : -1;
++
++	r = dm_create(param->name, minor, t, &md);
 +	if (r)
 +		goto bad;
 +
-+	dm_set_ro(md, param->read_only);
++	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
 +
 +	r = info(param->name, user);
 +	if (r) {
@@ -337,7 +354,8 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	if (!md)
 +		return -ENXIO;
 +
-+	r = param->suspend ? dm_suspend(md) : dm_resume(md);
++	r = (param->flags & DM_SUSPEND_FLAG) ? 
++	     dm_suspend(md) : dm_resume(md);
 +	dm_put(md);
 +	return r;
 +}
@@ -363,7 +381,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	if (r)
 +		goto bad;
 +
-+	dm_set_ro(md, param->read_only);
++	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
 +
 +	dm_put(md);
 +	return 0;
@@ -378,7 +396,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +static int rename(struct dm_ioctl *param)
 +{
-+	char *newname = (char *) (param + 1);
++	char *newname = (char *) param + param->data_start;
 +	struct mapped_device *md = dm_get(param->name);
 +
 +	if (!md)
@@ -418,15 +436,12 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	int r;
 +	struct dm_ioctl *p;
 +
++	if (command == DM_VERSION)
++		return version((struct dm_ioctl *) a);
++
 +	r = copy_params((struct dm_ioctl *) a, &p);
 +	if (r)
 +		return r;
-+
-+	if (strcmp(DM_IOCTL_VERSION, p->version)) {
-+		DMWARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
-+		r = -EINVAL;
-+		goto out;
-+	}
 +
 +	switch (command) {
 +	case DM_CREATE:
@@ -458,7 +473,6 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		r = -EINVAL;
 +	}
 +
-+      out:
 +	free_params(p);
 +	return r;
 +}
@@ -1490,8 +1504,8 @@ diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +EXPORT_SYMBOL(dm_unregister_target);
 diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.17/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Mon Jan 14 14:33:59 2002
-@@ -0,0 +1,1025 @@
++++ linux/drivers/md/dm.c	Tue Jan 15 15:37:35 2002
+@@ -0,0 +1,1031 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -1510,7 +1524,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +#define DEFAULT_READ_AHEAD 64
 +
 +static const char *_name = DM_NAME;
-+static const char *_version = "0.92.02-ioctl (2002-01-14)";
++static const char *_version = "0.94.00-ioctl (2002-01-15)";
 +static const char *_email = "lvm-devel@lists.sistina.com";
 +
 +static int major = 0;
@@ -1946,9 +1960,10 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	dm_lock_r();
 +
 +	md = _devs[minor];
-+	__dm_get(md);
 +	if (!md)
-+		goto bad;
++		goto bad_no_put;
++
++	__dm_get(md);
 +
 +	/*
 +	 * If we're suspended we have to queue
@@ -1984,6 +1999,11 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +
 +      bad:
 +	__dm_put(md);
++	dm_unlock_r();
++	buffer_IO_error(bh);
++	return 0;
++
++      bad_no_put:
 +	dm_unlock_r();
 +	buffer_IO_error(bh);
 +	return 0;
@@ -2770,8 +2790,8 @@ diff -ruN linux-2.4.17/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.17/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 --- linux-2.4.17/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Mon Jan 14 14:33:59 2002
-@@ -0,0 +1,59 @@
++++ linux/include/linux/dm-ioctl.h	Tue Jan 15 15:37:35 2002
+@@ -0,0 +1,68 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -2804,30 +2824,39 @@ diff -ruN linux-2.4.17/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +};
 +
 +struct dm_ioctl {
-+	unsigned long data_size;	/* the size of this structure */
 +	char version[16];
-+	char name[DM_NAME_LEN];
 +
-+	int exists;		/* out */
-+	int suspend;		/* in/out */
-+	int open_count;		/* out */
-+	int major;		/* out */
-+	int minor;		/* in/out */
-+	int read_only;		/* in/out */
++	unsigned long data_size;	/* total size of data passed in */
++					/* including this struct */
 +
-+	int target_count;	/* in/out */
++	unsigned long data_start;	/* offset to start of data */
++					/* relative to start of this struct */
++
++	char name[DM_NAME_LEN];		/* device name */
++
++	unsigned int target_count;	/* in/out */
++	unsigned int open_count;	/* out */
++	unsigned int flags;		/* in/out */
++
++	__kernel_dev_t dev;		/* in/out */
 +};
 +
-+/* FIXME: find own numbers: LVM1 used 109 */
 +#define DM_IOCTL 0xfd
 +
 +#define	DM_CREATE _IOWR(DM_IOCTL, 0x00, struct dm_ioctl)
 +#define	DM_REMOVE _IOW(DM_IOCTL, 0x01, struct dm_ioctl)
 +#define	DM_SUSPEND _IOW(DM_IOCTL, 0x02, struct dm_ioctl)
-+#define	DM_RELOAD _IOWR(DM_IOCTL, 0x03, struct dm_ioctl)
++#define	DM_RELOAD _IOW(DM_IOCTL, 0x03, struct dm_ioctl)
 +#define DM_INFO _IOWR(DM_IOCTL, 0x04, struct dm_ioctl)
-+#define DM_RENAME _IOWR(DM_IOCTL, 0x05, struct dm_ioctl)
++#define DM_RENAME _IOW(DM_IOCTL, 0x05, struct dm_ioctl)
++#define DM_VERSION _IOR(DM_IOCTL, 0x06, struct dm_ioctl)
 +
-+#define DM_IOCTL_VERSION "0.92"
++#define DM_IOCTL_VERSION "0.94"
++
++/* Status bits */
++#define DM_READONLY_FLAG	0x00000001
++#define DM_SUSPEND_FLAG		0x00000002
++#define DM_EXISTS_FLAG		0x00000004
++#define DM_PERSISTENT_DEV_FLAG	0x00000008
 +
 +#endif /* _LINUX_DM_IOCTL_H */

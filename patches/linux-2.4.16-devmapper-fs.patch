@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Mon Jan 14 14:33:57 2002
++++ linux/drivers/md/Config.in	Tue Jan 15 15:37:33 2002
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Mon Jan 14 14:33:57 2002
++++ linux/drivers/md/Makefile	Tue Jan 15 15:37:33 2002
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -1069,8 +1069,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +EXPORT_SYMBOL(dm_unregister_target);
 diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.16/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Mon Jan 14 14:33:44 2002
-@@ -0,0 +1,1025 @@
++++ linux/drivers/md/dm.c	Tue Jan 15 15:37:16 2002
+@@ -0,0 +1,1031 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -1089,7 +1089,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +#define DEFAULT_READ_AHEAD 64
 +
 +static const char *_name = DM_NAME;
-+static const char *_version = "0.92.02-fs (2002-01-14)";
++static const char *_version = "0.94.00-fs (2002-01-15)";
 +static const char *_email = "lvm-devel@lists.sistina.com";
 +
 +static int major = 0;
@@ -1525,9 +1525,10 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	dm_lock_r();
 +
 +	md = _devs[minor];
-+	__dm_get(md);
 +	if (!md)
-+		goto bad;
++		goto bad_no_put;
++
++	__dm_get(md);
 +
 +	/*
 +	 * If we're suspended we have to queue
@@ -1563,6 +1564,11 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +
 +      bad:
 +	__dm_put(md);
++	dm_unlock_r();
++	buffer_IO_error(bh);
++	return 0;
++
++      bad_no_put:
 +	dm_unlock_r();
 +	buffer_IO_error(bh);
 +	return 0;
@@ -3596,7 +3602,7 @@ diff -ruN linux-2.4.16/drivers/md/dmfs.h linux/drivers/md/dmfs.h
 +#endif				/* LINUX_DMFS_H */
 diff -ruN linux-2.4.16/fs/namespace.c linux/fs/namespace.c
 --- linux-2.4.16/fs/namespace.c	Thu Dec  6 15:57:56 2001
-+++ linux/fs/namespace.c	Mon Jan 14 14:33:57 2002
++++ linux/fs/namespace.c	Tue Jan 15 15:37:33 2002
 @@ -332,7 +332,7 @@
  	}
  }
@@ -3670,7 +3676,7 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
 --- linux-2.4.16/include/linux/fs.h	Thu Dec  6 15:57:58 2001
-+++ linux/include/linux/fs.h	Mon Jan 14 14:33:57 2002
++++ linux/include/linux/fs.h	Tue Jan 15 15:37:33 2002
 @@ -980,6 +980,7 @@
  extern struct vfsmount *kern_mount(struct file_system_type *);
  extern int may_umount(struct vfsmount *);
@@ -3681,7 +3687,7 @@ diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
  
 diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
 --- linux-2.4.16/include/linux/seq_file.h	Thu Dec  6 15:57:56 2001
-+++ linux/include/linux/seq_file.h	Mon Jan 14 14:33:57 2002
++++ linux/include/linux/seq_file.h	Tue Jan 15 15:37:33 2002
 @@ -12,6 +12,7 @@
  	loff_t index;
  	struct semaphore sem;
@@ -3692,7 +3698,7 @@ diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
  struct seq_operations {
 diff -ruN linux-2.4.16/kernel/ksyms.c linux/kernel/ksyms.c
 --- linux-2.4.16/kernel/ksyms.c	Thu Dec  6 15:57:56 2001
-+++ linux/kernel/ksyms.c	Mon Jan 14 14:33:57 2002
++++ linux/kernel/ksyms.c	Tue Jan 15 15:37:33 2002
 @@ -46,6 +46,7 @@
  #include <linux/tty.h>
  #include <linux/in6.h>
