@@ -1,5 +1,5 @@
 --- linux-2.4.21/drivers/md/dm-daemon.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.c	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-daemon.c	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,113 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -115,7 +115,7 @@
 +EXPORT_SYMBOL(dm_daemon_stop);
 +EXPORT_SYMBOL(dm_daemon_wake);
 --- linux-2.4.21/drivers/md/dm-daemon.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.h	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-daemon.h	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,29 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -147,7 +147,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-exception-store.c	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-exception-store.c	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,673 @@
 +/*
 + * dm-snapshot.c
@@ -823,8 +823,8 @@
 +	return 0;
 +}
 --- linux-2.4.21/drivers/md/dm-io.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.c	Mon Sep  1 16:28:55 2003
-@@ -0,0 +1,360 @@
++++ linux/drivers/md/dm-io.c	Fri Nov 21 13:31:18 2003
+@@ -0,0 +1,361 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
 + *
@@ -837,6 +837,7 @@
 +#include <linux/module.h>
 +#include <linux/slab.h>
 +#include <linux/sched.h>
++#include <linux/bitops.h>
 +
 +/* FIXME: can we shrink this ? */
 +struct io_context {
@@ -1186,7 +1187,7 @@
 +EXPORT_SYMBOL(dm_io_sync);
 +EXPORT_SYMBOL(dm_io_async);
 --- linux-2.4.21/drivers/md/dm-io.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.h	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-io.h	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,86 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -1275,7 +1276,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-ioctl.c	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,1284 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -1977,6 +1978,113 @@
 +	return r;
 +}
 +
++/*
++ * Build up the status struct for each target
++ */
++static void retrieve_status(struct dm_table *table, struct dm_ioctl *param,
++			    size_t param_size)
++{
++	unsigned int i, num_targets;
++	struct dm_target_spec *spec;
++	char *outbuf, *outptr;
++	status_type_t type;
++	size_t remaining, len, used = 0;
++
++	outptr = outbuf = get_result_buffer(param, param_size, &len);
++
++	if (param->flags & DM_STATUS_TABLE_FLAG)
++		type = STATUSTYPE_TABLE;
++	else
++		type = STATUSTYPE_INFO;
++
++	/* Get all the target info */
++	num_targets = dm_table_get_num_targets(table);
++	for (i = 0; i < num_targets; i++) {
++		struct dm_target *ti = dm_table_get_target(table, i);
++
++		remaining = len - (outptr - outbuf);
++		if (remaining < sizeof(struct dm_target_spec)) {
++			param->flags |= DM_BUFFER_FULL_FLAG;
++			break;
++		}
++
++		spec = (struct dm_target_spec *) outptr;
++
++		spec->status = 0;
++		spec->sector_start = ti->begin;
++		spec->length = ti->len;
++		strncpy(spec->target_type, ti->type->name,
++			sizeof(spec->target_type));
++
++		outptr += sizeof(struct dm_target_spec);
++		remaining = len - (outptr - outbuf);
++
++		/* Get the status/table string from the target driver */
++		if (ti->type->status) {
++			if (ti->type->status(ti, type, outptr, remaining)) {
++				param->flags |= DM_BUFFER_FULL_FLAG;
++				break;
++			}
++		} else
++			outptr[0] = '\0';
++
++		outptr += strlen(outptr) + 1;
++		used = param->data_start + (outptr - outbuf);
++
++		align_ptr(outptr);
++		spec->next = outptr - outbuf;
++	}
++
++	if (used)
++		param->data_size = used;
++
++	param->target_count = num_targets;
++}
++
++/*
++ * Wait for a device to report an event
++ */
++static int dev_wait(struct dm_ioctl *param, size_t param_size)
++{
++	int r;
++	struct mapped_device *md;
++	struct dm_table *table;
++	DECLARE_WAITQUEUE(wq, current);
++
++	md = find_device(param);
++	if (!md)
++		return -ENXIO;
++
++	/*
++	 * Wait for a notification event
++	 */
++	set_current_state(TASK_INTERRUPTIBLE);
++	if (!dm_add_wait_queue(md, &wq, param->event_nr)) {
++		schedule();
++		dm_remove_wait_queue(md, &wq);
++	}
++	set_current_state(TASK_RUNNING);
++
++	/*
++	 * The userland program is going to want to know what
++	 * changed to trigger the event, so we may as well tell
++	 * him and save an ioctl.
++	 */
++	r = __dev_status(md, param);
++	if (r)
++		goto out;
++
++	table = dm_get_table(md);
++	if (table) {
++		retrieve_status(table, param, param_size);
++		dm_table_put(table);
++	}
++
++ out:
++	dm_put(md);
++	return r;
++}
++
 +static inline int get_mode(struct dm_ioctl *param)
 +{
 +	int mode = FMODE_READ | FMODE_WRITE;
@@ -2164,69 +2272,6 @@
 +}
 +
 +/*
-+ * Build up the status struct for each target
-+ */
-+static void retrieve_status(struct dm_table *table, struct dm_ioctl *param,
-+			    size_t param_size)
-+{
-+	unsigned int i, num_targets;
-+	struct dm_target_spec *spec;
-+	char *outbuf, *outptr;
-+	status_type_t type;
-+	size_t remaining, len, used = 0;
-+
-+	outptr = outbuf = get_result_buffer(param, param_size, &len);
-+
-+	if (param->flags & DM_STATUS_TABLE_FLAG)
-+		type = STATUSTYPE_TABLE;
-+	else
-+		type = STATUSTYPE_INFO;
-+
-+	/* Get all the target info */
-+	num_targets = dm_table_get_num_targets(table);
-+	for (i = 0; i < num_targets; i++) {
-+		struct dm_target *ti = dm_table_get_target(table, i);
-+
-+		remaining = len - (outptr - outbuf);
-+		if (remaining < sizeof(struct dm_target_spec)) {
-+			param->flags |= DM_BUFFER_FULL_FLAG;
-+			break;
-+		}
-+
-+		spec = (struct dm_target_spec *) outptr;
-+
-+		spec->status = 0;
-+		spec->sector_start = ti->begin;
-+		spec->length = ti->len;
-+		strncpy(spec->target_type, ti->type->name,
-+			sizeof(spec->target_type));
-+
-+		outptr += sizeof(struct dm_target_spec);
-+		remaining = len - (outptr - outbuf);
-+
-+		/* Get the status/table string from the target driver */
-+		if (ti->type->status) {
-+			if (ti->type->status(ti, type, outptr, remaining)) {
-+				param->flags |= DM_BUFFER_FULL_FLAG;
-+				break;
-+			}
-+		} else
-+			outptr[0] = '\0';
-+
-+		outptr += strlen(outptr) + 1;
-+		used = param->data_start + (outptr - outbuf);
-+
-+		align_ptr(outptr);
-+		spec->next = outptr - outbuf;
-+	}
-+
-+	if (used)
-+		param->data_size = used;
-+
-+	param->target_count = num_targets;
-+}
-+
-+/*
 + * Return the status of a device as a text string for each
 + * target.
 + */
@@ -2244,50 +2289,6 @@
 +	if (r)
 +		goto out;
 + 
-+	table = dm_get_table(md);
-+	if (table) {
-+		retrieve_status(table, param, param_size);
-+		dm_table_put(table);
-+	}
-+
-+ out:
-+	dm_put(md);
-+	return r;
-+}
-+
-+/*
-+ * Wait for a device to report an event
-+ */
-+static int dev_wait(struct dm_ioctl *param, size_t param_size)
-+{
-+	int r;
-+	struct mapped_device *md;
-+	struct dm_table *table;
-+	DECLARE_WAITQUEUE(wq, current);
-+
-+	md = find_device(param);
-+	if (!md)
-+		return -ENXIO;
-+
-+	/*
-+	 * Wait for a notification event
-+	 */
-+	set_current_state(TASK_INTERRUPTIBLE);
-+	if (!dm_add_wait_queue(md, &wq, param->event_nr)) {
-+		schedule();
-+		dm_remove_wait_queue(md, &wq);
-+	}
-+	set_current_state(TASK_RUNNING);
-+
-+	/*
-+	 * The userland program is going to want to know what
-+	 * changed to trigger the event, so we may as well tell
-+	 * him and save an ioctl.
-+	 */
-+	r = __dev_status(md, param);
-+	if (r)
-+		goto out;
-+
 +	table = dm_get_table(md);
 +	if (table) {
 +		retrieve_status(table, param, param_size);
@@ -2562,7 +2563,7 @@
 +	dm_hash_exit();
 +}
 --- linux-2.4.21/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-linear.c	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,123 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -2688,8 +2689,8 @@
 +		DMERR("linear: unregister failed %d", r);
 +}
 --- linux-2.4.21/drivers/md/dm-log.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.c	Mon Sep  1 16:28:55 2003
-@@ -0,0 +1,303 @@
++++ linux/drivers/md/dm-log.c	Fri Nov 21 13:31:18 2003
+@@ -0,0 +1,310 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
 + *
@@ -2816,6 +2817,8 @@
 +	int sync_search;
 +};
 +
++#define BYTE_SHIFT 3
++
 +static int core_ctr(struct dirty_log *log, sector_t dev_size,
 +		    unsigned int argc, char **argv)
 +{
@@ -2845,8 +2848,13 @@
 +	clog->region_size = region_size;
 +	clog->region_count = region_count;
 +
-+	bitset_size = dm_round_up((region_count + 7) >> 3,
-+				  sizeof(*clog->clean_bits));
++	/*
++ 	 * Work out how many words we need to hold the bitset.
++ 	 */
++	bitset_size = dm_round_up(region_count,
++				  sizeof(*clog->clean_bits) << BYTE_SHIFT);
++	bitset_size >>= BYTE_SHIFT;
++
 +	clog->clean_bits = vmalloc(bitset_size);
 +	if (!clog->clean_bits) {
 +		DMWARN("couldn't allocate clean bitset");
@@ -2994,7 +3002,7 @@
 +EXPORT_SYMBOL(dm_create_dirty_log);
 +EXPORT_SYMBOL(dm_destroy_dirty_log);
 --- linux-2.4.21/drivers/md/dm-log.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.h	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-log.h	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,112 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -3109,7 +3117,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-raid1.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-raid1.c	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-raid1.c	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,1294 @@
 +/*
 + * Copyright (C) 2003 Sistina Software Limited.
@@ -4158,7 +4166,7 @@
 + * For now, #log_params = 1, log_type = "core"
 + *
 + */
-+#define DM_IO_PAGES 256
++#define DM_IO_PAGES 64
 +static int mirror_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 +{
 +	int r;
@@ -4406,7 +4414,7 @@
 +MODULE_AUTHOR("Heinz Mauelshagen <mge@sistina.com>");
 +MODULE_LICENSE("GPL");
 --- linux-2.4.21/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.c	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-snapshot.c	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,1235 @@
 +/*
 + * dm-snapshot.c
@@ -5644,7 +5652,7 @@
 +	kmem_cache_destroy(exception_cache);
 +}
 --- linux-2.4.21/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.h	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-snapshot.h	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,158 @@
 +/*
 + * dm-snapshot.c
@@ -5805,7 +5813,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-stripe.c	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,258 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6066,8 +6074,8 @@
 +	return;
 +}
 --- linux-2.4.21/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-table.c	Mon Sep  1 16:28:55 2003
-@@ -0,0 +1,710 @@
++++ linux/drivers/md/dm-table.c	Fri Nov 21 13:31:18 2003
+@@ -0,0 +1,679 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -6087,7 +6095,6 @@
 +#define NODE_SIZE L1_CACHE_BYTES
 +#define KEYS_PER_NODE (NODE_SIZE / sizeof(sector_t))
 +#define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
-+#define MAX_TARGET_ARGS 64
 +
 +struct dm_table {
 +	atomic_t holders;
@@ -6183,44 +6190,11 @@
 +	return 0;
 +}
 +
-+/*
-+ * highs, and targets are managed as dynamic arrays during a
-+ * table load.
-+ */
-+static int alloc_targets(struct dm_table *t, unsigned int num)
-+{
-+	sector_t *n_highs;
-+	struct dm_target *n_targets;
-+	int n = t->num_targets;
 +
-+	/*
-+	 * Allocate both the target array and offset array at once.
-+	 */
-+	n_highs = (sector_t *) vcalloc(sizeof(struct dm_target) +
-+				       sizeof(sector_t), num);
-+	if (!n_highs)
-+		return -ENOMEM;
-+
-+	n_targets = (struct dm_target *) (n_highs + num);
-+
-+	if (n) {
-+		memcpy(n_highs, t->highs, sizeof(*n_highs) * n);
-+		memcpy(n_targets, t->targets, sizeof(*n_targets) * n);
-+	}
-+
-+	memset(n_highs + n, -1, sizeof(*n_highs) * (num - n));
-+	vfree(t->highs);
-+
-+	t->num_allocated = num;
-+	t->highs = n_highs;
-+	t->targets = n_targets;
-+
-+	return 0;
-+}
 +
 +int dm_table_create(struct dm_table **result, int mode, unsigned num_targets)
 +{
-+	struct dm_table *t = kmalloc(sizeof(*t), GFP_NOIO);
++	struct dm_table *t = kmalloc(sizeof(*t), GFP_KERNEL);
 +
 +	if (!t)
 +		return -ENOMEM;
@@ -6229,15 +6203,20 @@
 +	INIT_LIST_HEAD(&t->devices);
 +	atomic_set(&t->holders, 1);
 +
-+	if (!num_targets)
-+		num_targets = KEYS_PER_NODE;
++	num_targets = dm_round_up(num_targets, KEYS_PER_NODE);
 +
-+	if (alloc_targets(t, num_targets)) {
++	/* Allocate both the target array and offset array at once. */
++	t->highs = (sector_t *) vcalloc(sizeof(struct dm_target) +
++					sizeof(sector_t), num_targets);
++	if (!t->highs) {
 +		kfree(t);
-+		t = NULL;
 +		return -ENOMEM;
 +	}
 +
++	memset(t->highs, -1, sizeof(*t->highs) * num_targets);
++
++	t->targets = (struct dm_target *) (t->highs + num_targets);
++	t->num_allocated = num_targets;
 +	t->mode = mode;
 +	*result = t;
 +	return 0;
@@ -6294,17 +6273,6 @@
 +{
 +	if (atomic_dec_and_test(&t->holders))
 +		table_destroy(t);
-+}
-+
-+/*
-+ * Checks to see if we need to extend highs or targets.
-+ */
-+static inline int check_space(struct dm_table *t)
-+{
-+	if (t->num_targets >= t->num_allocated)
-+		return alloc_targets(t, t->num_allocated * 2);
-+
-+	return 0;
 +}
 +
 +/*
@@ -6514,16 +6482,34 @@
 +}
 +
 +/*
++ * Used to dynamically allocate the arg array.
++ */
++static char **realloc_argv(unsigned *array_size, char **old_argv)
++{
++	char **argv;
++	unsigned new_size;
++
++	new_size = *array_size ? *array_size * 2 : 64;
++	argv = kmalloc(new_size * sizeof(*argv), GFP_KERNEL);
++	if (argv) {
++		memcpy(argv, old_argv, *array_size * sizeof(*argv));
++		*array_size = new_size;
++	}
++
++	kfree(old_argv);
++	return argv;
++}
++
++/*
 + * Destructively splits up the argument list to pass to ctr.
 + */
 +static int split_args(int *argc, char ***argvp, char *input)
 +{
-+	char *start, *end = input, *out;
-+	char **argv;
-+	int max_args = MAX_TARGET_ARGS;
++	char *start, *end = input, *out, **argv = NULL;
++	unsigned array_size = 0;
 +
 +	*argc = 0;
-+	argv = kmalloc(sizeof(*argv) * max_args, GFP_NOIO);
++	argv = realloc_argv(&array_size, argv);
 +	if (!argv)
 +		return -ENOMEM;
 +
@@ -6554,19 +6540,10 @@
 +		}
 +
 +		/* have we already filled the array ? */
-+		if ((*argc + 1) > max_args) {
-+			char **argv2;
-+			
-+			max_args *= 2;
-+			argv2 = kmalloc(sizeof(*argv2) * max_args, GFP_NOIO);
-+			if (!argv2) {
-+				kfree(argv);
++		if ((*argc + 1) > array_size) {
++			argv = realloc_argv(&array_size, argv);
++			if (!argv)
 +				return -ENOMEM;
-+			}
-+
-+			memcpy(argv2, argv, sizeof(*argv) * *argc);
-+			kfree(argv);
-+			argv = argv2;
 +		}
 +
 +		/* we know this is whitespace */
@@ -6590,8 +6567,8 @@
 +	char **argv;
 +	struct dm_target *tgt;
 +
-+	if ((r = check_space(t)))
-+		return r;
++	if (t->num_targets >= t->num_allocated)
++		return -ENOMEM;
 +
 +	tgt = t->targets + t->num_targets;
 +	memset(tgt, 0, sizeof(*tgt));
@@ -6779,7 +6756,7 @@
 +EXPORT_SYMBOL(dm_table_event);
 +EXPORT_SYMBOL(dm_table_get_mode);
 --- linux-2.4.21/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-target.c	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm-target.c	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,188 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
@@ -6970,7 +6947,7 @@
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
 --- linux-2.4.21/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm.c	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,1115 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -8088,7 +8065,7 @@
 +
 +EXPORT_SYMBOL(dm_kdevname);
 --- linux-2.4.21/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/dm.h	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,175 @@
 +/*
 + * Internal header file for device mapper
@@ -8266,8 +8243,8 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.c	Mon Sep  1 16:28:55 2003
-@@ -0,0 +1,656 @@
++++ linux/drivers/md/kcopyd.c	Fri Nov 21 13:31:18 2003
+@@ -0,0 +1,666 @@
 +/*
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
 + *
@@ -8297,6 +8274,11 @@
 +
 +static struct dm_daemon _kcopyd;
 +
++#define SECTORS_PER_PAGE (PAGE_SIZE / SECTOR_SIZE)
++#define SUB_JOB_SIZE 128
++#define PAGES_PER_SUB_JOB (SUB_JOB_SIZE / SECTORS_PER_PAGE)
++#define SUB_JOB_COUNT 8
++
 +/*-----------------------------------------------------------------
 + * Each kcopyd client has its own little pool of preallocated
 + * pages for kcopyd io.
@@ -8308,6 +8290,7 @@
 +	struct list_head pages;
 +	unsigned int nr_pages;
 +	unsigned int nr_free_pages;
++	unsigned int max_split;
 +};
 +
 +static inline void __push_page(struct kcopyd_client *kc, struct page *p)
@@ -8392,6 +8375,10 @@
 +
 +	kcopyd_put_pages(kc, &new);
 +	kc->nr_pages += nr;
++	kc->max_split = kc->nr_pages / PAGES_PER_SUB_JOB;
++	if (kc->max_split > SUB_JOB_COUNT)
++		kc->max_split = SUB_JOB_COUNT;
++
 +	return 0;
 +}
 +
@@ -8604,7 +8591,6 @@
 +	return r;
 +}
 +
-+#define SECTORS_PER_PAGE (PAGE_SIZE / SECTOR_SIZE)
 +static int run_pages_job(struct kcopyd_job *job)
 +{
 +	int r;
@@ -8692,7 +8678,6 @@
 +	dm_daemon_wake(&_kcopyd);
 +}
 +
-+#define SUB_JOB_SIZE 128
 +static void segment_complete(int read_err,
 +			     unsigned int write_err, void *context)
 +{
@@ -8761,17 +8746,19 @@
 + * Create some little jobs that will do the move between
 + * them.
 + */
-+#define SPLIT_COUNT 8
 +static void split_job(struct kcopyd_job *job)
 +{
-+	int i;
++	int nr;
 +
-+	atomic_set(&job->sub_jobs, SPLIT_COUNT);
-+	for (i = 0; i < SPLIT_COUNT; i++)
++	nr = dm_div_up(job->source.count, SUB_JOB_SIZE);
++	if (nr > job->kc->max_split)
++		nr = job->kc->max_split;
++
++	atomic_set(&job->sub_jobs, nr);
++	while (nr--)
 +		segment_complete(0, 0u, job);
 +}
 +
-+#define SUB_JOB_THRESHOLD (SPLIT_COUNT * SUB_JOB_SIZE)
 +int kcopyd_copy(struct kcopyd_client *kc, struct io_region *from,
 +		unsigned int num_dests, struct io_region *dests,
 +		unsigned int flags, kcopyd_notify_fn fn, void *context)
@@ -8804,7 +8791,7 @@
 +	job->fn = fn;
 +	job->context = context;
 +
-+	if (job->source.count < SUB_JOB_THRESHOLD)
++	if (job->source.count < SUB_JOB_SIZE)
 +		dispatch_job(job);
 +
 +	else {
@@ -8852,9 +8839,9 @@
 +	int r = 0;
 +	struct kcopyd_client *kc;
 +
-+	if (nr_pages * SECTORS_PER_PAGE < SUB_JOB_SIZE * SPLIT_COUNT) {
++	if (nr_pages * SECTORS_PER_PAGE < SUB_JOB_SIZE) {
 +		DMERR("kcopyd client requested %u pages: minimum is %lu",
-+		      nr_pages, SUB_JOB_SIZE * SPLIT_COUNT / SECTORS_PER_PAGE);
++		      nr_pages, SUB_JOB_SIZE / SECTORS_PER_PAGE);
 +		return -ENOMEM;
 +	}
 +
@@ -8925,7 +8912,7 @@
 +EXPORT_SYMBOL(kcopyd_copy);
 +EXPORT_SYMBOL(kcopyd_cancel);
 --- linux-2.4.21/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.h	Mon Sep  1 16:28:55 2003
++++ linux/drivers/md/kcopyd.h	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,47 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
@@ -8975,7 +8962,7 @@
 +
 +#endif
 --- linux-2.4.21/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Mon Sep  1 16:28:55 2003
++++ linux/include/linux/device-mapper.h	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,104 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -9082,7 +9069,7 @@
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 --- linux-2.4.21/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Mon Sep  1 16:28:55 2003
++++ linux/include/linux/dm-ioctl.h	Fri Nov 21 13:31:18 2003
 @@ -0,0 +1,237 @@
 +/*
 + * Copyright (C) 2001 - 2003 Sistina Software (UK) Limited.
@@ -9293,8 +9280,8 @@
 +
 +#define DM_VERSION_MAJOR	4
 +#define DM_VERSION_MINOR	0
-+#define DM_VERSION_PATCHLEVEL	4
-+#define DM_VERSION_EXTRA	"-ioctl (2003-08-30)"
++#define DM_VERSION_PATCHLEVEL	5
++#define DM_VERSION_EXTRA	"-ioctl (2003-11-18)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	(1 << 0) /* In/Out */
