@@ -68,7 +68,9 @@ struct exception_store {
 	/*
 	 * Return the %age full of the snapshot
 	 */
-	int (*percent_full) (struct exception_store *store);
+	void (*fraction_full) (struct exception_store *store,
+			       sector_t *numerator,
+			       sector_t *denominator);
 
 	struct dm_snapshot *snap;
 	void *context;

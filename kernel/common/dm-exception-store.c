@@ -427,11 +427,12 @@ static inline struct pstore *get_info(struct exception_store *store)
 	return (struct pstore *) store->context;
 }
 
-static int persistent_percentfull(struct exception_store *store)
+static void persistent_fraction_full(struct exception_store *store,
+				     sector_t *numerator,
+				     sector_t *denominator)
 {
-	struct pstore *ps = get_info(store);
-	return (ps->next_free * store->snap->chunk_size * 100) /
-	    get_dev_size(store->snap->cow->dev);
+	*numerator = get_info(store)->next_free * store->snap->chunk_size - 1;
+	*denominator = get_dev_size(store->snap->cow->dev);
 }
 
 static void persistent_destroy(struct exception_store *store)
@@ -596,7 +597,7 @@ int dm_create_persistent(struct exception_store *store, uint32_t chunk_size)
 		if (!ps->valid) {
 			DMWARN("snapshot is marked invalid");
 			r = -EINVAL;
-			goto bad;   
+			goto bad;
 		}
 
 		if (ps->chunk_size != chunk_size) {
@@ -625,7 +626,7 @@ int dm_create_persistent(struct exception_store *store, uint32_t chunk_size)
 	store->prepare_exception = persistent_prepare;
 	store->commit_exception = persistent_commit;
 	store->drop_snapshot = persistent_drop;
-	store->percent_full = persistent_percentfull;
+	store->fraction_full = persistent_fraction_full;
 	store->context = ps;
 
 	return r;
@@ -678,10 +679,12 @@ void transient_commit(struct exception_store *store,
 	callback(callback_context, 1);
 }
 
-static int transient_percentfull(struct exception_store *store)
+static void transient_fraction_full(struct exception_store *store,
+				    sector_t *numerator,
+				    sector_t *denominator)
 {
-	struct transient_c *tc = (struct transient_c *) store->context;
-	return (tc->next_free * 100) / get_dev_size(store->snap->cow->dev);
+	*numerator = ((struct transient_c *) store->context)->next_free;
+	*denominator = get_dev_size(store->snap->cow->dev);
 }
 
 int dm_create_transient(struct exception_store *store,
@@ -693,7 +696,7 @@ int dm_create_transient(struct exception_store *store,
 	store->destroy = transient_destroy;
 	store->prepare_exception = transient_prepare;
 	store->commit_exception = transient_commit;
-	store->percent_full = transient_percentfull;
+	store->fraction_full = transient_fraction_full;
 	store->snap = s;
 
 	tc = kmalloc(sizeof(struct transient_c), GFP_KERNEL);

@@ -650,8 +650,13 @@ static void pending_complete(struct pending_exception *pe, int success)
 		DMDEBUG("Exception completed successfully.");
 
 		/* Notify any interested parties */
-		if (s->store.percent_full) {
-			int pc = s->store.percent_full(&s->store);
+		if (s->store.fraction_full) {
+			sector_t numerator, denominator;
+			int pc;
+
+			s->store.fraction_full(&s->store, &numerator,
+					       &denominator);
+			pc = numerator * 100 / denominator;
 
 			if (pc >= s->last_percent + WAKE_UP_PERCENT) {
 				dm_table_event(s->table);
@@ -947,11 +952,15 @@ static int snapshot_status(struct dm_target *ti, status_type_t type,
 		if (!snap->valid)
 			snprintf(result, maxlen, "Invalid");
 		else {
-			if (snap->store.percent_full)
-				snprintf(result, maxlen, "%d%%",
-					 snap->store.percent_full(&snap->
-								  store));
-			else
+			if (snap->store.fraction_full) {
+				sector_t numerator, denominator;
+				snap->store.fraction_full(&snap->store,
+							  &numerator,
+							  &denominator);
+				snprintf(result, maxlen,
+					 SECTOR_FORMAT "/" SECTOR_FORMAT,
+					 numerator, denominator);
+			} else
 				snprintf(result, maxlen, "Unknown");
 		}
 		break;
