@@ -185,6 +185,8 @@ enum {
 	DM_TABLE_CLEAR_CMD,
 	DM_TABLE_DEPS_CMD,
 	DM_TABLE_STATUS_CMD,
+
+	DM_LIST_VERSIONS_CMD,
 };
 
 #define DM_IOCTL 0xfd
@@ -192,6 +194,7 @@ enum {
 #define DM_VERSION       _IOWR(DM_IOCTL, DM_VERSION_CMD, struct dm_ioctl)
 #define DM_REMOVE_ALL    _IOWR(DM_IOCTL, DM_REMOVE_ALL_CMD, struct dm_ioctl)
 #define DM_LIST_DEVICES  _IOWR(DM_IOCTL, DM_LIST_DEVICES_CMD, struct dm_ioctl)
+#define DM_LIST_VERSIONS _IOWR(DM_IOCTL, DM_LIST_VERSIONS_CMD, struct dm_ioctl)
 
 #define DM_DEV_CREATE    _IOWR(DM_IOCTL, DM_DEV_CREATE_CMD, struct dm_ioctl)
 #define DM_DEV_REMOVE    _IOWR(DM_IOCTL, DM_DEV_REMOVE_CMD, struct dm_ioctl)
