@@ -41,7 +41,7 @@
 +	 /* convert to 512-byte sectors */
 +	dev_size <<= 1;
 +
-+	return ((start < dev_size) && (len < (dev_size - start)));
++	return ((start < dev_size) && (len <= (dev_size - start)));
 +}
 +
 +/*
