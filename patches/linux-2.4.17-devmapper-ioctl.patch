@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.17/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Tue Jan 15 15:37:51 2002
++++ linux/drivers/md/Config.in	Thu Jan 17 18:14:49 2002
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.17/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.17/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Tue Jan 15 15:37:51 2002
++++ linux/drivers/md/Makefile	Thu Jan 17 18:14:49 2002
 @@ -4,9 +4,11 @@
  
  O_TARGET	:= mddev.o
@@ -101,7 +101,7 @@ diff -ruN linux-2.4.17/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 --- linux-2.4.17/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Tue Jan 15 14:22:17 2002
++++ linux/drivers/md/dm-ioctl.c	Thu Jan 17 12:40:05 2002
 @@ -0,0 +1,433 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -121,7 +121,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +static int version(struct dm_ioctl *user)
 +{
-+        return copy_to_user(user, DM_IOCTL_VERSION, sizeof(DM_IOCTL_VERSION));
++        return copy_to_user(user, DM_DRIVER_VERSION, sizeof(DM_DRIVER_VERSION));
 +}
 +
 +static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
@@ -538,7 +538,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +}
 diff -ruN linux-2.4.17/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 --- linux-2.4.17/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Tue Jan  8 17:57:45 2002
++++ linux/drivers/md/dm-linear.c	Tue Jan 15 19:53:55 2002
 @@ -0,0 +1,105 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -637,7 +637,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +	return r;
 +}
 +
-+void __exit dm_linear_exit(void)
++void dm_linear_exit(void)
 +{
 +	int r = dm_unregister_target(&linear_target);
 +
@@ -647,7 +647,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +
 diff -ruN linux-2.4.17/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 --- linux-2.4.17/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Tue Jan  8 17:57:45 2002
++++ linux/drivers/md/dm-stripe.c	Tue Jan 15 19:54:07 2002
 @@ -0,0 +1,200 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -841,7 +841,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +	return r;
 +}
 +
-+void __exit dm_stripe_exit(void)
++void dm_stripe_exit(void)
 +{
 +	if (dm_unregister_target(&stripe_target))
 +		DMWARN("striped target unregistration failed");
@@ -1504,7 +1504,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +EXPORT_SYMBOL(dm_unregister_target);
 diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.17/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Tue Jan 15 15:37:35 2002
++++ linux/drivers/md/dm.c	Thu Jan 17 18:14:36 2002
 @@ -0,0 +1,1031 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -1524,7 +1524,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +#define DEFAULT_READ_AHEAD 64
 +
 +static const char *_name = DM_NAME;
-+static const char *_version = "0.94.00-ioctl (2002-01-15)";
++static const char *_version = "0.94.01-ioctl (2002-01-17)";
 +static const char *_email = "lvm-devel@lists.sistina.com";
 +
 +static int major = 0;
@@ -2790,8 +2790,8 @@ diff -ruN linux-2.4.17/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.17/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 --- linux-2.4.17/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Tue Jan 15 15:37:35 2002
-@@ -0,0 +1,68 @@
++++ linux/include/linux/dm-ioctl.h	Thu Jan 17 18:14:36 2002
+@@ -0,0 +1,69 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -2852,6 +2852,7 @@ diff -ruN linux-2.4.17/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +#define DM_VERSION _IOR(DM_IOCTL, 0x06, struct dm_ioctl)
 +
 +#define DM_IOCTL_VERSION "0.94"
++#define DM_DRIVER_VERSION "0.94.01-ioctl (2002-01-17)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	0x00000001
