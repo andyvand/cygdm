@@ -20,6 +20,9 @@
 /* Hard sector size used all over the kernel */
 #define SECTOR_SIZE 512
 
+/* Number of entries in the free list to start with */
+#define INITIAL_FREE_LIST_SIZE 10
+
 /* Structure of work to do in the list */
 struct copy_work
 {
@@ -29,21 +32,67 @@ struct copy_work
 	kdev_t todev;
 	unsigned long nr_sectors;
 	int  throttle;
-	void (*callback)(int, void *);
+	void (*callback)(copy_cb_reason_t, void *, long);
 	void *context;
 	struct list_head list;
 };
 
 static LIST_HEAD(work_list);
+static LIST_HEAD(free_list);
 static struct task_struct *copy_task = NULL;
-static struct rw_semaphore list_lock;
+static struct rw_semaphore work_list_lock;
+static struct rw_semaphore free_list_lock;
 static DECLARE_MUTEX(start_lock);
 static DECLARE_MUTEX(run_lock);
 static DECLARE_WAIT_QUEUE_HEAD(start_waitq);
 static DECLARE_WAIT_QUEUE_HEAD(work_waitq);
+static DECLARE_WAIT_QUEUE_HEAD(freelist_waitq);
 static struct kiobuf *iobuf;
 static int thread_exit = 0;
+static long last_jiffies = 0;
 
+
+/* Find a free entry from the free-list */
+struct copy_work *get_work_struct(void)
+{
+	struct copy_work *entry = NULL;
+
+	down_write(&free_list_lock);
+	if (!list_empty(&free_list)) {
+		entry = list_entry(free_list.next, struct copy_work, list);
+		list_del(&entry->list);
+	}
+	up_write(&free_list_lock);
+
+	/* Nothing on the free-list - try to allocate one without doing IO */
+	if (!entry) {
+		entry = kmalloc(sizeof(struct copy_work), GFP_NOIO);
+
+		/* Failed...wait for IO to finish */
+		while (!entry) {
+			DECLARE_WAITQUEUE(wq, current);
+
+			set_task_state(current, TASK_INTERRUPTIBLE);
+			add_wait_queue(&freelist_waitq, &wq);
+
+			if (list_empty(&free_list))
+				schedule();
+
+			set_task_state(current, TASK_RUNNING);
+			remove_wait_queue(&freelist_waitq, &wq);
+
+			/* Try again */
+			down_write(&free_list_lock);
+			if (!list_empty(&free_list)) {
+				entry = list_entry(free_list.next, struct copy_work, list);
+				list_del(&entry->list);
+			}
+			up_write(&free_list_lock);
+		}
+	}
+
+	return entry;
+}
 
 /* Allocate pages for a kiobuf. */
 static int alloc_iobuf_pages(struct kiobuf *iobuf, int nr_sectors)
@@ -134,50 +183,71 @@ static int copy_kthread(void *unused)
 		DECLARE_WAITQUEUE(wq, current);
 		struct task_struct *tsk = current;
 
-		down_write(&list_lock);
+		down_write(&work_list_lock);
 
 		while (!list_empty(&work_list)) {
 
 			struct copy_work *work_item = list_entry(work_list.next, struct copy_work, list);
+			int done_sps;
 			long done_sectors = 0;
-			int callback_reason = 0;
+			copy_cb_reason_t callback_reason = COPY_CB_COMPLETE;
 
 			list_del(&work_item->list);
-			up_write(&list_lock);
+			up_write(&work_list_lock);
 
 			while (done_sectors < work_item->nr_sectors) {
 				long nr_sectors = min((long)KIO_MAX_SECTORS, (long)work_item->nr_sectors - done_sectors);
 
 				/* Read original blocks */
-				if (read_blocks(iobuf, work_item->fromdev, work_item->fromsec, nr_sectors)) {
+				if (read_blocks(iobuf, work_item->fromdev, work_item->fromsec + done_sectors, nr_sectors)) {
 					DMERR("Read blocks from device %s failed\n", kdevname(work_item->fromdev));
 
 					/* Callback error */
-					callback_reason = 1;
+					callback_reason = COPY_CB_FAILED_READ;
 					goto done_copy;
 				}
 
 				/* Write them out again */
-				if (write_blocks(iobuf, work_item->todev, work_item->tosec, nr_sectors)) {
+				if (write_blocks(iobuf, work_item->todev, work_item->tosec + done_sectors, nr_sectors)) {
 					DMERR("Write blocks to %s failed\n", kdevname(work_item->todev));
 
 					/* Callback error */
-					callback_reason = 2;
+					callback_reason = COPY_CB_FAILED_WRITE;
 					goto done_copy;
 				}
 				done_sectors += nr_sectors;
+
+				/* If we have exceeded the throttle value (in sectors/second) then
+				   sleep for a while */
+				done_sps = nr_sectors*HZ/(jiffies-last_jiffies);
+				if (work_item->throttle && done_sps > work_item->throttle && done_sps) {
+					long start_jiffies = jiffies;
+					do {
+						schedule_timeout(done_sps - work_item->throttle * HZ);
+					} while (jiffies <= start_jiffies+(done_sps - work_item->throttle * HZ));
+				}
+
+				/* Do a progress callback */
+				if (work_item->callback && done_sectors < work_item->nr_sectors)
+					work_item->callback(COPY_CB_PROGRESS, work_item->context, done_sectors);
+
 			}
 
 		done_copy:
-
 			/* Call the callback */
 			if (work_item->callback)
-				work_item->callback(callback_reason, work_item->context);
+				work_item->callback(callback_reason, work_item->context, done_sectors);
 
-			kfree(work_item);
-			down_write(&list_lock);
+			/* Add it back to the free list and notify anybody waiting for an entry */
+			down_write(&free_list_lock);
+			list_add(&work_item->list, &free_list);
+			up_write(&free_list_lock);
+			wake_up_interruptible(&freelist_waitq);
+
+			/* Get the work lock again for the top of the while loop */
+			down_write(&work_list_lock);
 		}
-		up_write(&list_lock);
+		up_write(&work_list_lock);
 
 		/* Wait for more work */
 		set_task_state(tsk, TASK_INTERRUPTIBLE);
@@ -191,6 +261,9 @@ static int copy_kthread(void *unused)
 
 	} while (thread_exit == 0);
 
+	unmap_kiobuf(iobuf);
+	free_kiovec(1, &iobuf);
+
 	up(&run_lock);
 	return 0;
 }
@@ -198,7 +271,7 @@ static int copy_kthread(void *unused)
 /* API entry point */
 int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_sectors,
 		 kdev_t fromdev, kdev_t todev,
-		 int throttle, void (*callback)(int, void *), void *context)
+		 int throttle, void (*callback)(copy_cb_reason_t, void *, long), void *context)
 {
 	struct copy_work *newwork;
 	static pid_t thread_pid = 0;
@@ -239,9 +312,8 @@ int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_se
 	}
 	up(&start_lock);
 
-	newwork = kmalloc(sizeof(struct copy_work), GFP_KERNEL);
-	if (!newwork)
-		return -ENOMEM;
+	/* This will wait until one is available */
+	newwork = get_work_struct();
 
 	newwork->fromsec    = fromsec;
 	newwork->tosec      = tosec;
@@ -252,18 +324,34 @@ int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_se
 	newwork->callback   = callback;
 	newwork->context    = context;
 
-	down_write(&list_lock);
+	down_write(&work_list_lock);
 	list_add_tail(&newwork->list, &work_list);
-	up_write(&list_lock);
+	up_write(&work_list_lock);
 
 	wake_up_interruptible(&work_waitq);
 	return 0;
 }
 
 
+/* Pre-allocate some structures for the free list */
+static int allocate_free_list(void)
+{
+	int i;
+	struct copy_work *newwork;
+
+	for (i=0; i<INITIAL_FREE_LIST_SIZE; i++) {
+		newwork = kmalloc(sizeof(struct copy_work), GFP_KERNEL);
+		if (!newwork)
+			return i;
+		list_add(&newwork->list, &free_list);
+	}
+	return i;
+}
+
 static int __init kcopyd_init(void)
 {
-	init_rwsem(&list_lock);
+	init_rwsem(&work_list_lock);
+	init_rwsem(&free_list_lock);
 	init_MUTEX(&start_lock);
 	init_MUTEX(&run_lock);
 
@@ -277,19 +365,38 @@ static int __init kcopyd_init(void)
 		free_kiovec(1, &iobuf);
 		return -1;
 	}
+
+	if (allocate_free_list() == 0) {
+		unmap_kiobuf(iobuf);
+		free_kiovec(1, &iobuf);
+		DMERR("Unable to allocate any work structures for the free list\n");
+		return -1;
+	}
+
 	return 0;
 }
 
 static void kcopyd_exit(void)
 {
+	struct list_head *entry, *temp;
+
 	thread_exit = 1;
 	wake_up_interruptible(&work_waitq);
 
 	/* Wait for the thread to finish */
 	down(&run_lock);
 	up(&run_lock);
+
+	/* Free the free list */
+	list_for_each_safe(entry, temp, &free_list) {
+		struct copy_work *cw;
+		cw = list_entry(entry, struct copy_work, list);
+		list_del(&cw->list);
+		kfree(cw);
+	}
 }
 
+/* These are only here until it gets added to dm.c */
 module_init(kcopyd_init);
 module_exit(kcopyd_exit);
 
