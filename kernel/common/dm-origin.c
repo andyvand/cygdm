@@ -33,6 +33,7 @@ static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
 {
 	struct origin_c *lc;
 	unsigned int start;
+	char *value;
 	int r = -EINVAL;
 	char *path;
 
@@ -42,7 +43,11 @@ static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
 	}
 
 	path = argv[0];
-	start = simple_strtoul(argv[1], NULL, 10);
+	start = simple_strtoul(argv[1], &value, 10);
+	if (value == NULL) {
+		*context = "Invalid segment size";
+		goto bad;
+	}
 
 	*context = "Cannot allocate origin context private structure";
 	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
@@ -51,15 +56,15 @@ static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
 
 	*context = "Cannot get target device";
 	r = dm_table_get_device(t, path, start, l, &lc->target_dev);
-	if (r)
-		goto bad_free;
+	if (r) {
+		kfree(lc);
+		goto bad;
+	}
 
 	*context = lc;
 
 	return 0;
 
-      bad_free:
-	kfree(lc);
       bad:
 	return r;
 }
@@ -101,19 +106,17 @@ static int __init origin_init(void)
 	int r = dm_register_target(&origin_target);
 
 	if (r < 0)
-		printk(KERN_ERR
-		       "Device mapper: Origin: register failed %d\n", r);
+		DMERR("Device mapper: Origin: register failed %d\n", r);
 
 	return r;
 }
 
-static void __exit origin_exit(void)
+static void origin_exit(void)
 {
 	int r = dm_unregister_target(&origin_target);
 
 	if (r < 0)
-		printk(KERN_ERR
-		       "Device mapper: Origin: unregister failed %d\n", r);
+		DMERR("Device mapper: Origin: unregister failed %d\n", r);
 }
 
 module_init(origin_init);
