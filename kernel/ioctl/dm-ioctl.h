@@ -43,7 +43,7 @@ struct dm_ioctl {
 	uint32_t data_size;	/* total size of data passed in
 				 * including this struct */
 
-	uint32_t data_start;	/* offset to start of data
+	uint32_t data_offset;	/* offset to start of data
 				 * relative to start of this struct */
 
 	uint32_t target_count;	/* in/out */
@@ -131,14 +131,16 @@ enum {
 
 #define DM_VERSION_MAJOR	3
 #define DM_VERSION_MINOR	0
-#define DM_VERSION_PATCHLEVEL	1
+#define DM_VERSION_PATCHLEVEL	2
 #define DM_VERSION_EXTRA	"-ioctl-cvs (2003-04-08)"
 
 /* Status bits */
-#define DM_READONLY_FLAG	0x00000001
-#define DM_SUSPEND_FLAG		0x00000002
-#define DM_EXISTS_FLAG		0x00000004
-#define DM_PERSISTENT_DEV_FLAG	0x00000008
+#define DM_READONLY_FLAG	0x00000001	/* In/Out */
+#define DM_SUSPEND_FLAG		0x00000002	/* In/Out */
+#define DM_EXISTS_FLAG		0x00000004	/*    Out */
+#define DM_PERSISTENT_DEV_FLAG	0x00000008	/* In     */
+#define DM_BUFFER_FULL_FLAG	0x00000010	/*    Out */
+#define DM_ERROR_DEFERRED_FLAG	0x00000020	/* In     */
 
 /*
  * Flag passed into ioctl STATUS command to get table information

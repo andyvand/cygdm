@@ -329,9 +329,9 @@ typedef int (*ioctl_fn)(struct dm_ioctl *param, struct dm_ioctl *user);
  * Check a string doesn't overrun the chunk of
  * memory we copied from userland.
  */
-static int valid_str(char *str, void *begin, void *end)
+static int invalid_str(char *str, const void *begin, const void *buffer_end)
 {
-	while (((void *) str >= begin) && ((void *) str < end))
+	while (((void *) str >= begin) && ((void *) str <= buffer_end))
 		if (!*str++)
 			return 0;
 
@@ -339,44 +339,43 @@ static int valid_str(char *str, void *begin, void *end)
 }
 
 static int next_target(struct dm_target_spec *last, uint32_t next,
-		       void *begin, void *end,
-		       struct dm_target_spec **spec, char **params)
+		       const void *begin, const void *buffer_end,
+		       struct dm_target_spec **spec, char **target_params)
 {
-	*spec = (struct dm_target_spec *)
-	    ((unsigned char *) last + next);
-	*params = (char *) (*spec + 1);
+	*spec = (struct dm_target_spec *) ((unsigned char *) last + next);
+	*target_params = (char *) (*spec + 1);
 
-	if (*spec < (last + 1) || ((void *) *spec > end))
+	if (*spec < (last + 1) || ((void *) *target_params > buffer_end))
 		return -EINVAL;
 
-	return valid_str(*params, begin, end);
+	return invalid_str(*target_params, begin, buffer_end);
 }
 
-static int populate_table(struct dm_table *table, struct dm_ioctl *args)
+static int populate_table(struct dm_table *table, struct dm_ioctl *param)
 {
 	int r, first = 1;
 	unsigned int i = 0;
 	struct dm_target_spec *spec;
-	char *params;
-	void *begin, *end;
+	char *target_params;
+	void *begin, *buffer_end;
 
-	if (!args->target_count) {
+	if (!param->target_count) {
 		DMWARN("populate_table: no targets specified");
 		return -EINVAL;
 	}
 
-	begin = (void *) args;
-	end = begin + args->data_size;
+	begin = (void *) (param + 1);
+	buffer_end = (void *) param + param->data_size - 1;
 
-	for (i = 0; i < args->target_count; i++) {
+	for (i = 0; i < param->target_count; i++) {
 
 		if (first)
-			r = next_target((struct dm_target_spec *) args,
-					args->data_start,
-					begin, end, &spec, &params);
+			r = next_target((struct dm_target_spec *) param,
+					param->data_offset, begin, buffer_end,
+					&spec, &target_params);
 		else
-			r = next_target(spec, spec->next, begin, end,
-					&spec, &params);
+			r = next_target(spec, spec->next, begin, buffer_end,
+					&spec, &target_params);
 
 		if (r) {
 			DMWARN("unable to find target");
@@ -385,7 +384,7 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 
 		r = dm_table_add_target(table, spec->target_type,
 					(sector_t) spec->sector_start,
-					(sector_t) spec->length, params);
+					(sector_t) spec->length, target_params);
 		if (r) {
 			DMWARN("error adding target to table");
 			return -EINVAL;
@@ -406,35 +405,36 @@ static inline void *align_ptr(void *ptr)
 	return (void *) (((size_t) (ptr + ALIGN_MASK)) & ~ALIGN_MASK);
 }
 
+static inline void align_data_start(struct dm_ioctl *user,
+				    struct dm_ioctl *param)
+{
+	param->data_offset = align_ptr(user + 1) - (void *) user;
+}
+
 /*
  * Copies a dm_ioctl and an optional additional payload to
  * userland.
  */
-static int results_to_user(struct dm_ioctl *user, struct dm_ioctl *param,
-			   void *data, size_t len)
+static int results_to_user(struct dm_ioctl *user, struct dm_ioctl *param)
 {
-	void *ptr = NULL;
-
-	if (data) {
-		ptr = align_ptr(user + 1);
-		param->data_start = ptr - (void *) user;
-	}
+	void *param_start;
 
 	/*
-	 * The version number has already been filled in, so we
-	 * just copy later fields.
+	 * The version number has already been filled in
+	 * so we just copy later fields.
 	 */
 	if (copy_to_user(&user->data_size, &param->data_size,
 			 sizeof(*param) - sizeof(param->version)))
 		return -EFAULT;
 
-	if (data) {
-		if (param->data_start + len > param->data_size)
-			return -ENOSPC;
+	if (param->data_size <= sizeof(*param))
+		return 0;
 
-		if (copy_to_user(ptr, data, len))
-			return -EFAULT;
-	}
+	param_start = (void *) param + param->data_offset;
+
+	if (copy_to_user((void *) user + param->data_offset, param_start,
+			 param->data_size - (param_start - (void *) param)))
+		return -EFAULT;
 
 	return 0;
 }
@@ -450,13 +450,16 @@ static void __info(struct mapped_device *md, struct dm_ioctl *param)
 	struct block_device *bdev;
 
 	if (!md) {
-		param->flags = 0;
+		param->flags &= ~DM_EXISTS_FLAG;
 		return;
 	}
 
-	param->flags = DM_EXISTS_FLAG;
+	param->flags |= DM_EXISTS_FLAG;
+
 	if (dm_suspended(md))
 		param->flags |= DM_SUSPEND_FLAG;
+	else
+		param->flags &= ~DM_SUSPEND_FLAG;
 
 	dev = dm_kdev(md);
 	param->dev = kdev_t_to_nr(dev);
@@ -467,6 +470,8 @@ static void __info(struct mapped_device *md, struct dm_ioctl *param)
 
 	if (is_read_only(dev))
 		param->flags |= DM_READONLY_FLAG;
+	else
+		param->flags &= ~DM_READONLY_FLAG;
 
 	table = dm_get_table(md);
 	param->target_count = dm_table_get_num_targets(table);
@@ -514,12 +519,6 @@ static struct mapped_device *find_device(struct dm_ioctl *param)
 	return md;
 }
 
-/* Return first error of pair */
-static inline int first_error(int r1, int r2)
-{
-	return (r1 ? r1 : r2);
-}
-
 /*
  * Copies device info back to user space, used by
  * the create and info ioctls.
@@ -534,7 +533,8 @@ static int info(struct dm_ioctl *param, struct dm_ioctl *user)
 	if (md)
 		dm_put(md);
 
-	return results_to_user(user, param, NULL, 0);
+	param->data_size = sizeof(*param);
+	return results_to_user(user, param);
 }
 
 static inline int get_mode(struct dm_ioctl *param)
@@ -582,55 +582,66 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 		dev = to_kdev_t(param->dev);
 
 	r = dm_create(dev, t, &md);
-	if (r) {
-		dm_table_put(t);
-		return r;
-	}
+
 	dm_table_put(t);	/* md will have grabbed its own reference */
+
+	if (r)
+		return r;
 
 	set_device_ro(dm_kdev(md), (param->flags & DM_READONLY_FLAG) ? 1 : 0);
 
 	r = dm_hash_insert(param->name, *param->uuid ? param->uuid : NULL, md);
-	if (r)
-		goto out;
+	if (r) {
+		dm_put(md);
+		return r;
+	}
 
 	__info(md, param);
-	r = results_to_user(user, param, NULL, 0);
-
-      out:
 	dm_put(md);
 
-	return r;
+	param->data_size = sizeof(*param);
+	return results_to_user(user, param);
 }
 
 /*
  * Build up the status struct for each target
  */
-static int __status(struct mapped_device *md, struct dm_ioctl *param,
-		    char *outbuf, size_t *len)
+static void __status(struct mapped_device *md, struct dm_ioctl *param)
 {
 	unsigned int i, num_targets;
 	struct dm_target_spec *spec;
-	char *outptr;
+	char *outptr, *data_start, *buffer_end;
 	status_type_t type;
-	struct dm_table *table = dm_get_table(md);
+	struct dm_table *table;
+	
+	if (!md) {
+		param->data_size = sizeof(*param);
+		return;
+	}
+
+	table = dm_get_table(md);
 
 	if (param->flags & DM_STATUS_TABLE_FLAG)
 		type = STATUSTYPE_TABLE;
 	else
 		type = STATUSTYPE_INFO;
 
-	outptr = outbuf;
+	data_start = (void *) param + param->data_offset;
+	buffer_end = (void *) param + param->data_size - 1;
+
+	outptr = data_start;
 
 	/* Get all the target info */
 	num_targets = dm_table_get_num_targets(table);
 	for (i = 0; i < num_targets; i++) {
 		struct dm_target *ti = dm_table_get_target(table, i);
 
-		if (outptr - outbuf +
-		    sizeof(struct dm_target_spec) > param->data_size) {
-			dm_table_put(table);
-			return -ENOMEM;
+		/*
+		 * Bail out if we would overflow the buffer
+		 */
+		if (outptr + sizeof(struct dm_target_spec) + 1 > buffer_end) {
+			param->flags |= DM_BUFFER_FULL_FLAG;
+			goto out;
 		}
 
 		spec = (struct dm_target_spec *) outptr;
@@ -646,20 +657,25 @@ static int __status(struct mapped_device *md, struct dm_ioctl *param,
 		/* Get the status/table string from the target driver */
 		if (ti->type->status)
 			ti->type->status(ti, type, outptr,
-					 outbuf + param->data_size - outptr);
+					 buffer_end - outptr + 1);
 		else
 			outptr[0] = '\0';
 
 		outptr += strlen(outptr) + 1;
 		align_ptr(outptr);
-		spec->next = outptr - outbuf;
+		spec->next = (void *) outptr - (void *) data_start;
 	}
 
-	param->target_count = num_targets;
-	*len = outptr - outbuf;
-	dm_table_put(table);
+	param->flags &= ~DM_BUFFER_FULL_FLAG;
 
-	return 0;
+      out:
+	param->target_count = num_targets;
+
+	if (outptr > buffer_end)
+		outptr = buffer_end + 1;
+	param->data_size = (void *) outptr - (void *) param;
+
+	dm_table_put(table);
 }
 
 /*
@@ -668,41 +684,19 @@ static int __status(struct mapped_device *md, struct dm_ioctl *param,
  */
 static int get_status(struct dm_ioctl *param, struct dm_ioctl *user)
 {
-	int r = 0;
 	struct mapped_device *md;
-	size_t len = 0;
-	char *outbuf = NULL;
+
+	align_data_start(user, param);
 
 	md = find_device(param);
-	if (!md)
-		goto out;
 
-	/* We haven't a clue how long the resultant data will be so
-	   just allocate as much as userland has allowed us and make sure
-	   we don't overun it */
-	outbuf = kmalloc(param->data_size, GFP_KERNEL);
-	if (!outbuf) {
-		r = -ENOMEM;
-		goto out;
-	}
-
-	/*
-	 * Get the status of all targets and 
-	 * setup the basic dm_ioctl structure.
-	 */
-	r = __status(md, param, outbuf, &len);
-
-      out:
 	__info(md, param);
+	__status(md, param);
 
 	if (md)
 		dm_put(md);
 
-	r = first_error(r, results_to_user(user, param, outbuf, len));
-
-	kfree(outbuf);
-
-	return r;
+	return results_to_user(user, param);
 }
 
 /*
@@ -716,7 +710,7 @@ static int wait_device_event(struct dm_ioctl *param, struct dm_ioctl *user)
 
 	md = find_device(param);
 	if (!md)
-		goto out;
+		return -ENXIO;
 
 	/*
 	 * Wait for a notification event
@@ -730,7 +724,6 @@ static int wait_device_event(struct dm_ioctl *param, struct dm_ioctl *user)
 	yield();
 	set_current_state(TASK_RUNNING);
 
-      out:
 	return get_status(param, user);
 }
 
@@ -739,67 +732,58 @@ static int wait_device_event(struct dm_ioctl *param, struct dm_ioctl *user)
  */
 static int deps(struct dm_ioctl *param, struct dm_ioctl *user)
 {
-	int r = 0;
-	unsigned int count;
 	struct mapped_device *md;
 	struct list_head *tmp;
-	size_t len = 0;
 	struct dm_target_deps *tdeps = NULL;
 	struct dm_table *table = NULL;
+	void *endpos, *buffer_end;
 
 	md = find_device(param);
-	__info(md, param);
+	if (!md)
+		return -ENXIO;
 
-	if (!md) {
-		r = -ENXIO;
-		goto out;
-	}
+	__info(md, param);
 
 	table = dm_get_table(md);
 
-	/*
-	 * Count the devices.
-	 */
-	count = 0;
-	list_for_each (tmp, dm_table_get_devices(table))
-	    count++;
+	align_data_start(user, param);
 
-	/*
-	 * Allocate a kernel space version of the dm_target_status
-	 * struct.
-	 */
-	if (array_too_big(sizeof(*tdeps), sizeof(*tdeps->dev), count)) {
-		r = -ENOMEM;
-		goto out;
-	}
+	tdeps = (void *) param + param->data_offset;
+	buffer_end = (void *) param + param->data_size - 1;
 
-	len = sizeof(*tdeps) + (sizeof(*tdeps->dev) * count);
-	tdeps = kmalloc(len, GFP_KERNEL);
-	if (!tdeps) {
-		r = -ENOMEM;
-		len = 0;
+	endpos = (void *) tdeps + sizeof(*tdeps);
+	if (endpos > buffer_end) {
+		param->flags |= DM_BUFFER_FULL_FLAG;
 		goto out;
 	}
 
 	/*
 	 * Fill in the devices.
 	 */
-	tdeps->count = count;
-	count = 0;
+	tdeps->count = 0;
 	list_for_each (tmp, dm_table_get_devices(table)) {
 		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
-		tdeps->dev[count++] = dd->bdev->bd_dev;
+
+		if (endpos + sizeof(*tdeps->dev) > buffer_end) {
+			param->flags |= DM_BUFFER_FULL_FLAG;
+			goto out;
+		}
+		
+		tdeps->dev[tdeps->count++] = dd->bdev->bd_dev;
+		endpos += sizeof(*tdeps->dev);
 	}
 
-      out:
-	if (table)
-		dm_table_put(table);
-	if (md)
-		dm_put(md);
-	r = first_error(r, results_to_user(user, param, tdeps, len));
+	param->flags &= ~DM_BUFFER_FULL_FLAG;
 
-	kfree(tdeps);
-	return r;
+      out:
+	if (endpos > buffer_end)
+		endpos = buffer_end + 1;
+	param->data_size = endpos - (void *) param;
+
+	dm_table_put(table);
+	dm_put(md);
+
+	return results_to_user(user, param);
 }
 
 static int remove(struct dm_ioctl *param, struct dm_ioctl *user)
@@ -827,26 +811,26 @@ static int remove_all(struct dm_ioctl *param, struct dm_ioctl *user)
 
 static int suspend(struct dm_ioctl *param, struct dm_ioctl *user)
 {
-	int r;
+	int r, r2;
 	struct mapped_device *md;
 
 	md = find_device(param);
-	if (!md) {
-		r = -ENXIO;
-		goto out;
-	}
+	if (!md)
+		return -ENXIO;
 
 	if (param->flags & DM_SUSPEND_FLAG)
 		r = dm_suspend(md);
 	else
 		r = dm_resume(md);
 
-      out:
 	__info(md, param);
-	if (md)
-		dm_put(md);
 
-	return first_error(r, results_to_user(user, param, NULL, 0));
+	dm_put(md);
+
+	param->data_size = sizeof(*param);
+	
+	r2 = results_to_user(user, param);
+	return r2 ? r2 : r;
 }
 
 static int reload(struct dm_ioctl *param, struct dm_ioctl *user)
@@ -856,43 +840,48 @@ static int reload(struct dm_ioctl *param, struct dm_ioctl *user)
 	struct dm_table *t;
 
 	md = find_device(param);
-	if (!md) {
-		r = -ENXIO;
-		goto out;
-	}
+	if (!md)
+		return -ENXIO;
 
 	r = dm_table_create(&t, get_mode(param));
-	if (r)
-		goto out;
+	if (r) {
+		dm_put(md);
+		return r;
+	}
 
 	r = populate_table(t, param);
 	if (r) {
 		dm_table_put(t);
-		goto out;
+		dm_put(md);
+		return r;
 	}
 
 	r = dm_swap_table(md, t);
 	dm_table_put(t);	/* md will have taken its own reference */
-	if (r)
-		goto out;
+	if (r) {
+		dm_put(md);
+		return r;
+	}
 
 	set_device_ro(dm_kdev(md), (param->flags & DM_READONLY_FLAG) ? 1 : 0);
 
-      out:
 	__info(md, param);
-	if (md)
-		dm_put(md);
+	dm_put(md);
 
-	return first_error(r, results_to_user(user, param, NULL, 0));
+	param->data_size = sizeof(*param);
+	return results_to_user(user, param);
 }
 
 static int rename(struct dm_ioctl *param, struct dm_ioctl *user)
 {
 	int r;
-	char *new_name = (char *) param + param->data_start;
+	char *new_name = (char *) param + param->data_offset;
+	void *begin, *buffer_end;
 
-	if (valid_str(new_name, (void *) param,
-		      (void *) param + param->data_size)) {
+	begin = (void *) (param + 1);
+	buffer_end = (void *) param + param->data_size - 1;
+
+	if (invalid_str(new_name, begin, buffer_end)) {
 		DMWARN("Invalid new logical volume name supplied.");
 		return -EINVAL;
 	}
