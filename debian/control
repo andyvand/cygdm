@@ -37,7 +37,7 @@ Description: The Linux Kernel Device Mapper header files
 Package: libdevmapper0
 Section: libs
 Architecture: any
-Depends: ${shlibs:Depends}, modutils, fileutils
+Depends: ${shlibs:Depends}, modutils
 Provides: libdevmapper
 Description: The Linux Kernel Device Mapper userspace library
  The Linux Kernel Device Mapper is the LVM (Linux Logical Volume Management)
