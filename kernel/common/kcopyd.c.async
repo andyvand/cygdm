@@ -26,7 +26,7 @@
 
 /* Number of iobufs we have, therefore the number of I/Os we
    can be doing at once */
-#define NUM_IOBUFS 4
+#define NUM_IOBUFS 16
 
 /* Slab cache for work entries when the freelist runs out */
 static kmem_cache_t *entry_cachep;
@@ -77,31 +77,33 @@ static DECLARE_WAIT_QUEUE_HEAD(work_waitq);
 static DECLARE_WAIT_QUEUE_HEAD(freelist_waitq);
 static int thread_exit = 0;
 
-/* Find a free entry from the free-list or allocate a new one
+/* Find a free entry from the free-list or allocate a new one.
    This routine always returns a valid pointer even if it has to wait
-   for one */
+   for it */
 static struct copy_work *get_work_struct(void)
 {
 	struct copy_work *entry = NULL;
 
-	down_write(&free_list_lock);
-	if (!list_empty(&free_list)) {
-		entry = list_entry(free_list.next, struct copy_work, list);
-		list_del(&entry->list);
-	}
-	up_write(&free_list_lock);
+	while (!entry) {
+		down_write(&free_list_lock);
+		if (!list_empty(&free_list)) {
+			entry = list_entry(free_list.next, struct copy_work, list);
+			list_del(&entry->list);
+		}
+		up_write(&free_list_lock);
 
-	/* Nothing on the free-list - try to allocate one without doing IO */
-	if (!entry) {
-		entry = kmem_cache_alloc(entry_cachep, GFP_NOIO);
+		/* Nothing on the free-list - try to allocate one without doing IO */
+		if (!entry) {
+			entry = kmem_cache_alloc(entry_cachep, GFP_NOIO);
 
-		/* Make sure we know it didn't come from the free list */
-		if (entry) {
-			entry->freelist = 0;
+			/* Make sure we know it didn't come from the free list */
+			if (entry) {
+				entry->freelist = 0;
+			}
 		}
 
 		/* Failed...wait for IO to finish */
-		while (!entry) {
+		if (!entry) {
 			DECLARE_WAITQUEUE(wq, current);
 
 			set_task_state(current, TASK_INTERRUPTIBLE);
@@ -112,14 +114,6 @@ static struct copy_work *get_work_struct(void)
 
 			set_task_state(current, TASK_RUNNING);
 			remove_wait_queue(&freelist_waitq, &wq);
-
-			/* Try again */
-			down_write(&free_list_lock);
-			if (!list_empty(&free_list)) {
-				entry = list_entry(free_list.next, struct copy_work, list);
-				list_del(&entry->list);
-			}
-			up_write(&free_list_lock);
 		}
 	}
 
@@ -152,13 +146,16 @@ static void end_copy(struct iobuf_entry *ioe, copy_cb_reason_t reason)
 	if (ioe->work->callback)
 		ioe->work->callback(reason, ioe->work->context, ioe->work->done_sectors);
 
-	down_write(&work_list_lock);
+	down_write(&free_list_lock);
 	if (ioe->work->freelist) {
 		list_add(&ioe->work->list, &free_list);
-		wake_up_interruptible(&freelist_waitq);
+	}
+	else {
+		kmem_cache_free(entry_cachep, ioe->work);
 	}
 	list_add(&ioe->list, &iobuf_list);
-	up_write(&work_list_lock);
+	up_write(&free_list_lock);
+	wake_up_interruptible(&freelist_waitq);
 }
 
 /* A single BH has completed */
@@ -172,7 +169,7 @@ static void end_bh(struct buffer_head *bh, int uptodate)
 	if ((!uptodate) && !kiobuf->errno)
 		kiobuf->errno = -EIO;
 
-	/* Have allof them done ? */
+	/* Have all of them done ? */
 	if (atomic_dec_and_test(&kiobuf->io_count)) {
 		if (kiobuf->end_io)
 			kiobuf->end_io(kiobuf);
@@ -365,7 +362,7 @@ static int copy_kthread(void *unused)
 		struct task_struct *tsk = current;
 		struct list_head   *entry, *temp;
 
-		/* FIrst, check for outstanding writes to do */
+		/* First, check for outstanding writes to do */
 		spin_lock_irq(&write_list_spinlock);
 		list_for_each_safe(entry, temp, &write_list) {
 			struct copy_work *work_item = list_entry(entry, struct copy_work, list);
@@ -446,6 +443,7 @@ static int copy_kthread(void *unused)
 	} while (thread_exit == 0);
 
 	up(&run_lock);
+	DMINFO("kcopyd shutting down");
 	return 0;
 }
 
@@ -527,6 +525,7 @@ static int allocate_free_list(void)
 		newwork = kmalloc(sizeof(struct copy_work), GFP_KERNEL);
 		if (!newwork)
 			return i;
+		newwork->freelist = 1;
 		list_add(&newwork->list, &free_list);
 	}
 	return i;
