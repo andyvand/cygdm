@@ -54,14 +54,22 @@ endif
 SUFFIXES=
 SUFFIXES=.c .d .o .so
 
-CFLAGS+=-Wall -fPIC
-#CFLAGS+=-O2
-CFLAGS+=-g -fno-omit-frame-pointer
+CFLAGS+=-fPIC -Wall -Wundef -Wshadow -Wcast-align -Wwrite-strings -Wmissing-prototypes -Wmissing-declarations -Wnested-externs -Winline
+
+#CFLAGS+=-W -Wconversion -Wpointer-arith -Wredundant-decls -Wbad-function-cast -Wcast-qual -Wmissing-noreturn
+
+ifeq ("@DEBUG@", "yes")
+  CFLAGS+=-g -fno-omit-frame-pointer -DDEBUG
+else
+  CFLAGS+=-O2
+endif
+
+ifeq ("@COMPAT@", "yes")
+  CFLAGS+=-DDM_COMPAT
+endif
 
 #CFLAGS+=-pg
 #LD_FLAGS=-pg
-
-#CFLAGS+=-DDEBUG
 
 STRIP=
 #STRIP=-s
@@ -101,10 +109,14 @@ $(SUBDIRS.clean):
 $(SUBDIRS.distclean):
 	$(MAKE) -C $(@:.distclean=) distclean
 
+$(TARGETS): $(OBJECTS)
+
 %.o: %.c
 	$(CC) -c $(INCLUDES) $(CFLAGS) $< -o $@
 
 %.so: $(OBJECTS) .export.sym
+
+%.so: %.o
 	$(CC) -shared -Wl,-soname,$(notdir $@).$(LIB_VERSION) \
 	-Wl,--version-script,.export.sym $(OBJECTS) -o $@
 

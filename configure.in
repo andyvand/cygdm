@@ -60,6 +60,14 @@ AC_ARG_WITH(group,
 
 AC_ARG_ENABLE(jobs, [  --enable-jobs=NUM       Number of jobs to run simultaneously], JOBS=-j$enableval, JOBS=)
 
+dnl Enable Debugging
+AC_ARG_ENABLE(debug,    [  --enable-debug          Enable debugging],  \
+DEBUG=yes, DEBUG=no)
+
+dnl Disable Compatibility mode
+AC_ARG_ENABLE(compat,   [  --disable-compat        Disable support for old device-mapper versions],  \
+COMPAT=no, COMPAT=yes)
+
 dnl Clear default exec_prefix - install into /sbin rather than /usr/sbin
 if [[ "x$exec_prefix" = xNONE -a "x$prefix" = xNONE ]];
  then  exec_prefix="";
@@ -157,7 +165,9 @@ AC_SUBST(interface)
 AC_SUBST(kerneldir)
 AC_SUBST(kernelvsn)
 AC_SUBST(tmpdir)
+AC_SUBST(DEBUG)
 AC_SUBST(DM_LIB_VERSION)
+AC_SUBST(COMPAT)
 dnl First and last lines should not contain files to generate in order to 
 dnl keep utility scripts running properly
 AC_OUTPUT( 								\
