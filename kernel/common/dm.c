@@ -269,7 +269,7 @@ static struct {
 	xx(dm_linear)
 	xx(dm_stripe)
 	xx(dm_snapshot)
-	xx(dm_mirror)
+/*	xx(dm_mirror) */
 	xx(dm_interface)
 #undef xx
 };

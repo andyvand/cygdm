@@ -226,8 +226,9 @@ void dm_stripe_exit(void);
 int dm_snapshot_init(void);
 void dm_snapshot_exit(void);
 
-int dm_mirror_init(void);
-void dm_mirror_exit(void);
+/* Future */
+/* int dm_mirror_init(void); */
+/* void dm_mirror_exit(void); */
 
 /*
  * Init functions for the user interface to device-mapper.  At

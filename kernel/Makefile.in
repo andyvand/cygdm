@@ -32,7 +32,7 @@ FS=dmfs-error.c dmfs-lv.c dmfs-root.c dmfs-status.c \
    dmfs-super.c dmfs-suspend.c dmfs-table.c dmfs.h
 
 COMMON=dm-linear.c dm-stripe.c \
-       dm-mirror.c dm-snapshot.c kcopyd.c \
+       dm-snapshot.c kcopyd.c \
        dm-table.c dm-target.c dm.c dm.h dm-snapshot.h \
        dm-exception-store.c kcopyd.h
 
