@@ -5,32 +5,39 @@ Device Mapper installation
 
    Run the 'configure' script from the top directory.
 
-   If your kernel source is not in /usr/src/linux give its location
-   using --with-kernel-dir.
+   If your kernel already contains an up-to-date version of device-mapper,
+   or you intend to patch your kernel by hand, then no arguments to 
+   'configure' should be necessary.
 
-   Other flags let you change the installation & working directories.
+   Otherwise you need to tell 'configure' where your kernel source
+   directory is using --with-kernel-dir.
 
    Example:  
    ./configure --with-kernel-dir=/usr/src/linux-2.4.20
 
+   Other flags let you change the installation & working directories.
 
-2) Patch, configure and build a new kernel containing device-mapper
-   (unless, of course, your kernel already contains device-mapper).
 
-   If there is already a patch for your kernel and you gave 'configure'
-   appropriate parameters in step 1, you can just run 'make apply-patches' 
-   from the top directory and go on to step 3.  (This also attempts to
-   apply the VFS lock patch, which will fail if you've already applied it.)
+2) If your kernel does not already contain device-mapper, patch,
+   configure and build a new kernel with it.
+
+   If there is a patch for your kernel included in this package and you
+   gave 'configure' appropriate parameters in step 1, you can run 
+   'make apply-patches' from the top directory to apply the patches.  
+   (This also attempts to apply the VFS lock patch, which will fail if 
+   you've already applied it.)
    
    Configure, build and install your kernel in the normal way, selecting
    'Device mapper support' from the 'Multiple devices driver support' menu.
+   If you wish to use 'pvmove' you also need to select 
+   'Mirror (RAID-1) support'.
 
    If you are patching by hand, the patches are stored in the
    'patches' subdirectory.  The name of each patch contains the kernel
    version it was generated against and whether it is for the 'fs' or
    'ioctl' interface.  Current development effort is concentrated
    on the 'ioctl' interface.  (Use CVS to get the older 'fs' patches if
-   you want - see note below.)
+   you want - see note at end.)
 
    patches/common holds the constituent patches.
    You may need to use these if some of the patches (e.g. mempool)
@@ -70,15 +77,10 @@ Device Mapper installation
    dynamically.  It prints a message if it works or else it fails silently 
    with a non-zero status code (which you probably want to test for).
 
-   If you want the block devices created by the device-mapper to have a 
-   specific major number, then specify this when loading the module
-      e.g. modprobe dm-mod major=123
-   This major number is visible in /proc/devices.
-
 
 5) You can now boot your new kernel and use 'dmsetup' to test the API.
    Read the dmsetup man page for more information.
-   Or proceed to install a beta version of the new LVM2 tools.
+   Or proceed to install the new LVM2 tools.
 
 
 Note if you are upgrading
@@ -88,7 +90,7 @@ Note if you are upgrading
 
 Notes about the alternative filesystem interface
 ================================================
-The original 2.4 filesystem interface has not been updated for several 
+The original 2.4 filesystem interface has not been updated for many
 months, requires an old kernel, and is missing lots of features.
 
 A new filesystem interface is under development for 2.5 kernels (and
