@@ -106,7 +106,7 @@ static int __init local_init(void)
 	return 0;
 }
 
-static void __exit local_exit(void)
+static void local_exit(void)
 {
 	if (kmem_cache_destroy(_io_hook_cache))
 		WARN("it looks like there are still some io_hooks allocated");

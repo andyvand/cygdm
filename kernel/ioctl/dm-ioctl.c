@@ -4,9 +4,8 @@
  * This file is released under the GPL.
  */
 
-#include <linux/fs.h>
-
 #include "dm.h"
+
 #include <linux/dm-ioctl.h>
 
 static void free_params(struct dm_ioctl *p)
