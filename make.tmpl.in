@@ -52,7 +52,6 @@ ifndef MAKEFLAGS
 MAKEFLAGS = @JOBS@
 endif
 
-SUFFIXES=
 SUFFIXES=.c .d .o .so .a
 
 CFLAGS+=-fPIC -Wall -Wundef -Wshadow -Wcast-align -Wwrite-strings -Wmissing-prototypes -Wmissing-declarations -Wnested-externs -Winline
@@ -70,13 +69,13 @@ ifeq ("@COMPAT@", "yes")
 endif
 
 #CFLAGS+=-pg
-#LD_FLAGS=-pg
+#LD_FLAGS+=-pg
 
 STRIP=
 #STRIP=-s
 
 LIB_VERSION := $(shell cat $(top_srcdir)/VERSION | \
-		   awk -F '.' '{printf "%s.%s",$$1,$$2}')
+		 awk -F '.' '{printf "%s.%s",$$1,$$2}')
 
 INCLUDES+=-I. -I$(top_srcdir)/include
 
@@ -110,10 +109,10 @@ $(SUBDIRS.install):
 	$(MAKE) -C $(@:.install=) install
 
 $(SUBDIRS.clean):
-	$(MAKE) -C $(@:.clean=) clean
+	-$(MAKE) -C $(@:.clean=) clean
 
 $(SUBDIRS.distclean):
-	$(MAKE) -C $(@:.distclean=) distclean
+	-$(MAKE) -C $(@:.distclean=) distclean
 
 $(TARGETS): $(OBJECTS)
 
