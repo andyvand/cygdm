@@ -33,7 +33,8 @@ FS=dmfs-error.c dmfs-lv.c dmfs-root.c dmfs-status.c \
 
 COMMON=device-mapper.h dm-linear.c dm-stripe.c \
        dm-mirror.c dm-origin.c dm-snapshot.c kcopyd.c \
-       dm-table.c dm-target.c dm.c dm.h
+       dm-table.c dm-target.c dm.c dm.h dm-snapshot.h \
+       dm-exception-store.c
 
 IOCTL=dm-ioctl.c
 
@@ -63,7 +64,7 @@ symlinks:
 			     $(kerneldir)/include/linux/`basename $$i`; \
 		fi; \
 	done
-	
+
 	for i in $(common_hdrs) ; do \
 		$(LN_S) `pwd`/$$i $(kerneldir)/include/linux ; \
 	done
@@ -81,36 +82,36 @@ patches:
 		echo "Working directory $(tmpdir) missing" ; \
 		exit 1; \
 	fi
-	
+
 	( \
 		cd $(tmpdir); \
 		tar xf $(KERNELTAR) ; \
 		cp -al linux linux-$(kernelvsn) ; \
 	)
-	
+
 	for i in $(common) $($(interface)) ; do \
 		$(LN_S) `pwd`/$$i $(tmpdir)/linux/drivers/md ; \
 	done
-	
+
 	for i in $(common_hdrs) ; do \
 		$(LN_S) `pwd`/$$i $(tmpdir)/linux/include/linux ; \
 	done
-	
+
 	if [ "$(interface)" == "ioctl" ] ; then \
 		$(LN_S) `pwd`/$(ioctl_hdr) $(tmpdir)/linux/include/linux ; \
 	fi
-	
+
 	for i in ../patches/common/linux-$(kernelvsn)* \
 		 ../patches/$(interface)/linux-$(kernelvsn)* ; do \
 		patch -d $(tmpdir)/linux -p1 -i `pwd`/$$i ; \
 	done
-	
+
 	( \
 		cd $(tmpdir); \
 		diff -ruN linux-$(kernelvsn) linux ; \
 		exit 0; \
 	) > ../patches/linux-$(kernelvsn)-devmapper-$(interface).patch
-	
+
 	$(RM) -r $(tmpdir)
 
 patches-clean:
