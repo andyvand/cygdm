@@ -64,6 +64,7 @@ struct snapshot_c {
         struct list_head list;         /* List of snapshots per Origin */
 	unsigned int chunk_size;       /* Size of data blocks saved - must be a power of 2 */
 	unsigned int chunk_size_mask;  /* Chunk size-1 for & operations */
+	unsigned int chunk_size_shift; /* Power of 2 that chunk_size is */
         long   extent_size;            /* Size of extents used for COW blocks */
 	int    full;                   /* 1 if snapshot is full (and therefore unusable) */
 	int    persistent;             /* 1 if snapshot is is persistent (save metadata to disk) */
@@ -118,7 +119,7 @@ static int write_metadata(struct snapshot_c *lc);
 #define ORIGIN_HASH_SIZE 256
 #define ORIGIN_MASK      0xFF
 #define ORIGIN_HASH_FN(x)  (MINOR(x) & ORIGIN_MASK)
-#define EX_HASH_FN(sector, snap) ((sector/snap->chunk_size) & snap->hash_mask)
+#define EX_HASH_FN(sector, snap) ((((sector) - ((sector) & snap->chunk_size_mask)) >> snap->chunk_size_shift) & snap->hash_mask)
 
 /* Hash table mapping origin volumes to lists of snapshots and
    a lock to protect it */
@@ -303,8 +304,9 @@ static struct exception *find_exception(struct snapshot_c *sc, uint32_t b_rsecto
 	list_for_each(slist, l) {
 		struct exception *et = list_entry(slist, struct exception, list);
 
-		if (et->rsector_org == b_rsector - (b_rsector & sc->chunk_size_mask))
+		if (et->rsector_org == b_rsector - (b_rsector & sc->chunk_size_mask)) {
 			return et;
+		}
 	}
 	return NULL;
 }
@@ -462,7 +464,7 @@ static struct exception *add_exception(struct snapshot_c *sc, unsigned long org,
 
 	new_ex->rsector_org = org;
 	new_ex->rsector_new = new;
-	new_ex->bh = 0;
+	new_ex->bh = NULL;
 	atomic_set(&new_ex->ondisk, 0);
 	new_ex->snap = sc;
 
@@ -487,6 +489,7 @@ static int read_metadata(struct snapshot_c *lc)
 	struct disk_exception *cow_block;
 	struct kiobuf *read_iobuf;
 	int err = 0;
+	int devsize = get_dev_size(lc->cow_dev->dev);
 
 	/* Allocate our own iovec for this operation 'cos the others
 	   are way too small */
@@ -504,6 +507,13 @@ static int read_metadata(struct snapshot_c *lc)
 
 	do
 	{
+		/* Make sure the chain does not go off the end of the device, or backwards */
+		if (cur_sector > devsize || cur_sector < first_free_sector) {
+			DMERR("COW table chain pointers are inconsistent, can't activate snapshot\n");
+			err = -1;
+			goto ret_free;
+		}
+
 		first_free_sector = max(first_free_sector, cur_sector+lc->extent_size);
 		status = read_blocks(read_iobuf, lc->cow_dev->dev, cur_sector, nr_sectors);
 		if (status == 0) {
@@ -517,9 +527,12 @@ static int read_metadata(struct snapshot_c *lc)
 			for (i=0; i <= lc->highest_metadata_entry &&
 				  cow_block[entry].rsector_new != 0; i++) {
 
-				add_exception(lc,
-					      le64_to_cpu(cow_block[entry].rsector_org),
-					      le64_to_cpu(cow_block[entry].rsector_new));
+				struct exception *ex;
+
+				ex = add_exception(lc,
+						   le64_to_cpu(cow_block[entry].rsector_org),
+						   le64_to_cpu(cow_block[entry].rsector_new));
+				atomic_set(&ex->ondisk, 1);
 				first_free_sector = max(first_free_sector,
 							(unsigned long)(le64_to_cpu(cow_block[entry].rsector_new) +
 									lc->chunk_size));
@@ -839,6 +852,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad_putdev;
 	}
 
+
         lc->chunk_size = chunk_size;
         lc->chunk_size_mask = chunk_size-1;
 	lc->extent_size = extent_size;
@@ -846,6 +860,13 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	lc->need_cow  = 0;
 	lc->full      = 0;
 	lc->disk_cow  = NULL;
+
+	/* Work out the power of 2 that it is */
+	lc->chunk_size_shift = 0;
+	while ( (chunk_size&1) == 0) {
+		chunk_size >>= 1;
+		lc->chunk_size_shift++;
+	}
 
 	/* Allocate hash table for COW data */
 	r = -ENOMEM;
@@ -985,11 +1006,7 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 				     SNAPSHOT_COPY_PRIORITY, 0,
 				     copy_callback, ex);
 
-			/* Update the bh bits so the write goes to the newly remapped volume...
-			   after the COW has completed */
-			bh->b_rdev = lc->cow_dev->dev;
-			bh->b_rsector = lc->next_free_sector + (bh->b_rsector & lc->chunk_size_mask);
-
+			/* Add this bh to the list of those we need to resubmit when the COW has completed */
 			bh->b_reqnext = ex->bh;
 			ex->bh = bh;
 
@@ -1003,15 +1020,14 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 		/* Do reads */
 		down_read(&lc->origin->lock);
 
-		/* By default reads come from the origin */
-		bh->b_rdev = lc->origin_dev->dev;
-
-		/* Unless it has been remapped */
+		/* See if it it has been remapped */
 		ex = find_exception(context, bh->b_rsector);
 		if (ex && atomic_read(&ex->ondisk)) {
 
 			bh->b_rdev = lc->cow_dev->dev;
 			bh->b_rsector = ex->rsector_new + (bh->b_rsector & lc->chunk_size_mask);
+		} else {
+			bh->b_rdev = lc->origin_dev->dev;
 		}
 		up_read(&lc->origin->lock);
 	}
@@ -1059,8 +1075,8 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 				dev_size = get_dev_size(snap->cow_dev->dev);
 				if (snap->next_free_sector + snap->chunk_size >= dev_size) {
 					        /* Snapshot is full, we can't use it */
-						DMWARN("Snapshot %s is full\n",
-						       kdevname(snap->cow_dev->dev));
+						DMWARN("Snapshot %s is full (sec=%ld, size=%ld)\n",
+						       kdevname(snap->cow_dev->dev), snap->next_free_sector + snap->chunk_size, dev_size);
 						snap->full = 1;
 						/* Mark it full on the device */
 						write_header(snap);
@@ -1073,7 +1089,7 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 
 					reloc_sector = snap->next_free_sector;
 					snap->next_free_sector += snap->chunk_size;
-					ex = add_exception(snap, bh->b_rsector, reloc_sector);
+					ex = add_exception(snap, read_start, reloc_sector);
 					if (!ex) {
 						DMERR("Snapshot %s error adding new exception entry\n",
 						      kdevname(snap->cow_dev->dev));
@@ -1092,7 +1108,7 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 			}
 			/* If the exception is in flight then defer the BH -
 			   but don't add it twice! */
-			if (ex && !atomic_read(&ex->ondisk) && !ret) {
+			if (ex && ret && !atomic_read(&ex->ondisk)) {
 				bh->b_reqnext = ex->bh;
 				ex->bh = bh;
 				ret = 0;
