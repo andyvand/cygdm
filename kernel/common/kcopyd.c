@@ -57,7 +57,6 @@ static struct kiobuf *iobuf;
 static int thread_exit = 0;
 static long last_jiffies = 0;
 
-
 /* Find a free entry from the free-list or allocate a new one
    This routine always returns a valid pointer even if it has to wait
    for one */
@@ -65,20 +64,23 @@ static struct copy_work *get_work_struct(void)
 {
 	struct copy_work *entry = NULL;
 
-	down_write(&free_list_lock);
-	if (!list_empty(&free_list)) {
-		entry = list_entry(free_list.next, struct copy_work, list);
-		list_del(&entry->list);
-	}
-	up_write(&free_list_lock);
+	while (!entry) {
 
-	/* Nothing on the free-list - try to allocate one without doing IO */
-	if (!entry) {
-		entry = kmem_cache_alloc(entry_cachep, GFP_NOIO);
+		down_write(&free_list_lock);
+		if (!list_empty(&free_list)) {
+			entry = list_entry(free_list.next, struct copy_work, list);
+			list_del(&entry->list);
+		}
+		up_write(&free_list_lock);
 
-		/* Make sure we know it didn't come from the free list */
-		if (entry) {
-			entry->freelist = 0;
+		if (!entry) {
+			/* Nothing on the free-list - try to allocate one without doing IO */
+			entry = kmem_cache_alloc(entry_cachep, GFP_NOIO);
+
+			/* Make sure we know it didn't come from the free list */
+			if (entry) {
+				entry->freelist = 0;
+			}
 		}
 
 		/* Failed...wait for IO to finish */
@@ -93,14 +95,6 @@ static struct copy_work *get_work_struct(void)
 
 			set_task_state(current, TASK_RUNNING);
 			remove_wait_queue(&freelist_waitq, &wq);
-
-			/* Try again */
-			down_write(&free_list_lock);
-			if (!list_empty(&free_list)) {
-				entry = list_entry(free_list.next, struct copy_work, list);
-				list_del(&entry->list);
-			}
-			up_write(&free_list_lock);
 		}
 	}
 
@@ -294,6 +288,9 @@ static int copy_kthread(void *unused)
 				list_add(&work_item->list, &free_list);
 				up_write(&free_list_lock);
 			        wake_up_interruptible(&freelist_waitq);
+			}
+			else {
+				kmem_cache_free(entry_cachep, work_item);
 			}
 
 			/* Get the work lock again for the top of the while loop */
