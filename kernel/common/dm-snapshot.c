@@ -15,12 +15,7 @@
 #include <linux/blkdev.h>
 #include <linux/device-mapper.h>
 
-#include "dm.h"
-
-/*
- * Magic for persistent snapshots: "SnAp" - Feeble isn't it.
- */
-#define SNAP_MAGIC 0x70416e53
+#include "dm-snapshot.h"
 
 /*
  * Hard sector size used all over the kernel
@@ -32,336 +27,239 @@
  */
 #define SNAPSHOT_COPY_PRIORITY 2
 
-/*
- * The on-disk version of the metadata. Only applicable to
- * persistent snapshots.
- * There is no backward or forward compatibility implemented, snapshots
- * with different disk versions than the kernel will not be usable. It is
- * expected that "lvcreate" will blank out the start of the COW device
- * before calling the snapshot constructor.
- */
-#define SNAPSHOT_DISK_VERSION 1
-
-/*
- * Metadata format: (please keep this up-to-date!)
- * Persistent snapshots have a 1 block header (see below for structure) at
- * the very start of the device. The COW metadata starts at
- * .start_of_exceptions.
- *
- * COW metadata is stored in blocks that are "extent-size" sectors long as
- * an array of disk_exception structures in Little-Endian format.
- * The last entry in this array has rsector_new set to 0 (this cannot be a
- * legal redirection as the header is here) and if rsector_org has a value
- * it is the sector number of the next COW metadata sector on the disk. if
- * rsector_org is also zero then this is the end of the COW metadata.
- *
- * The metadata is written in hardblocksize lumps rather than in units of
- * extents for efficiency so don't expect a whole extent to be zeroed out
- * at any time.
- *
- * Non-persistent snapshots simple have redirected blocks stored
- * (in chunk_size sectors) from hard block 1 to avoid inadvertantly
- * creating a bad header.
- */
-
-/*
- * Internal snapshot structure
- */
-struct snapshot_c {
-	 /* Original device (s/b a snapshot-origin) */
-	struct dm_dev *origin_dev;
-
-	/* Device holding COW data */
-	struct dm_dev *cow_dev;
-
-	/* List of snapshots per Origin */
-        struct list_head list;
-
-	 /* Size of data blocks saved - must be a power of 2 */
-	unsigned int chunk_size;
-
-	/* Chunk size-1 for & operations */
-	unsigned int chunk_size_mask;
-
-	/* Power of 2 that chunk_size is */
-	unsigned int chunk_size_shift;
-
-	/* Size of extents used for COW blocks */
-        long extent_size;
-
-	/* 1 if snapshot is full (and therefore unusable) */
-	int full;
-
-	/* 1 if snapshot is is persistent (save metadata to disk) */
-	int persistent;
-
-	/* Number of the next free sector for COW/data */
-	unsigned long next_free_sector;
-
-	/* Where the metadata starts */
-	unsigned long start_of_exceptions;
-
-	/* Where we are currently writing the metadata */
-	unsigned long current_metadata_sector;
-
-	/* Index into disk_cow array */
-	int current_metadata_entry;
-
-	/* Index into mythical extent array */
-	int current_metadata_number;
-
-	/* Number of metadata entries in the disk_cow array */
-	int highest_metadata_entry;
-
-	/* Number of metadata entries per hard disk block */
-	int md_entries_per_block;
-
-	/* kiobuf for doing I/O to header & metadata */
-	struct kiobuf *cow_iobuf;
-
-	/* Hash table for looking up COW data */
-	struct list_head *hash_table;
-
-	/* Hash table for looking up inflight COW operations */
-	struct list_head *inflight_hash_table;
-
-	 /* To serialise access to the metadata */
-	struct rw_semaphore lock;
-
-	/* To help with calculating the hash function */
-	uint32_t hash_mask;
-	uint32_t inflight_hash_mask;
-	uint32_t hash_size;
-
-	 /*
-	  * Disk extent with COW data in it. as an array of
-	  * exception tables. The first one points to the next
-	  * block of metadata or 0 if this is the last
-	  */
-	struct disk_exception *disk_cow;
-};
-
-/*
- * Exception in memory
- */
-struct exception {
-	/* List of exceptions in this bucket */
-	struct list_head list;
-	uint32_t rsector_org;
-	uint32_t rsector_new;
-};
-
-/*
- * Inflight COW exception in memory
- */
-struct inflight_exception {
-	/* List of inflight exceptions in this bucket */
-	struct list_head list;
-	uint32_t rsector_org;
-	uint32_t rsector_new;
+struct pending_exception {
+	struct exception e;
 
 	/* Chain of WRITE buffer heads to submit when this COW has completed */
 	struct buffer_head *bh;
 
 	/* Pointer back to snapshot context */
-	struct snapshot_c *snap;
+	struct dm_snapshot *snap;
 };
 
 /*
- * An array of these is held in each disk block. LE format
+ * Hash table mapping origin volumes to lists of snapshots and
+ * a lock to protect it
  */
-struct disk_exception {
-	uint64_t rsector_org;
-	uint64_t rsector_new;
-};
+static kmem_cache_t *exception_cachep;
+static kmem_cache_t *pending_cachep;
 
 /*
- * Structure of a (persistent) snapshot header on disk. in LE format
+ * One of these per registered origin, held in the snapshot_origins hash
  */
-struct snap_disk_header {
-	uint32_t magic;
+struct origin {
+	/* The origin device */
+	kdev_t dev;
 
-	/* Simple, incrementing version. no backward compatibility */
-	uint32_t version;
+	struct list_head hash_list;
 
-	/* In 512 byte sectors */
-	uint32_t chunk_size;
-
-	/* In 512 byte sectors */
-	uint32_t extent_size;
-	uint64_t start_of_exceptions;
-	uint32_t full;
+	/* List of snapshots for this origin */
+	struct list_head snapshots;
 };
 
-static int write_metadata(struct snapshot_c *lc);
-static int write_header(struct snapshot_c *lc);
 /*
  * Size of the hash table for origin volumes. If we make this
  * the size of the minors list then it should be nearly perfect
  */
 #define ORIGIN_HASH_SIZE 256
 #define ORIGIN_MASK      0xFF
+static struct list_head *_origins;
+static struct rw_semaphore _origins_lock;
 
-/*
- * Hash table mapping origin volumes to lists of snapshots and
- * a lock to protect it
- */
-static struct list_head *snapshot_origins = NULL;
-static struct rw_semaphore origin_hash_lock;
-static kmem_cache_t *exception_cachep;
-static kmem_cache_t *inflight_cachep;
-/*
- * Hash functions
- */
-static inline unsigned int origin_hash(kdev_t dev)
+static int init_origin_hash(void)
 {
-       return MINOR(dev) & ORIGIN_MASK;
-}
+	int i;
 
-static inline uint32_t exception_hash(offset_t sector, struct snapshot_c *e)
-{
-       unsigned int chunk = (sector & ~e->chunk_size_mask) >> e->chunk_size_shift;
-       return chunk & e->hash_mask;
-}
-
-static inline uint32_t inflight_exception_hash(offset_t sector, struct snapshot_c *e)
-{
-       unsigned int chunk = (sector & ~e->chunk_size_mask) >> e->chunk_size_shift;
-       return chunk & e->inflight_hash_mask;
-}
-
-/*
- * One of these per registered origin, held in the snapshot_origins hash
- */
-struct origin_list
-{
-	/* The origin device */
-	kdev_t origin_dev;
-
-	/* List pointers for this list */
-	struct list_head list;
-
-	/* List of snapshots for this origin */
-	struct list_head snap_list;
-};
-
-
-/*
- * Return the number of sectors in the device
- */
-static inline int get_dev_size(kdev_t dev)
-{
-	int *sizes;
-
-	sizes = blk_size[MAJOR(dev)];
-	if (sizes)
-		return sizes[MINOR(dev)]<<1;
-	else
-		return 0;
-}
-
-/*
- * Return the list of snapshots for a given origin device.  The
- * origin_hash_lock must be held when calling this.
- */
-static struct origin_list *__lookup_snapshot_list(kdev_t origin)
-{
-        struct list_head *slist;
-	struct list_head *snapshot_list;
-
-	snapshot_list = &snapshot_origins[origin_hash(origin)];
-	list_for_each(slist, snapshot_list) {
-		struct origin_list *ol;
-		ol = list_entry(slist, struct origin_list, list);
-
-		if (ol->origin_dev == origin) {
-			return ol;
-		}
-	}
-	return NULL;
-}
-
-/*
- * Add a new exception entry to the on-disk metadata.
- */
-static int update_metadata_block(struct snapshot_c *sc, unsigned long org, unsigned long new)
-{
-	int i = sc->current_metadata_entry++;
-	unsigned long next_md_block = sc->current_metadata_sector;
-
-	sc->current_metadata_number++;
-
-	/* Update copy of disk COW */
-	sc->disk_cow[i].rsector_org = cpu_to_le64(org);
-	sc->disk_cow[i].rsector_new = cpu_to_le64(new);
-
-	/* Have we filled this extent ? */
-	if (sc->current_metadata_number >= sc->highest_metadata_entry) {
-		/* Fill in pointer to next metadata extent */
-		i++;
-		sc->current_metadata_entry++;
-
-		next_md_block = sc->next_free_sector;
-		sc->next_free_sector += sc->extent_size;
-
-		sc->disk_cow[i].rsector_org = cpu_to_le64(next_md_block);
-		sc->disk_cow[i].rsector_new = 0;
+	_origins = kmalloc(ORIGIN_HASH_SIZE * sizeof(struct list_head),
+			   GFP_KERNEL);
+	if (!_origins) {
+		DMERR("Device mapper: Snapshot: unable to allocate memory");
+		return -ENOMEM;
 	}
 
-	/* Commit to disk */
-	if (write_metadata(sc)) {
-		sc->full = 1; /* Failed. don't try again */
-		return -1;
-	}
+	for (i = 0; i < ORIGIN_HASH_SIZE; i++)
+		INIT_LIST_HEAD(_origins + i);
+	init_rwsem(&_origins_lock);
 
-	/*
-	 * Write a new (empty) metadata block if we are at the
-	 * end of an existing block so that read_metadata finds a
-	 * terminating zero entry.
-	 */
-	if (sc->current_metadata_entry == sc->md_entries_per_block) {
-		memset(sc->disk_cow, 0, PAGE_SIZE);
-		sc->current_metadata_sector = next_md_block;
-
-		/*
-		 * If this is also the end of an extent then go
-		 * back to the start.
-		 */
-		if (sc->current_metadata_number >= sc->highest_metadata_entry) {
-			sc->current_metadata_number = 0;
-		}
-		else {
-			int blocksize = get_hardsect_size(sc->cow_dev->dev);
-			sc->current_metadata_sector += blocksize/SECTOR_SIZE;
-		}
-
-		sc->current_metadata_entry = 0;
-		if (write_metadata(sc) != 0) {
-			sc->full = 1;
-			return -1;
-		}
-	}
 	return 0;
 }
 
+static void exit_origin_hash(void)
+{
+	kfree(_origins);
+}
+
+static inline unsigned int origin_hash(kdev_t dev)
+{
+	return MINOR(dev) & ORIGIN_MASK;
+}
+
+static struct origin *__lookup_origin(kdev_t origin)
+{
+	struct list_head *slist;
+	struct list_head *ol;
+	struct origin *o;
+
+	ol = &_origins[origin_hash(origin)];
+	list_for_each(slist, ol) {
+		o = list_entry(slist, struct origin, hash_list);
+
+		if (o->dev == origin)
+			return o;
+	}
+
+	return NULL;
+}
+
+static void __insert_origin(struct origin *o)
+{
+	struct list_head *sl = &_origins[origin_hash(o->dev)];
+	list_add_tail(&o->hash_list, sl);
+}
 
 /*
- * Add a new exception to the list
+ * Make a note of the snapshot and its origin so we can look it
+ * up when the origin has a write on it.
  */
-static struct exception *add_exception(struct snapshot_c *sc, unsigned long org, unsigned long new)
+static int register_snapshot(struct dm_snapshot *snap)
 {
-	struct list_head *l = &sc->hash_table[exception_hash(org, sc)];
-	struct exception *new_ex;
+	struct origin *o;
+	kdev_t dev = snap->origin->dev;
 
-	new_ex = kmem_cache_alloc(exception_cachep, GFP_NOIO);
-	if (!new_ex) return NULL;
+	down_write(&_origins_lock);
+	o = __lookup_origin(dev);
 
-	new_ex->rsector_org = org;
-	new_ex->rsector_new = new;
+	if (!o) {
+		/* New origin */
+		o = kmalloc(sizeof(*o), GFP_KERNEL);
+		if (!o) {
+			up_write(&_origins_lock);
+			return -ENOMEM;
+		}
 
-	list_add(&new_ex->list, l);
+		/* Initialise the struct */
+		INIT_LIST_HEAD(&o->snapshots);
+		o->dev = dev;
 
-	return new_ex;
+		__insert_origin(o);
+	}
+
+	list_add_tail(&snap->list, &o->snapshots);
+
+	up_write(&_origins_lock);
+	return 0;
+}
+
+static void unregister_snapshot(struct dm_snapshot *s)
+{
+	struct origin *o;
+
+	down_write(&_origins_lock);
+	o = __lookup_origin(s->origin->dev);
+
+	list_del(&s->list);
+	if (list_empty(&o->snapshots)) {
+		list_del(&o->hash_list);
+		kfree(o);
+	}
+
+	up_write(&_origins_lock);
+}
+
+/*
+ * Implementation of the exception hash tables.
+ */
+static int init_exception_table(struct exception_table *et, uint32_t size)
+{
+	int i;
+
+	et->hash_mask = size - 1;
+	et->table = vmalloc(sizeof(struct list_head) * (size));
+	if (!et->table)
+		return -ENOMEM;
+
+	for (i = 0; i < size; i++)
+		INIT_LIST_HEAD(et->table + i);
+
+	return 0;
+}
+
+static void exit_exception_table(struct exception_table *et, kmem_cache_t *mem)
+{
+	struct list_head *slot, *entry, *temp;
+	struct exception *ex;
+	int i, size;
+
+	size = et->hash_mask + 1;
+	for (i = 0; i < size; i++) {
+		slot = et->table + i;
+
+		list_for_each_safe(entry, temp, slot) {
+			ex = list_entry(entry, struct exception, hash_list);
+			kmem_cache_free(mem, ex);
+		}
+	}
+
+	vfree(et->table);
+}
+
+/*
+ * FIXME: check how this hash fn is performing.
+ */
+static inline uint32_t exception_hash(struct exception_table *et, chunk_t chunk)
+{
+	return chunk & et->hash_mask;
+}
+
+static void insert_exception(struct exception_table *eh, struct exception *e)
+{
+	struct list_head *l = &eh->table[exception_hash(eh, e->old_chunk)];
+	list_add(&e->hash_list, l);
+}
+
+static inline void remove_exception(struct exception *e)
+{
+	list_del(&e->hash_list);
+}
+
+/*
+ * Return the exception data for a sector, or NULL if not
+ * remapped.
+ */
+static struct exception *lookup_exception(struct exception_table *et,
+					  chunk_t chunk)
+{
+	struct list_head *slot, *el;
+	struct exception *e;
+
+	slot = &et->table[exception_hash(et, chunk)];
+	list_for_each(el, slot) {
+		e = list_entry(el, struct exception, hash_list);
+		if (e->old_chunk == chunk)
+			return e;
+	}
+
+	return NULL;
+}
+
+static inline struct exception *alloc_exception(void)
+{
+	return kmem_cache_alloc(exception_cachep, GFP_NOIO);
+}
+
+static inline struct pending_exception *alloc_pending_exception(void)
+{
+	return kmem_cache_alloc(pending_cachep, GFP_NOIO);
+}
+
+static inline void free_exception(struct exception *e)
+{
+	kmem_cache_free(exception_cachep, e);
+}
+
+static inline void free_pending_exception(struct pending_exception *pe)
+{
+	kmem_cache_free(pending_cachep, pe);
 }
 
 /*
@@ -369,27 +267,37 @@ static struct exception *add_exception(struct snapshot_c *sc, unsigned long org,
  */
 static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 {
-	struct inflight_exception *iex = (struct inflight_exception *)context;
+	struct pending_exception *pe = (struct pending_exception *) context;
+	struct dm_snapshot *s = pe->snap;
+	struct exception *e;
 
 	if (reason == COPY_CB_COMPLETE) {
 		struct buffer_head *bh;
 
 		/* Update the metadata if we are persistent */
-		if (iex->snap->persistent)
-			update_metadata_block(iex->snap, iex->rsector_org, iex->rsector_new);
+		if (s->store->commit_exception)
+			s->store->commit_exception(s->store, &pe->e);
+
+		e = alloc_exception();
+		if (!e) {
+			/* FIXME: what do we do now ? */
+			return;
+		}
 
 		/* Add a proper exception,
 		   and remove the inflight exception from the list */
-		down_write(&iex->snap->lock);
+		down_write(&pe->snap->lock);
 
-		add_exception(iex->snap, iex->rsector_org, iex->rsector_new);
-		list_del(&iex->list);
+		memcpy(e, &pe->e, sizeof(*e));
+		insert_exception(&s->complete, e);
+		remove_exception(&pe->e);
 
 		/* Submit any pending write BHs */
-		bh = iex->bh;
-		iex->bh = NULL;
-		up_write(&iex->snap->lock);
-		kmem_cache_free(inflight_cachep, iex);
+		bh = pe->bh;
+		pe->bh = NULL;
+		up_write(&pe->snap->lock);
+
+		kmem_cache_free(pending_cachep, pe);
 
 		while (bh) {
 			struct buffer_head *nextbh = bh->b_reqnext;
@@ -397,153 +305,21 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 			generic_make_request(WRITE, bh);
 			bh = nextbh;
 		}
-
 	}
 
 	/* Read/write error - snapshot is unusable */
 	if (reason == COPY_CB_FAILED_WRITE || reason == COPY_CB_FAILED_READ) {
 		DMERR("Error reading/writing snapshot");
-		iex->snap->full = 1;
-		if (iex->snap->persistent)
-			write_header(iex->snap);
-		list_del(&iex->list);
-		kmem_cache_free(inflight_cachep, iex);
+
+		if (pe->snap->store->drop_snapshot)
+			pe->snap->store->drop_snapshot(pe->snap->store);
+		remove_exception(&pe->e);
+		kmem_cache_free(pending_cachep, pe);
 	}
 }
 
 /*
- * Make a note of the snapshot and its origin so we can look it
- * up when the origin has a write on it.
- */
-static int register_snapshot(kdev_t origin_dev, struct snapshot_c *snap)
-{
-	struct origin_list *ol;
-
-	down_write(&origin_hash_lock);
-	ol = __lookup_snapshot_list(origin_dev);
-
-	if (!ol) {
-		struct list_head *snapshot_list;
-
-		/* New origin */
-		ol = kmalloc(sizeof(*ol), GFP_KERNEL);
-		if (!ol) {
-			up_write(&origin_hash_lock);
-			return 0;
-		}
-
-		/* Add this snapshot to the origin's list of snapshots */
-		INIT_LIST_HEAD(&ol->snap_list);
-
-		/* Initialise the struct */
-		ol->origin_dev = origin_dev;
-
-		/* Add this origin to the hash table */
-		snapshot_list = &snapshot_origins[origin_hash(origin_dev)];
-		list_add_tail(&ol->list, snapshot_list);
-	}
-
-	list_add_tail(&snap->list, &ol->snap_list);
-
-	up_write(&origin_hash_lock);
-	return 1;
-}
-
-/*
- * Return the exception data for a sector, or NULL if not
- * remapped.
- */
-static struct exception *find_exception(struct snapshot_c *sc, uint32_t b_rsector)
-{
-	struct list_head *l = &sc->hash_table[exception_hash(b_rsector, sc)];
-        struct list_head *slist;
-
-	list_for_each(slist, l) {
-		struct exception *et = list_entry(slist, struct exception, list);
-
-		if (et->rsector_org == b_rsector - (b_rsector & sc->chunk_size_mask)) {
-			return et;
-		}
-	}
-	return NULL;
-}
-
-/*
- * Return the inflight exception data for a sector, or NULL if none active
- */
-static struct inflight_exception *find_inflight_exception(struct snapshot_c *sc, uint32_t b_rsector)
-{
-	struct list_head *l = &sc->inflight_hash_table[inflight_exception_hash(b_rsector, sc)];
-        struct list_head *slist;
-
-	list_for_each(slist, l) {
-		struct inflight_exception *et = list_entry(slist, struct inflight_exception, list);
-		if (et->rsector_org == b_rsector - (b_rsector & sc->chunk_size_mask)) {
-			return et;
-		}
-	}
-	return NULL;
-}
-
-/*
- * Add a new inflight exception to the list
- */
-static struct inflight_exception *add_inflight_exception(struct snapshot_c *sc, unsigned long org, unsigned long new)
-{
-	struct list_head *l = &sc->inflight_hash_table[inflight_exception_hash(org, sc)];
-	struct inflight_exception *new_ex;
-
-	new_ex = kmem_cache_alloc(inflight_cachep, GFP_NOIO);
-	if (!new_ex) return NULL;
-
-	new_ex->rsector_org = org;
-	new_ex->rsector_new = new;
-	new_ex->bh = NULL;
-	new_ex->snap = sc;
-
-	list_add(&new_ex->list, l);
-
-	return new_ex;
-}
-
-/*
- * Allocate a kiobuf. This is the only code nicked from the old
- * snapshot driver and I've changed it anyway.
- */
-static int alloc_iobuf_pages(struct kiobuf *iobuf, int nr_sectors)
-{
-	int nr_pages, err, i;
-
-	if (nr_sectors > KIO_MAX_SECTORS)
-		return -1;
-
-	nr_pages = nr_sectors / (PAGE_SIZE/SECTOR_SIZE);
-	err = expand_kiobuf(iobuf, nr_pages);
-	if (err) goto out;
-
-	err = -ENOMEM;
-	iobuf->locked = 1;
-	iobuf->nr_pages = 0;
-	for (i = 0; i < nr_pages; i++) {
-		struct page * page;
-
-		page = alloc_page(GFP_KERNEL);
-		if (!page) goto out;
-
-		iobuf->maplist[i] = page;
-		LockPage(page);
-		iobuf->nr_pages++;
-	}
-	iobuf->offset = 0;
-
-	err = 0;
-
-out:
-	return err;
-}
-
-/*
- * ...OK there's this too.
+ * Hard coded magic.
  */
 static int calc_max_buckets(void)
 {
@@ -557,413 +333,62 @@ static int calc_max_buckets(void)
 }
 
 /*
+ * Rounds a number down to a power of 2.
+ */
+static inline uint32_t round_down(uint32_t n)
+{
+	while (n & (n - 1))
+		n &= (n - 1);
+	return n;
+}
+
+/*
  * Allocate room for a suitable hash table.
  */
-static int alloc_hash_table(struct snapshot_c *sc)
+static int init_hash_tables(struct dm_snapshot *s)
 {
-	int  i;
-	int  hash_size;
-	unsigned long cow_dev_size;
-	unsigned long origin_dev_size;
-	int  max_buckets;
+	offset_t hash_size, cow_dev_size, origin_dev_size, max_buckets;
 
-        /*
+	/*
 	 * Calculate based on the size of the original volume or
 	 * the COW volume...
 	 */
-	cow_dev_size = get_dev_size(sc->cow_dev->dev);
-	origin_dev_size = get_dev_size(sc->origin_dev->dev);
+	cow_dev_size = get_dev_size(s->cow->dev);
+	origin_dev_size = get_dev_size(s->origin->dev);
 	max_buckets = calc_max_buckets();
 
-	hash_size = min(origin_dev_size, cow_dev_size) / sc->chunk_size;
+	hash_size = min(origin_dev_size, cow_dev_size) / s->chunk_size;
 	hash_size = min(hash_size, max_buckets);
 
 	/* Round it down to a power of 2 */
-	while (hash_size & (hash_size-1))
-		hash_size &= (hash_size-1);
-
-	sc->hash_mask = hash_size-1;
-	sc->hash_size = hash_size;
-	sc->hash_table = vmalloc(sizeof(struct list_head) * (hash_size));
-	if (!sc->hash_table) return -1;
-
-	for (i=0; i<hash_size; i++)
-		INIT_LIST_HEAD(sc->hash_table + i);
+	hash_size = round_down(hash_size);
+	if (init_exception_table(&s->complete, hash_size))
+		return -ENOMEM;
 
 	/*
 	 * Allocate hash table for in-flight exceptions
 	 * Make this smaller than the real hash table
 	 */
-	hash_size >>= 1;
-	sc->inflight_hash_mask = sc->hash_mask >> 1;
+	hash_size >>= 3;
+	if (!hash_size)
+		hash_size = 64;
 
-	sc->inflight_hash_table = vmalloc(sizeof(struct list_head) * (hash_size));
-	if (!sc->inflight_hash_table) return -1;
-	for (i=0; i<hash_size; i++)
-		INIT_LIST_HEAD(sc->inflight_hash_table + i);
+	if (init_exception_table(&s->pending, hash_size)) {
+		exit_exception_table(&s->complete, exception_cachep);
+		return -ENOMEM;
+	}
 
 	return 0;
 }
 
-
 /*
- * READ or WRITE some blocks to/from a device
- */
-static int do_io(int rw, struct kiobuf *iobuf, kdev_t dev, unsigned long start, int nr_sectors)
-{
-	int i, sectors_per_block, nr_blocks;
-	int blocksize = get_hardsect_size(dev);
-	int status;
-
-	sectors_per_block = blocksize / SECTOR_SIZE;
-
-	nr_blocks = nr_sectors / sectors_per_block;
-	start /= sectors_per_block;
-
-	for (i = 0; i < nr_blocks; i++)
-		iobuf->blocks[i] = start++;
-
-	iobuf->length = nr_sectors << 9;
-
-	status = brw_kiovec(rw, 1, &iobuf, dev, iobuf->blocks, blocksize);
-	return (status != (nr_sectors << 9));
-}
-
-/*
- * Free all the allocated exception structures.
- */
-static void free_exception_table(struct snapshot_c *lc)
-{
-	int i;
-
-	for (i=0; i < lc->hash_size; i++) {
-		struct list_head *l = &lc->hash_table[i];
-		struct list_head *entry, *temp;
-
-		if (l) {
-			list_for_each_safe(entry, temp, l) {
-				struct exception *ex;
-				ex = list_entry(entry, struct exception, list);
-				list_del(&ex->list);
-				kmem_cache_free(exception_cachep, ex);
-			}
-		}
-	}
-}
-
-/*
- * Read on-disk COW metadata and populate the hash table.
- */
-static int read_metadata(struct snapshot_c *lc)
-{
-	int status;
-	int i;
-	int entry = 0;
-	int map_page = 0;
-	int nr_sectors = lc->extent_size;
-	int blocksize = get_hardsect_size(lc->cow_dev->dev);
-	unsigned long cur_sector = lc->start_of_exceptions;
-	unsigned long last_sector;
-	unsigned long first_free_sector = 0;
-	int entries_per_page = PAGE_SIZE / sizeof(struct disk_exception);
-	struct disk_exception *cow_block;
-	struct kiobuf *read_iobuf;
-	int err = 0;
-	int devsize = get_dev_size(lc->cow_dev->dev);
-
-	/*
-	 * Allocate our own iovec for this operation 'cos the
-	 * others are way too small.
-	 */
-	if (alloc_kiovec(1, &read_iobuf)) {
-		DMERR("Error allocating iobuf for %s", kdevname(lc->cow_dev->dev));
-		return -1;
-	}
-
-	if (alloc_iobuf_pages(read_iobuf, lc->extent_size)) {
-		DMERR("Error allocating iobuf space for %s", kdevname(lc->cow_dev->dev));
-		free_kiovec(1, &read_iobuf);
-		return -1;
-	}
-	cow_block = page_address(read_iobuf->maplist[0]);
-
-	do
-	{
-		/* Make sure the chain does not go off the end of the device, or backwards */
-		if (cur_sector > devsize || cur_sector < first_free_sector) {
-			DMERR("COW table chain pointers are inconsistent, can't activate snapshot");
-			err = -1;
-			goto ret_free;
-		}
-
-		first_free_sector = max(first_free_sector, cur_sector+lc->extent_size);
-		status = do_io(READ, read_iobuf, lc->cow_dev->dev, cur_sector, nr_sectors);
-		if (status == 0) {
-
-			map_page = 0;
-			entry = 0;
-
-			cow_block = page_address(read_iobuf->maplist[0]);
-
-			/* Now populate the hash table from this data */
-			for (i=0; i <= lc->highest_metadata_entry &&
-				  cow_block[entry].rsector_new != 0; i++) {
-
-				struct exception *ex;
-
-				ex = add_exception(lc,
-						   le64_to_cpu(cow_block[entry].rsector_org),
-						   le64_to_cpu(cow_block[entry].rsector_new));
-
-				first_free_sector = max(first_free_sector,
-							(unsigned long)(le64_to_cpu(cow_block[entry].rsector_new) +
-									lc->chunk_size));
-
-				/* Do we need to move onto the next page? */
-				if (++entry >= entries_per_page) {
-					entry = 0;
-					cow_block = page_address(read_iobuf->maplist[++map_page]);
-				}
-			}
-		}
-		else {
-			DMERR("Error reading COW metadata for %s", kdevname(lc->cow_dev->dev));
-			err = -1;
-			goto ret_free;
-		}
-		last_sector = cur_sector;
-		cur_sector = le64_to_cpu(cow_block[entry].rsector_org);
-
-	} while (cur_sector != 0);
-
-	lc->persistent = 1;
-	lc->current_metadata_sector = last_sector +
-		                      map_page*PAGE_SIZE/SECTOR_SIZE +
-                                      entry/(SECTOR_SIZE/sizeof(struct disk_exception));
-	lc->current_metadata_entry  = entry;
-	lc->current_metadata_number = i;
-	lc->next_free_sector = first_free_sector;
-
-	/* Copy last block into cow_iobuf */
-	memcpy(lc->disk_cow, (char *)((long)&cow_block[entry] - ((long)&cow_block[entry] & (blocksize-1))), blocksize);
-
- ret_free:
-	unmap_kiobuf(read_iobuf);
-	free_kiovec(1, &read_iobuf);
-
-	return err;
-}
-
-/*
- * Read the snapshot volume header, returns 0 only if it read OK
- * and it was valid. returns 1 if no header was found, -1 on
- * error.  All fields are checked against the snapshot structure
- * itself to make sure we don't corrupt the data.
- */
-static int read_header(struct snapshot_c *lc)
-{
-	int status;
-	struct snap_disk_header *header;
-	int blocksize = get_hardsect_size(lc->cow_dev->dev);
-	unsigned long devsize;
-
-	/* Get it */
-	status = do_io(READ, lc->cow_iobuf, lc->cow_dev->dev, 0L, blocksize/SECTOR_SIZE);
-	if (status != 0) {
-		DMERR("Snapshot dev %s error reading header", kdevname(lc->cow_dev->dev));
-		return -1;
-	}
-
-	header = (struct snap_disk_header *)page_address(lc->cow_iobuf->maplist[0]);
-
-	/*
-	 * Check the magic. It's OK if this fails, we just create a new snapshot header
-	 * and start from scratch
-	 */
-	if (le32_to_cpu(header->magic) != SNAP_MAGIC) {
-		return 1;
-	}
-
-	/* Check the version matches */
-	if (le32_to_cpu(header->version) != SNAPSHOT_DISK_VERSION) {
-		DMWARN("Snapshot dev %s version mismatch. Stored: %d, driver: %d",
-		       kdevname(lc->cow_dev->dev), le32_to_cpu(header->version), SNAPSHOT_DISK_VERSION);
-		return -1;
-	}
-
-	/* Check the chunk sizes match */
-	if (le32_to_cpu(header->chunk_size) != lc->chunk_size) {
-		DMWARN("Snapshot dev %s chunk size mismatch. Stored: %d, requested: %d",
-		       kdevname(lc->cow_dev->dev), le32_to_cpu(header->chunk_size), lc->chunk_size);
-		return -1;
-	}
-
-	/* Check the extent sizes match */
-	if (le32_to_cpu(header->extent_size) != lc->extent_size) {
-		DMWARN("Snapshot dev %s extent size mismatch. Stored: %d, requested: %ld",
-		       kdevname(lc->cow_dev->dev), le32_to_cpu(header->extent_size), lc->extent_size);
-		return -1;
-	}
-
-	/* Get the rest of the data */
-	lc->start_of_exceptions = le64_to_cpu(header->start_of_exceptions);
-	if (header->full) {
-		DMWARN("Snapshot dev %s is full. It cannot be used", kdevname(lc->cow_dev->dev));
-		lc->full = 1;
-		return -1;
-	}
-
-	/* Validate against the size of the volume */
-	devsize = get_dev_size(lc->cow_dev->dev);
-	if (lc->start_of_exceptions > devsize) {
-		DMWARN("Snapshot metadata error on %s. start exceptions > device size (%ld > %ld)",
-		       kdevname(lc->cow_dev->dev), lc->start_of_exceptions, devsize);
-		return -1;
-	}
-
-	/* Read metadata into the hash table and update pointers */
-	return read_metadata(lc);
-}
-
-/*
- * Write (or update) the header. The only time we should need to
- * do an update is when the snapshot becomes full.
- */
-static int write_header(struct snapshot_c *lc)
-{
-	struct snap_disk_header *header;
-	struct kiobuf *head_iobuf;
-	int blocksize = get_hardsect_size(lc->cow_dev->dev);
-	int status;
-
-	/*
-	 * Allocate our own iobuf for this so we don't corrupt
-	 * any of the other writes that may be going on.
-	 */
-	if (alloc_kiovec(1, &head_iobuf)) {
-		DMERR("Error allocating iobuf for header on %s", kdevname(lc->cow_dev->dev));
-		return -1;
-	}
-
-	if (alloc_iobuf_pages(head_iobuf, PAGE_SIZE/SECTOR_SIZE)) {
-		DMERR("Error allocating iobuf space for header on %s", kdevname(lc->cow_dev->dev));
-		free_kiovec(1, &head_iobuf);
-		return -1;
-	}
-
-	header = (struct snap_disk_header *)page_address(head_iobuf->maplist[0]);
-
-	header->magic       = cpu_to_le32(SNAP_MAGIC);
-	header->version     = cpu_to_le32(SNAPSHOT_DISK_VERSION);
-	header->chunk_size  = cpu_to_le32(lc->chunk_size);
-	header->extent_size = cpu_to_le32(lc->extent_size);
-	header->full        = cpu_to_le32(lc->full);
-
-	header->start_of_exceptions = cpu_to_le64(lc->start_of_exceptions);
-
-	/* Must write at least a full block */
-	status = do_io(WRITE, head_iobuf, lc->cow_dev->dev, 0, blocksize/SECTOR_SIZE);
-
-	unmap_kiobuf(head_iobuf);
-	free_kiovec(1, &head_iobuf);
-	return status;
-}
-
-
-/*
- * Write the latest COW metadata block.
- */
-static int write_metadata(struct snapshot_c *lc)
-{
-	int blocksize = get_hardsect_size(lc->cow_dev->dev);
-	int writesize = blocksize/SECTOR_SIZE;
-
-	if (do_io(WRITE, lc->cow_iobuf, lc->cow_dev->dev, lc->current_metadata_sector, writesize) != 0) {
-		DMERR("Error writing COW block");
-		return -1;
-	}
-	return 0;
-}
-
-static int setup_persistent_snapshot(struct snapshot_c *lc, int blocksize, void **context)
-{
-	int status;
-	int i;
-	int cow_sectors;
-
-	lc->highest_metadata_entry = (lc->extent_size*SECTOR_SIZE) / sizeof(struct disk_exception) - 1;
-	lc->md_entries_per_block   = blocksize / sizeof(struct disk_exception);
-
-	/* Allocate and set up iobuf for metadata I/O */
-	*context = "Unable to allocate COW iovec";
-	if (alloc_kiovec(1, &lc->cow_iobuf))
-		return -1;
-
-	/* Allocate space for the COW buffer. It should be at least PAGE_SIZE. */
-	cow_sectors = blocksize/SECTOR_SIZE + PAGE_SIZE/SECTOR_SIZE;
-	*context = "Unable to allocate COW I/O buffer space";
-	if (alloc_iobuf_pages(lc->cow_iobuf, cow_sectors)) {
-		free_kiovec(1, &lc->cow_iobuf);
-		return -1;
-	}
-
-	for (i=0; i < lc->cow_iobuf->nr_pages; i++) {
-		memset(page_address(lc->cow_iobuf->maplist[i]), 0, PAGE_SIZE);
-	}
-
-	lc->disk_cow = page_address(lc->cow_iobuf->maplist[0]);
-
-	*context = "Error in disk header";
-	/* Check for a header on disk and create a new one if not */
-	if ( (status = read_header(lc)) == 1) {
-
-		/* Write a new header */
-		lc->start_of_exceptions = lc->next_free_sector;
-		lc->next_free_sector += lc->extent_size;
-		lc->current_metadata_sector = lc->start_of_exceptions;
-		lc->current_metadata_entry  = 0;
-		lc->current_metadata_number = 0;
-
-		*context = "Unable to write snapshot header";
-		if (write_header(lc) != 0) {
-			DMERR("Error writing header to snapshot volume %s",
-			      kdevname(lc->cow_dev->dev));
-			goto free_ret;
-		}
-
-		/* Write a blank metadata block to the device */
-		if (write_metadata(lc) != 0) {
-			DMERR("Error writing initial COW table to snapshot volume %s",
-			      kdevname(lc->cow_dev->dev));
-			goto free_ret;
-		}
-	}
-
-	/*
-	 * There is a header but it doesn't match - fail so we
-	 * don't destroy what might be useful data on disk.  If
-	 * the user really wants to use this COW device for a
-	 * snapshot then the first sector should be zeroed out
-	 * first.
-	 */
-	if (status == -1)
-		goto free_ret;
-
-	return 0;
-
- free_ret:
-	unmap_kiobuf(lc->cow_iobuf);
-	free_kiovec(1, &lc->cow_iobuf);
-	return -1;
-}
-
-/*
- * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n> <chunk-size> <extent-size>
+ * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n>
+ * <chunk-size> <extent-size>
  */
 static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 			int argc, char **argv, void **context)
 {
-	struct snapshot_c *lc;
+	struct dm_snapshot *s;
 	unsigned long chunk_size;
 	unsigned long extent_size = 0L;
 	int r = -EINVAL;
@@ -975,184 +400,273 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 
 	if (argc < 4) {
 		*context = "dm-snapshot: Not enough arguments";
-		return -EINVAL;
+		r = -EINVAL;
+		goto bad;
 	}
 
 	origin_path = argv[0];
-	cow_path    = argv[1];
-	persistent  = argv[2];
+	cow_path = argv[1];
+	persistent = argv[2];
 
-	*context = "Persistent flag is not P or N";
-	if ((*persistent & 0x5f) != 'P' &&
-	    (*persistent & 0x5f) != 'N')
+	if ((*persistent & 0x5f) != 'P' && (*persistent & 0x5f) != 'N') {
+		*context = "Persistent flag is not P or N";
+		r = -EINVAL;
 		goto bad;
+	}
 
 	chunk_size = simple_strtoul(argv[3], &value, 10);
 	if (chunk_size == 0 || value == NULL) {
 		*context = "Invalid chunk size";
+		r = -EINVAL;
 		goto bad;
 	}
 
 	/* Get the extent size for persistent snapshots */
 	if ((*persistent & 0x5f) == 'P') {
-		*context = "No extent size specified";
-		if (argc < 5)
+		if (argc < 5) {
+			*context = "No extent size specified";
+			r = -EINVAL;
 			goto bad;
+		}
 
 		extent_size = simple_strtoul(argv[4], &value, 10);
 		if (extent_size == 0 || value == NULL) {
 			*context = "Invalid extent size";
+			r = -EINVAL;
 			goto bad;
 		}
 	}
 
-	*context = "Cannot allocate snapshot context private structure";
-	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
-	if (lc == NULL)
+	s = kmalloc(sizeof(*s), GFP_KERNEL);
+	if (s == NULL) {
+		*context = "Cannot allocate snapshot context private structure";
+		r = -ENOMEM;
 		goto bad;
+	}
 
-	*context = "Cannot get origin device";
-	r = dm_table_get_device(t, origin_path, 0, 0, &lc->origin_dev);
-	if (r)
-		goto bad_free;
-
-	*context = "Cannot get COW device";
-	r = dm_table_get_device(t, cow_path, 0, 0, &lc->cow_dev);
+	r = dm_table_get_device(t, origin_path, 0, 0, &s->origin);
 	if (r) {
-		dm_table_put_device(t, lc->origin_dev);
+		*context = "Cannot get origin device";
+		r = -EINVAL;
+		goto bad_free;
+	}
+
+	r = dm_table_get_device(t, cow_path, 0, 0, &s->cow);
+	if (r) {
+		dm_table_put_device(t, s->origin);
+		*context = "Cannot get COW device";
+		r = -EINVAL;
 		goto bad_free;
 	}
 
 	/* Validate the extent and chunk sizes against the device block size */
-	blocksize = get_hardsect_size(lc->cow_dev->dev);
-	if (chunk_size % (blocksize/SECTOR_SIZE)) {
+	blocksize = get_hardsect_size(s->cow->dev);
+	if (chunk_size % (blocksize / SECTOR_SIZE)) {
 		*context = "Chunk size is not a multiple of device blocksize";
+		r = -EINVAL;
 		goto bad_putdev;
 	}
 
-	if (extent_size % (blocksize/SECTOR_SIZE)) {
+	if (extent_size % (blocksize / SECTOR_SIZE)) {
 		*context = "Extent size is not a multiple of device blocksize";
+		r = -EINVAL;
 		goto bad_putdev;
 	}
 
 	/* Check the sizes are small enough to fit in one kiovec */
 	if (chunk_size > KIO_MAX_SECTORS) {
 		*context = "Chunk size is too big";
+		r = -EINVAL;
 		goto bad_putdev;
 	}
 
 	if (extent_size > KIO_MAX_SECTORS) {
 		*context = "Extent size is too big";
+		r = -EINVAL;
 		goto bad_putdev;
 	}
 
 	/* Check chunk_size is a power of 2 */
-	if (chunk_size != 1 << (ffs(chunk_size)-1)) {
+	if (chunk_size & (chunk_size - 1)) {
 		*context = "Chunk size is not a power of 2";
 		r = -EINVAL;
 		goto bad_putdev;
 	}
 
+	s->chunk_size = chunk_size;
+	s->chunk_mask = chunk_size - 1;
+	for (s->chunk_shift = 0; chunk_size;
+	     s->chunk_shift++, chunk_size >>= 1) ;
 
-        lc->chunk_size = chunk_size;
-        lc->chunk_size_mask = chunk_size-1;
-	lc->extent_size = extent_size;
-	lc->next_free_sector = blocksize/SECTOR_SIZE; /* Leave the first block alone */
-	lc->full      = 0;
-	lc->disk_cow  = NULL;
-	init_rwsem(&lc->lock);
-
-	/* Work out the power of 2 that it is */
-	lc->chunk_size_shift = 0;
-	while ( (chunk_size&1) == 0) {
-		chunk_size >>= 1;
-		lc->chunk_size_shift++;
-	}
+	s->valid = 1;
+	init_rwsem(&s->lock);
 
 	/* Allocate hash table for COW data */
-	r = -ENOMEM;
-	*context = "Unable to allocate has table space";
-	if (alloc_hash_table(lc) == -1)
+	if (init_hash_tables(s)) {
+		*context = "Unable to allocate hash table space";
+		r = -ENOMEM;
 		goto bad_putdev;
+	}
 
 	/*
 	 * Check the persistent flag - done here because we need the iobuf
 	 * to check the LV header
 	 */
-	if ((*persistent & 0x5f) == 'P') {
-		lc->persistent = 1;
+#if 0
+	if ((*persistent & 0x5f) == 'P')
+		s->store = dm_create_persistent(s, blocksize,
+						extent_size, context);
+	else
+#endif
+		s->store = dm_create_transient(s, blocksize, context);
 
-		/* Allocate the COW iobuf and set associated variables */
-		if (setup_persistent_snapshot(lc, blocksize, context))
-			goto bad_free1;
+	if (!s->store) {
+		*context = "Couldn't create exception store";
+		r = -EINVAL;
+		goto bad_free1;
 	}
-	else {
-		lc->persistent = 0;
+
+	/* Allocate the COW iobuf and set associated variables */
+	if (s->store->init &&
+	    s->store->init(s->store, blocksize, extent_size, context)) {
+		*context = "Couldn't initialise exception store";
+		r = -ENOMEM;
+		goto bad_free1;
 	}
 
 	/* Flush IO to the origin device */
-	/* TODO: VFS lock sync too */
-	fsync_dev(lc->origin_dev->dev);
+	/* FIXME: what does sct have against fsync_dev ? */
+	fsync_dev(s->origin->dev);
 #if LVM_VFS_ENHANCEMENT
-	fsync_dev_lockfs(lc->origin_dev->dev);
-	unlockfs(lc->origin_dev->dev);
+	fsync_dev_lockfs(s->origin->dev);
 #endif
 
-        /* Add snapshot to the list of snapshots for this origin */
-	r = -EINVAL;
-	*context = "Cannot register snapshot origin";
-	if (!register_snapshot(lc->origin_dev->dev, lc))
-	    goto bad_free2;
+	/* Add snapshot to the list of snapshots for this origin */
+	if (register_snapshot(s)) {
+		r = -EINVAL;
+		*context = "Cannot register snapshot origin";
+		goto bad_free2;
+	}
 
-	*context = lc;
+#if LVM_VFS_ENHANCEMENT
+	unlockfs(s->origin->dev);
+#endif
+
+	*context = s;
 	return 0;
 
  bad_free2:
-	if (lc->persistent) {
-		unmap_kiobuf(lc->cow_iobuf);
-		free_kiovec(1, &lc->cow_iobuf);
-	}
+	if (s->store->destroy)
+		s->store->destroy(s->store);
+
  bad_free1:
-	vfree(lc->hash_table);
-	vfree(lc->inflight_hash_table);
+	exit_exception_table(&s->pending, pending_cachep);
+	exit_exception_table(&s->complete, exception_cachep);
+
  bad_putdev:
-	dm_table_put_device(t, lc->cow_dev);
-	dm_table_put_device(t, lc->origin_dev);
+	dm_table_put_device(t, s->cow);
+	dm_table_put_device(t, s->origin);
+
  bad_free:
-	kfree(lc);
+	kfree(s);
+
  bad:
 	return r;
 }
 
-static void snapshot_dtr(struct dm_table *t, void *c)
+static void snapshot_dtr(struct dm_table *t, void *context)
 {
-	struct snapshot_c *lc = (struct snapshot_c *) c;
+	struct dm_snapshot *s = (struct dm_snapshot *) context;
 
-	/* Unhook from the list */
-	list_del(&lc->list);
+	unregister_snapshot(s);
+
+	exit_exception_table(&s->pending, pending_cachep);
+	exit_exception_table(&s->complete, exception_cachep);
 
 	/* Deallocate memory used */
-	free_exception_table(lc);
-	if (lc->persistent) {
-		unmap_kiobuf(lc->cow_iobuf);
-		free_kiovec(1, &lc->cow_iobuf);
+	if (s->store->destroy)
+		s->store->destroy(s->store);
+
+	dm_table_put_device(t, s->origin);
+	dm_table_put_device(t, s->cow);
+	kfree(s);
+}
+
+/*
+ * Performs a new copy on write.
+ */
+static int new_exception(struct dm_snapshot *s, struct buffer_head *bh)
+{
+	struct exception *e;
+	struct pending_exception *pe;
+	chunk_t chunk;
+
+	chunk = sector_to_chunk(s, bh->b_rsector);
+
+	/*
+	 * If the exception is in flight then we just defer the
+	 * bh until this copy has completed.
+	 */
+
+	/* FIXME: great big race. */
+	e = lookup_exception(&s->pending, chunk);
+	if (e) {
+		/* cast the exception to a pending exception */
+		pe = list_entry(e, struct pending_exception, e);
+		bh->b_reqnext = pe->bh;
+		pe->bh = bh;
+		return 0;
 	}
 
-	vfree(lc->hash_table);
-	vfree(lc->inflight_hash_table);
-	dm_table_put_device(t, lc->origin_dev);
-	dm_table_put_device(t, lc->cow_dev);
-	kfree(c);
+	pe = alloc_pending_exception();
+	if (!pe) {
+		DMWARN("Couldn't allocate inflight_exception.");
+		return -ENOMEM;
+	}
+
+	pe->e.old_chunk = chunk;
+
+	if (s->store->prepare_exception &&
+	    s->store->prepare_exception(s->store, &pe->e)) {
+		s->valid = 0;
+		return -ENXIO;
+	}
+
+	bh->b_reqnext = pe->bh;
+	pe->bh = bh;
+	pe->snap = s;
+
+	insert_exception(&s->pending, &pe->e);
+
+	/* Get kcopyd to do the copy */
+	dm_blockcopy(chunk_to_sector(s, pe->e.old_chunk),
+		     chunk_to_sector(s, pe->e.new_chunk),
+		     s->chunk_size,
+		     s->origin->dev,
+		     s->cow->dev, SNAPSHOT_COPY_PRIORITY, 0, copy_callback, pe);
+
+	return 1;
+}
+
+static inline void remap_exception(struct dm_snapshot *s, struct exception *e,
+				   struct buffer_head *bh)
+{
+	bh->b_rdev = s->cow->dev;
+	bh->b_rsector = chunk_to_sector(s, e->new_chunk) +
+	    (bh->b_rsector & s->chunk_mask);
 }
 
 static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 {
-	struct exception *ex;
-	struct snapshot_c *lc = (struct snapshot_c *) context;
-	int ret = 1;
+	struct exception *e;
+	struct dm_snapshot *s = (struct dm_snapshot *) context;
+	int r = 1;
+	chunk_t chunk;
 
-        /* Full snapshots are not usable */
-	if (lc->full)
+	chunk = sector_to_chunk(s, bh->b_rsector);
+
+	/* Full snapshots are not usable */
+	if (!s->valid)
 		return -1;
 
 	/*
@@ -1161,88 +675,61 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 	 * writeable.
 	 */
 	if (rw == WRITE) {
-		struct inflight_exception *iex;
 
-		down_write(&lc->lock);
+		down_write(&s->lock);
 
 		/* If the block is already remapped - use that, else remap it */
-		ex = find_exception(context, bh->b_rsector);
-		if (ex) {
-			bh->b_rdev = lc->cow_dev->dev;
-			bh->b_rsector = ex->rsector_new + (bh->b_rsector & lc->chunk_size_mask);
+		e = lookup_exception(&s->complete, chunk);
+		if (e) {
+			remap_exception(s, e, bh);
+			up_write(&s->lock);
+			return 1;
 		}
 
-		if (!ex && (iex = find_inflight_exception(context, bh->b_rsector)) ) {
-			/* Exception has not been committed to disk - save this bh */
-			bh->b_reqnext = iex->bh;
-			iex->bh = bh;
-			up_write(&lc->lock);
+		e = lookup_exception(&s->pending, chunk);
+		if (e) {
+			struct pending_exception *pe;
+			pe = list_entry(e, struct pending_exception, e);
+
+			/*
+			 * Exception has not been committed to
+			 * disk - save this bh
+			 */
+			bh->b_reqnext = pe->bh;
+			pe->bh = bh;
+			up_write(&s->lock);
 			return 0;
 		}
 
-		if (!ex) {
-			unsigned long read_start = bh->b_rsector - (bh->b_rsector & lc->chunk_size_mask);
-			unsigned long devsize = get_dev_size(lc->cow_dev->dev);
-			unsigned long reloc_sector;
-			struct inflight_exception *iex;
+		if (new_exception(s, bh))
+			r = -1;
+		else
+			r = 0;
 
-			/* Check there is enough space */
-			if (lc->next_free_sector + lc->chunk_size >= devsize) {
-				DMWARN("Snapshot %s is full", kdevname(lc->cow_dev->dev));
-				lc->full = 1;
-				if (lc->persistent)
-					write_header(lc);
-				up_write(&lc->lock);
-				return -1;
-			}
+		up_write(&s->lock);
 
-			/* Update the inflight exception table */
-			reloc_sector = lc->next_free_sector;
-			lc->next_free_sector += lc->chunk_size;
-			iex = add_inflight_exception(lc, read_start, reloc_sector);
-			if (!iex) {
-				DMERR("Snapshot %s error adding new exception entry", kdevname(lc->cow_dev->dev));
-				/* Error here - treat it as full */
-				lc->full = 1;
-				if (lc->persistent)
-					write_header(lc);
-				up_write(&lc->lock);
-				return -1;
-			}
+	} else {
+		/*
+		 * FIXME: this read path scares me because we
+		 * always use the origin when we have a pending
+		 * exception.  However I can't think of a
+		 * situation where this is wrong - ejt.
+		 */
 
-			/* Add this bh to the list of those we need to resubmit when the COW has completed */
-			bh->b_reqnext = iex->bh;
-			iex->bh = bh;
-
-			/* Get kcopyd to do the work */
-			dm_blockcopy(read_start, reloc_sector, lc->chunk_size,
-				     lc->origin_dev->dev, lc->cow_dev->dev,
-				     SNAPSHOT_COPY_PRIORITY, 0,
-				     copy_callback, iex);
-
-			/* Tell the upper layers we have control of the BH now */
-			ret = 0;
-		}
-
-		up_write(&lc->lock);
-	}
-	else {
 		/* Do reads */
-		down_read(&lc->lock);
+		down_read(&s->lock);
 
 		/* See if it it has been remapped */
-		ex = find_exception(context, bh->b_rsector);
-		if (ex) {
+		e = lookup_exception(&s->complete, chunk);
+		if (e)
+			remap_exception(s, e, bh);
+		else
+			bh->b_rdev = s->origin->dev;
 
-			bh->b_rdev = lc->cow_dev->dev;
-			bh->b_rsector = ex->rsector_new + (bh->b_rsector & lc->chunk_size_mask);
-		} else {
-			bh->b_rdev = lc->origin_dev->dev;
-		}
-		up_read(&lc->lock);
+		up_read(&s->lock);
 	}
 
-	return ret;
+	return r;
 }
 
 /*
@@ -1251,155 +738,103 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 {
 	struct list_head *snap_list;
-	struct origin_list *ol;
-	int ret = 1;
+	struct origin *o;
+	int r = 1;
+	chunk_t chunk;
 
-	down_read(&origin_hash_lock);
-	ol = __lookup_snapshot_list(origin->dev);
-	up_read(&origin_hash_lock);
+	down_read(&_origins_lock);
+	o = __lookup_origin(origin->dev);
 
-	if (ol && !list_empty(&ol->snap_list)) {
-		struct list_head *origin_snaps = &ol->snap_list;
+	if (o) {
+		struct list_head *origin_snaps = &o->snapshots;
+		struct dm_snapshot *lock_snap;
+
+		/* Lock the metadata */
+		lock_snap = list_entry(origin_snaps->next,
+				       struct dm_snapshot, list);
 
 		/* Do all the snapshots on this origin */
 		list_for_each(snap_list, origin_snaps) {
-			struct snapshot_c *snap;
-			struct exception  *ex;
-			snap = list_entry(snap_list, struct snapshot_c, list);
-
-			/* Ignore full snapshots */
-			if (snap->full)
-				continue;
+			struct dm_snapshot *snap;
+			struct exception *e;
+			snap = list_entry(snap_list, struct dm_snapshot, list);
 
 			down_write(&snap->lock);
 
 			/*
-			 * Check exception table to see if block is already remapped in this
-			 * snapshot and mark the snapshot as needing a COW if not
+			 * Remember different snapshots can have
+			 * different chunk sizes.
 			 */
-			ex = find_exception(snap, bh->b_rsector);
-			if (!ex) {
-				offset_t dev_size;
-				struct inflight_exception *iex = find_inflight_exception(snap, bh->b_rsector);
+			chunk = sector_to_chunk(snap, bh->b_rsector);
 
-				/* If the exception is in flight then defer the BH -
-				   but don't add it twice! */
-				if (iex) {
-					if (ret) {
-						bh->b_reqnext = iex->bh;
-						iex->bh = bh;
-						ret = 0;
-					}
-					up_write(&snap->lock);
-					continue;
-				}
-
-                                /*
-				 * Check for full snapshot. Doing the size calculation here means that
-				 * the COW device can be resized without us being told
+			/* Only deal with valid snapshots */
+			if (snap->valid) {
+				/*
+				 * Check exception table to see
+				 * if block is already remapped
+				 * in this snapshot and mark the
+				 * snapshot as needing a COW if
+				 * not
 				 */
-				dev_size = get_dev_size(snap->cow_dev->dev);
-				if (snap->next_free_sector + snap->chunk_size >= dev_size) {
-					        /* Snapshot is full, we can't use it */
-						DMWARN("Snapshot %s is full (sec=%ld, size=%ld)",
-						       kdevname(snap->cow_dev->dev), snap->next_free_sector + snap->chunk_size, dev_size);
-						snap->full = 1;
-						/* Mark it full on the device */
-						if (snap->persistent)
-							write_header(snap);
-						up_write(&snap->lock);
-						continue;
-				}
-				else {
-					/* Update exception table */
-					unsigned long reloc_sector;
-					unsigned long read_start = bh->b_rsector - (bh->b_rsector & snap->chunk_size_mask);
-					struct inflight_exception *iex;
-
-					reloc_sector = snap->next_free_sector;
-					snap->next_free_sector += snap->chunk_size;
-					iex = add_inflight_exception(snap, read_start, reloc_sector);
-					if (!iex) {
-						DMERR("Snapshot %s error adding new exception entry",
-						      kdevname(snap->cow_dev->dev));
-						/* Error here - treat it as full */
-						snap->full = 1;
-						if (snap->persistent)
-							write_header(snap);
-						up_write(&snap->lock);
-						continue;
-					}
-
-					/* Get kcopyd to do the copy */
-					dm_blockcopy(read_start, reloc_sector, snap->chunk_size,
-						     snap->origin_dev->dev, snap->cow_dev->dev,
-						     SNAPSHOT_COPY_PRIORITY, 0,
-						     copy_callback, iex);
-					if (ret) {
-						bh->b_reqnext = iex->bh;
-						iex->bh = bh;
-						ret = 0;
-					}
-				}
+				e = lookup_exception(&snap->complete, chunk);
+				if (!e && !new_exception(snap, bh))
+					r = 0;
 			}
+
 			up_write(&snap->lock);
 		}
 	}
-	return ret;
+
+	up_read(&_origins_lock);
+	return r;
 }
 
-
 static struct target_type snapshot_target = {
-	name:	"snapshot",
-	module:	THIS_MODULE,
-	ctr:	snapshot_ctr,
-	dtr:	snapshot_dtr,
-	map:	snapshot_map,
-	err:	NULL
+	name:"snapshot",
+	module:THIS_MODULE,
+	ctr:snapshot_ctr,
+	dtr:snapshot_dtr,
+	map:snapshot_map,
+	err:NULL
 };
 
 int __init dm_snapshot_init(void)
 {
-	int r = dm_register_target(&snapshot_target);
+	int r;
 
-	if (r < 0)
-		DMERR("Device mapper: Snapshot: register failed %d", r);
-	else {
-		snapshot_origins = kmalloc(ORIGIN_HASH_SIZE * sizeof(struct list_head), GFP_KERNEL);
-		if (snapshot_origins == NULL) {
-			DMERR("Device mapper: Snapshot: unable to allocate memory");
-			r = -1;
-		}
-		else {
-			/* initialise the origin->snapshot hash table */
-			int i;
-			for (i=0; i<ORIGIN_HASH_SIZE; i++)
-				INIT_LIST_HEAD(snapshot_origins + i);
-			init_rwsem(&origin_hash_lock);
-		}
+	r = dm_register_target(&snapshot_target);
+	if (r) {
+		DMERR("snapshot target register failed %d", r);
+		return r;
 	}
+
+	r = init_origin_hash();
+	if (r) {
+		DMERR("init_origin_hash failed.");
+		return r;
+	}
+
 	exception_cachep = kmem_cache_create("dm-snapshot-ex",
 					     sizeof(struct exception),
 					     __alignof__(struct exception),
 					     0, NULL, NULL);
 	if (!exception_cachep) {
-		kfree(snapshot_origins);
+		exit_origin_hash();
 		return -1;
 	}
 
-
-	inflight_cachep = kmem_cache_create("dm-snapshot-in",
-					    sizeof(struct inflight_exception),
-					    __alignof__(struct inflight_exception),
-					    0, NULL, NULL);
-	if (!inflight_cachep) {
-		kfree(snapshot_origins);
+	pending_cachep =
+	    kmem_cache_create("dm-snapshot-in",
+			      sizeof(struct pending_exception),
+			      __alignof__(struct pending_exception),
+			      0, NULL, NULL);
+	if (!pending_cachep) {
+		exit_origin_hash();
 		kmem_cache_destroy(exception_cachep);
 		return -1;
 	}
 
-
-	return r;
+	return 0;
 }
 
 void dm_snapshot_exit(void)
@@ -1409,10 +844,9 @@ void dm_snapshot_exit(void)
 	if (r < 0)
 		DMERR("Device mapper: Snapshot: unregister failed %d", r);
 
-	if (snapshot_origins)
-		kfree(snapshot_origins);
+	exit_origin_hash();
 
-	kmem_cache_destroy(inflight_cachep);
+	kmem_cache_destroy(pending_cachep);
 	kmem_cache_destroy(exception_cachep);
 }
 
