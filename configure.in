@@ -176,6 +176,7 @@ make.tmpl                                                               \
 include/Makefile                                                        \
 dmsetup/Makefile							\
 lib/Makefile							 	\
+lib/libdm-common.h						 	\
 kernel/Makefile								\
 kernel/common/dm.c							\
 kernel/ioctl/dm-ioctl.h							\
