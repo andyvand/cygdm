@@ -1,0 +1,8 @@
+devmapper (0.95.02cvs20020218) unstable; urgency=low
+
+  * Initial Release.
+  * device-mapper broken up into libdevmapper1, libdevmapper-dev,
+    dmsetup, and kernel-patch-device-mapper.
+
+ -- Andres Salomon <dilinger@mp3revolution.net>  Mon, 18 Feb 2002 15:46:08 -0500
+
