@@ -5,6 +5,7 @@
  */
 
 #include "dm.h"
+#include "kcopyd.h"
 
 #include <linux/init.h>
 #include <linux/module.h>
@@ -26,7 +27,7 @@ struct dm_io {
 
 	struct dm_target *ti;
 	int rw;
-	void *map_context;
+	union map_info map_context;
 	void (*end_io) (struct buffer_head * bh, int uptodate);
 	void *context;
 };
@@ -66,6 +67,12 @@ struct mapped_device {
 	 * io objects are allocated from here.
 	 */
 	mempool_t *io_pool;
+
+	/*
+	 * Event handling.
+	 */
+	uint32_t event_nr;
+	wait_queue_head_t eventq;
 };
 
 #define MIN_IOS 256
@@ -75,6 +82,10 @@ static struct mapped_device *get_kdev(kdev_t dev);
 static int dm_request(request_queue_t *q, int rw, struct buffer_head *bh);
 static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb);
 
+/*-----------------------------------------------------------------
+ * In order to avoid the 256 minor number limit we are going to
+ * register more major numbers as neccessary.
+ *---------------------------------------------------------------*/
 #define MAX_MINORS (1 << MINORBITS)
 
 struct major_details {
@@ -95,6 +106,11 @@ struct major_details {
 static struct rw_semaphore _dev_lock;
 static struct major_details *_majors[MAX_BLKDEV];
 
+/*
+ * This holds a list of majors that non-specified device numbers
+ * may be allocated from.  Only majors with free minors appear on
+ * this list.
+ */
 static LIST_HEAD(_transients_free);
 
 static int __alloc_major(unsigned int major, struct major_details **result)
@@ -348,6 +364,7 @@ static struct {
 } _inits[] = {
 #define xx(n) {n ## _init, n ## _exit},
 	xx(local)
+	xx(kcopyd)
 	xx(dm_target)
 	xx(dm_linear)
 	xx(dm_stripe)
@@ -523,7 +540,7 @@ static void dec_pending(struct buffer_head *bh, int uptodate)
 
 	if (endio) {
 		r = endio(io->ti, bh, io->rw, uptodate ? 0 : -EIO,
-			  io->map_context);
+			  &io->map_context);
 		if (r < 0)
 			uptodate = 0;
 
@@ -550,6 +567,9 @@ static inline int __map_buffer(struct mapped_device *md, int rw,
 			       struct buffer_head *bh, struct dm_io *io)
 {
 	struct dm_target *ti;
+
+	if (!md->map)
+		return -EINVAL;
 
 	ti = dm_table_find_target(md->map, bh->b_rsector);
 	if (!ti->type)
@@ -664,7 +684,7 @@ static int __bmap(struct mapped_device *md, kdev_t dev, unsigned long block,
 {
 	struct buffer_head bh;
 	struct dm_target *ti;
-	void *map_context;
+	union map_info map_context;
 	int r;
 
 	if (test_bit(DMF_BLOCK_IO, &md->flags)) {
@@ -674,6 +694,9 @@ static int __bmap(struct mapped_device *md, kdev_t dev, unsigned long block,
 	if (!check_dev_size(dev, block)) {
 		return -EINVAL;
 	}
+
+	if (!md->map)
+		return -EINVAL;
 
 	/* setup dummy bh */
 	memset(&bh, 0, sizeof(bh));
@@ -687,7 +710,7 @@ static int __bmap(struct mapped_device *md, kdev_t dev, unsigned long block,
 
 	/* do the mapping */
 	r = ti->type->map(ti, &bh, READ, &map_context);
-	ti->type->end_io(ti, &bh, READ, 0, map_context);
+	ti->type->end_io(ti, &bh, READ, 0, &map_context);
 
 	if (!r) {
 		*r_dev = bh.b_rdev;
@@ -771,6 +794,7 @@ static struct mapped_device *alloc_md(kdev_t dev)
 	atomic_set(&md->holders, 1);
 	atomic_set(&md->pending, 0);
 	init_waitqueue_head(&md->wait);
+	init_waitqueue_head(&md->eventq);
 
 	return md;
 }
@@ -797,6 +821,16 @@ static int __find_hardsect_size(struct list_head *devices)
 /*
  * Bind a table to the device.
  */
+static void event_callback(void *context)
+{
+	struct mapped_device *md = (struct mapped_device *) context;
+
+	down_write(&md->lock);
+	md->event_nr++;
+	wake_up_interruptible(&md->eventq);
+	up_write(&md->lock);
+}
+
 static int __bind(struct mapped_device *md, struct dm_table *t)
 {
 	unsigned int minor = minor(md->dev);
@@ -810,6 +844,7 @@ static int __bind(struct mapped_device *md, struct dm_table *t)
 	    __find_hardsect_size(dm_table_get_devices(t));
 	register_disk(NULL, md->dev, 1, &dm_blk_dops, blk_size[major][minor]);
 
+	dm_table_event_callback(md->map, event_callback, md);
 	dm_table_get(t);
 	return 0;
 }
@@ -819,8 +854,12 @@ static void __unbind(struct mapped_device *md)
 	unsigned int minor = minor(md->dev);
 	unsigned int major = major(md->dev);
 
-	dm_table_put(md->map);
-	md->map = NULL;
+	if (md->map) {
+		dm_table_event_callback(md->map, NULL, NULL);
+		dm_table_put(md->map);
+		md->map = NULL;
+
+	}
 
 	blk_size[major][minor] = 0;
 	blksize_size[major][minor] = 0;
@@ -830,20 +869,15 @@ static void __unbind(struct mapped_device *md)
 /*
  * Constructor for a new device.
  */
-int dm_create(kdev_t dev, struct dm_table *table, struct mapped_device **result)
+int dm_create(kdev_t dev, struct mapped_device **result)
 {
-	int r;
 	struct mapped_device *md;
 
 	md = alloc_md(dev);
 	if (!md)
 		return -ENXIO;
 
-	r = __bind(md, table);
-	if (r) {
-		free_md(md);
-		return r;
-	}
+	__unbind(md);	/* Ensure zero device size */
 
 	*result = md;
 	return 0;
@@ -857,6 +891,8 @@ void dm_get(struct mapped_device *md)
 void dm_put(struct mapped_device *md)
 {
 	if (atomic_dec_and_test(&md->holders)) {
+		if (md->map)
+			dm_table_suspend_targets(md->map);
 		__unbind(md);
 		free_md(md);
 	}
@@ -886,8 +922,10 @@ int dm_swap_table(struct mapped_device *md, struct dm_table *table)
 
 	down_write(&md->lock);
 
-	/* device must be suspended */
-	if (!test_bit(DMF_SUSPENDED, &md->flags)) {
+	/*
+	 * The device must be suspended, or have no table bound yet.
+	 */
+	if (md->map && !test_bit(DMF_SUSPENDED, &md->flags)) {
 		up_write(&md->lock);
 		return -EPERM;
 	}
@@ -910,6 +948,7 @@ int dm_swap_table(struct mapped_device *md, struct dm_table *table)
  */
 int dm_suspend(struct mapped_device *md)
 {
+	int r = 0;
 	DECLARE_WAITQUEUE(wait, current);
 
 	down_write(&md->lock);
@@ -935,21 +974,28 @@ int dm_suspend(struct mapped_device *md)
 	while (1) {
 		set_current_state(TASK_INTERRUPTIBLE);
 
-		if (!atomic_read(&md->pending))
+		if (!atomic_read(&md->pending) || signal_pending(current))
 			break;
 
 		schedule();
 	}
-
-	current->state = TASK_RUNNING;
+	set_current_state(TASK_RUNNING);
 
 	down_write(&md->lock);
 	remove_wait_queue(&md->wait, &wait);
-	set_bit(DMF_SUSPENDED, &md->flags);
-	dm_table_suspend_targets(md->map);
+
+	/* did we flush everything ? */
+	if (atomic_read(&md->pending)) {
+		clear_bit(DMF_BLOCK_IO, &md->flags);
+		r = -EINTR;
+	} else {
+		set_bit(DMF_SUSPENDED, &md->flags);
+		if (md->map)
+			dm_table_suspend_targets(md->map);
+	}
 	up_write(&md->lock);
 
-	return 0;
+	return r;
 }
 
 int dm_resume(struct mapped_device *md)
@@ -957,12 +1003,14 @@ int dm_resume(struct mapped_device *md)
 	struct deferred_io *def;
 
 	down_write(&md->lock);
-	if (!test_bit(DMF_SUSPENDED, &md->flags) || !dm_table_get_size(md->map)) {
+	if (!test_bit(DMF_SUSPENDED, &md->flags)) {
 		up_write(&md->lock);
 		return -EINVAL;
 	}
 
-	dm_table_resume_targets(md->map);
+	if (md->map)
+		dm_table_resume_targets(md->map);
+
 	clear_bit(DMF_SUSPENDED, &md->flags);
 	clear_bit(DMF_BLOCK_IO, &md->flags);
 	def = md->deferred;
@@ -981,10 +1029,54 @@ struct dm_table *dm_get_table(struct mapped_device *md)
 
 	down_read(&md->lock);
 	t = md->map;
-	dm_table_get(t);
+	if (t)
+		dm_table_get(t);
 	up_read(&md->lock);
 
 	return t;
+}
+
+/*-----------------------------------------------------------------
+ * Event notification.
+ *---------------------------------------------------------------*/
+uint32_t dm_get_event_nr(struct mapped_device *md)
+{
+	uint32_t r;
+
+	down_read(&md->lock);
+	r = md->event_nr;
+	up_read(&md->lock);
+
+	return r;
+}
+
+int dm_add_wait_queue(struct mapped_device *md, wait_queue_t *wq,
+		      uint32_t event_nr)
+{
+	down_write(&md->lock);
+	if (event_nr != md->event_nr) {
+		up_write(&md->lock);
+		return 1;
+	}
+
+	add_wait_queue(&md->eventq, wq);
+	up_write(&md->lock);
+
+	return 0;
+}
+
+const char *dm_kdevname(kdev_t dev)
+{
+	static char buffer[32];
+	sprintf(buffer, "%03d:%03d", MAJOR(dev), MINOR(dev));
+	return buffer;
+}
+
+void dm_remove_wait_queue(struct mapped_device *md, wait_queue_t *wq)
+{
+	down_write(&md->lock);
+	remove_wait_queue(&md->eventq, wq);
+	up_write(&md->lock);
 }
 
 kdev_t dm_kdev(struct mapped_device *md)
@@ -1019,3 +1111,5 @@ module_exit(dm_exit);
 MODULE_DESCRIPTION(DM_NAME " driver");
 MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 MODULE_LICENSE("GPL");
+
+EXPORT_SYMBOL(dm_kdevname);

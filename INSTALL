@@ -27,7 +27,10 @@ Device Mapper installation
    gave 'configure' appropriate parameters in step 1, you can run 
    'make apply-patches' from the top directory to apply the patches.  
    (This also attempts to apply the VFS lock patch, which will fail if 
-   you've already applied it.)
+   you've already applied it.  For 2.4.21 there's a choice of two VFS lock
+   patches: the experimental one is destined to replace the old-style one.
+   The VFS lock patch is designed to suspend the filesystem whenever
+   snapshots are created so that they contain a consistent filsystem.)
    
    Configure, build and install your kernel in the normal way, selecting
    'Device mapper support' from the 'Multiple devices driver support' menu.

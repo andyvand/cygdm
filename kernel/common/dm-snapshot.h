@@ -47,6 +47,12 @@ struct exception_store {
 	void (*destroy) (struct exception_store *store);
 
 	/*
+	 * The target shouldn't read the COW device until this is
+	 * called.
+	 */
+	int (*read_metadata) (struct exception_store *store);
+
+	/*
 	 * Find somewhere to store the next exception.
 	 */
 	int (*prepare_exception) (struct exception_store *store,
@@ -66,7 +72,7 @@ struct exception_store {
 	void (*drop_snapshot) (struct exception_store *store);
 
 	/*
-	 * Return the %age full of the snapshot
+	 * Return how full the snapshot is.
 	 */
 	void (*fraction_full) (struct exception_store *store,
 			       sector_t *numerator,
@@ -93,6 +99,7 @@ struct dm_snapshot {
 
 	/* You can't use a snapshot if this is 0 (e.g. if full) */
 	int valid;
+	int have_metadata;
 
 	/* Used for display of table */
 	char type;
@@ -105,6 +112,8 @@ struct dm_snapshot {
 
 	/* The on disk metadata handler */
 	struct exception_store store;
+
+	struct kcopyd_client *kcopyd_client;
 };
 
 /*

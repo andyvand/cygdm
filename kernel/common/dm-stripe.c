@@ -187,7 +187,7 @@ static void stripe_dtr(struct dm_target *ti)
 }
 
 static int stripe_map(struct dm_target *ti, struct buffer_head *bh, int rw,
-		      void **context)
+		      union map_info *context)
 {
 	struct stripe_c *sc = (struct stripe_c *) ti->private;
 
@@ -221,7 +221,7 @@ static int stripe_status(struct dm_target *ti, status_type_t type,
 			offset +=
 			    snprintf(result + offset, maxlen - offset,
 				     " %s " SECTOR_FORMAT,
-		       kdevname(to_kdev_t(sc->stripe[i].dev->bdev->bd_dev)),
+		       dm_kdevname(to_kdev_t(sc->stripe[i].dev->bdev->bd_dev)),
 				     sc->stripe[i].physical_start);
 		}
 		break;

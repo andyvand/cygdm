@@ -1,5 +1,5 @@
-diff -ru linux-2.4.21-rc6+/include/linux/vmalloc.h linux/include/linux/vmalloc.h
---- linux-2.4.21-rc6+/include/linux/vmalloc.h	Mon Jun  2 14:03:16 2003
+diff -ru linux-2.4.21/include/linux/vmalloc.h linux/include/linux/vmalloc.h
+--- linux-2.4.21/include/linux/vmalloc.h	Mon Jun  2 14:03:16 2003
 +++ linux/include/linux/vmalloc.h	Mon Jun  2 15:53:06 2003
 @@ -26,6 +26,7 @@
  extern void vmfree_area_pages(unsigned long address, unsigned long size);
@@ -9,8 +9,8 @@ diff -ru linux-2.4.21-rc6+/include/linux/vmalloc.h linux/include/linux/vmalloc.h
  
  /*
   *	Allocate any pages
-diff -ru linux-2.4.21-rc6+/kernel/ksyms.c linux/kernel/ksyms.c
---- linux-2.4.21-rc6+/kernel/ksyms.c	Mon Jun  2 13:59:22 2003
+diff -ru linux-2.4.21/kernel/ksyms.c linux/kernel/ksyms.c
+--- linux-2.4.21/kernel/ksyms.c	Mon Jun  2 13:59:22 2003
 +++ linux/kernel/ksyms.c	Mon Jun  2 15:53:06 2003
 @@ -112,6 +112,7 @@
  EXPORT_SYMBOL(vfree);
@@ -20,8 +20,8 @@ diff -ru linux-2.4.21-rc6+/kernel/ksyms.c linux/kernel/ksyms.c
  EXPORT_SYMBOL(mem_map);
  EXPORT_SYMBOL(remap_page_range);
  EXPORT_SYMBOL(max_mapnr);
-diff -ru linux-2.4.21-rc6+/mm/vmalloc.c linux/mm/vmalloc.c
---- linux-2.4.21-rc6+/mm/vmalloc.c	Mon Jun  2 14:02:13 2003
+diff -ru linux-2.4.21/mm/vmalloc.c linux/mm/vmalloc.c
+--- linux-2.4.21/mm/vmalloc.c	Mon Jun  2 14:02:13 2003
 +++ linux/mm/vmalloc.c	Mon Jun  2 15:53:06 2003
 @@ -327,3 +327,22 @@
  	read_unlock(&vmlist_lock);

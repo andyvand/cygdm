@@ -1,7 +1,7 @@
-diff -ruN linux-2.4.20/MAINTAINERS linux/MAINTAINERS
---- linux-2.4.20/MAINTAINERS	Fri Jan 10 16:33:49 2003
-+++ linux/MAINTAINERS	Thu Mar 27 14:47:03 2003
-@@ -439,6 +439,13 @@
+diff -ru linux-2.4.21/MAINTAINERS linux/MAINTAINERS
+--- linux-2.4.21/MAINTAINERS	Mon Jun  2 14:02:18 2003
++++ linux/MAINTAINERS	Mon Jun  2 15:48:04 2003
+@@ -476,6 +476,13 @@
  W:	http://www.debian.org/~dz/i8k/
  S:	Maintained
  
@@ -15,9 +15,9 @@ diff -ruN linux-2.4.20/MAINTAINERS linux/MAINTAINERS
  DEVICE NUMBER REGISTRY
  P:	H. Peter Anvin
  M:	hpa@zytor.com
-diff -ruN linux-2.4.20/drivers/md/Config.in linux/drivers/md/Config.in
---- linux-2.4.20/drivers/md/Config.in	Fri Jan 10 16:34:50 2003
-+++ linux/drivers/md/Config.in	Wed Apr 23 20:23:54 2003
+diff -ru linux-2.4.21/drivers/md/Config.in linux/drivers/md/Config.in
+--- linux-2.4.21/drivers/md/Config.in	Mon Jun  2 14:00:51 2003
++++ linux/drivers/md/Config.in	Mon Jun  2 15:48:04 2003
 @@ -14,5 +14,9 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -28,10 +28,10 @@ diff -ruN linux-2.4.20/drivers/md/Config.in linux/drivers/md/Config.in
 +fi
  
  endmenu
-diff -ruN linux-2.4.20/Documentation/Configure.help linux/Documentation/Configure.help
---- linux-2.4.20/Documentation/Configure.help	Fri Jan 10 16:33:55 2003
-+++ linux/Documentation/Configure.help	Wed Apr 30 18:22:27 2003
-@@ -1822,6 +1822,20 @@
+diff -ru linux-2.4.21/Documentation/Configure.help linux/Documentation/Configure.help
+--- linux-2.4.21/Documentation/Configure.help	Mon Jun  2 14:03:02 2003
++++ linux/Documentation/Configure.help	Mon Jun  2 15:48:04 2003
+@@ -1839,6 +1839,20 @@
    want), say M here and read <file:Documentation/modules.txt>.  The
    module will be called lvm-mod.o.
  

@@ -363,13 +363,13 @@ int dm_get_device(struct dm_target *ti, const char *path, sector_t start,
 	int r;
 	kdev_t dev;
 	struct dm_dev *dd;
-	int major, minor;
+	unsigned major, minor;
 	struct dm_table *t = ti->table;
 
 	if (!t)
 		BUG();
 
-	if (sscanf(path, "%x:%x", &major, &minor) == 2) {
+	if (sscanf(path, "%u:%u", &major, &minor) == 2) {
 		/* Extract the major/minor numbers */
 		dev = mk_kdev(major, minor);
 	} else {
@@ -684,5 +684,4 @@ void dm_table_resume_targets(struct dm_table *t)
 EXPORT_SYMBOL(dm_get_device);
 EXPORT_SYMBOL(dm_put_device);
 EXPORT_SYMBOL(dm_table_event);
-EXPORT_SYMBOL(dm_table_event_callback);
 EXPORT_SYMBOL(dm_table_get_mode);

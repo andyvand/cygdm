@@ -27,7 +27,7 @@ static inline struct tt_internal *__find_target_type(const char *name)
 	struct list_head *tih;
 	struct tt_internal *ti;
 
-	list_for_each (tih, &_targets) {
+	list_for_each(tih, &_targets) {
 		ti = list_entry(tih, struct tt_internal, list);
 
 		if (!strcmp(name, ti->tt.name))
@@ -114,9 +114,10 @@ int dm_register_target(struct target_type *t)
 		return -ENOMEM;
 
 	down_write(&_lock);
-	if (__find_target_type(t->name))
+	if (__find_target_type(t->name)) {
+		kfree(ti);
 		rv = -EEXIST;
-	else
+	} else
 		list_add(&ti->list, &_targets);
 
 	up_write(&_lock);
@@ -160,7 +161,7 @@ static void io_err_dtr(struct dm_target *ti)
 }
 
 static int io_err_map(struct dm_target *ti, struct buffer_head *bh, int rw,
-		      void **map_context)
+		      union map_info *map_context)
 {
 	return -EIO;
 }

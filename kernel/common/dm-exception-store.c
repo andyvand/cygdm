@@ -7,6 +7,7 @@
  */
 
 #include "dm-snapshot.h"
+#include "dm-io.h"
 #include "kcopyd.h"
 
 #include <linux/mm.h>
@@ -60,7 +61,7 @@ struct disk_header {
 	 * Is this snapshot valid.  There is no way of recovering
 	 * an invalid snapshot.
 	 */
-	int valid;
+	uint32_t valid;
 
 	/*
 	 * Simple, incrementing version. no backward
@@ -78,7 +79,7 @@ struct disk_exception {
 };
 
 struct commit_callback {
-	void (*callback) (void *, int success);
+	void (*callback)(void *, int success);
 	void *context;
 };
 
@@ -98,7 +99,6 @@ struct pstore {
 	 * whole chunks worth of metadata in memory at once.
 	 */
 	void *area;
-	struct kiobuf *iobuf;
 
 	/*
 	 * Used to keep track of which metadata area the data in
@@ -122,45 +122,16 @@ struct pstore {
 	struct commit_callback *callbacks;
 };
 
-/*
- * For performance reasons we want to defer writing a committed
- * exceptions metadata to disk so that we can amortise away this
- * exensive operation.
- *
- * For the initial version of this code we will remain with
- * synchronous io.  There are some deadlock issues with async
- * that I haven't yet worked out.
- */
-static int do_io(int rw, struct kcopyd_region *where, struct kiobuf *iobuf)
+static inline unsigned int sectors_to_pages(unsigned int sectors)
 {
-	int i, sectors_per_block, nr_blocks, start;
-	int blocksize = get_hardsect_size(where->dev);
-	int status;
-
-	sectors_per_block = blocksize / SECTOR_SIZE;
-
-	nr_blocks = where->count / sectors_per_block;
-	start = where->sector / sectors_per_block;
-
-	for (i = 0; i < nr_blocks; i++)
-		iobuf->blocks[i] = start++;
-
-	iobuf->length = where->count << 9;
-	iobuf->locked = 1;
-
-	status = brw_kiovec(rw, 1, &iobuf, where->dev, iobuf->blocks,
-			    blocksize);
-	if (status != (where->count << 9))
-		return -EIO;
-
-	return 0;
+	return sectors / (PAGE_SIZE / SECTOR_SIZE);
 }
 
-static int allocate_iobuf(struct pstore *ps)
+static int alloc_area(struct pstore *ps)
 {
 	int r = -ENOMEM;
 	size_t i, len, nr_pages;
-	struct page *page;
+	struct page *page, *last = NULL;
 
 	len = ps->chunk_size << SECTOR_SHIFT;
 
@@ -172,49 +143,36 @@ static int allocate_iobuf(struct pstore *ps)
 	if (!ps->area)
 		return r;
 
-	if (alloc_kiovec(1, &ps->iobuf))
-		goto bad;
-
-	nr_pages = ps->chunk_size / (PAGE_SIZE / SECTOR_SIZE);
-	r = expand_kiobuf(ps->iobuf, nr_pages);
-	if (r)
-		goto bad;
+	nr_pages = sectors_to_pages(ps->chunk_size);
 
 	/*
-	 * We lock the pages for ps->area into memory since they'll be
-	 * doing a lot of io.
+	 * We lock the pages for ps->area into memory since
+	 * they'll be doing a lot of io.  We also chain them
+	 * together ready for dm-io.
 	 */
 	for (i = 0; i < nr_pages; i++) {
 		page = vmalloc_to_page(ps->area + (i * PAGE_SIZE));
 		LockPage(page);
-		ps->iobuf->maplist[i] = page;
-		ps->iobuf->nr_pages++;
+		if (last)
+			last->list.next = &page->list;
+		last = page;
 	}
 
-	ps->iobuf->nr_pages = nr_pages;
-	ps->iobuf->offset = 0;
-
 	return 0;
-
-      bad:
-	if (ps->iobuf)
-		free_kiovec(1, &ps->iobuf);
-
-	if (ps->area)
-		vfree(ps->area);
-	ps->iobuf = NULL;
-	return r;
 }
 
-static void free_iobuf(struct pstore *ps)
+static void free_area(struct pstore *ps)
 {
-	int i;
+	size_t i, nr_pages;
+	struct page *page;
 
-	for (i = 0; i < ps->iobuf->nr_pages; i++)
-		UnlockPage(ps->iobuf->maplist[i]);
-	ps->iobuf->locked = 0;
+	nr_pages = sectors_to_pages(ps->chunk_size);
+	for (i = 0; i < nr_pages; i++) {
+		page = vmalloc_to_page(ps->area + (i * PAGE_SIZE));
+		page->list.next = NULL;
+		UnlockPage(page);
+	}
 
-	free_kiovec(1, &ps->iobuf);
 	vfree(ps->area);
 }
 
@@ -223,18 +181,14 @@ static void free_iobuf(struct pstore *ps)
  */
 static int chunk_io(struct pstore *ps, uint32_t chunk, int rw)
 {
-	int r;
-	struct kcopyd_region where;
+	struct io_region where;
+	unsigned int bits;
 
 	where.dev = ps->snap->cow->dev;
 	where.sector = ps->chunk_size * chunk;
 	where.count = ps->chunk_size;
 
-	r = do_io(rw, &where, ps->iobuf);
-	if (r)
-		return r;
-
-	return 0;
+	return dm_io_sync(1, &where, rw, vmalloc_to_page(ps->area), 0, &bits);
 }
 
 /*
@@ -274,14 +228,14 @@ static int read_header(struct pstore *ps, int *new_snapshot)
 
 	dh = (struct disk_header *) ps->area;
 
-	if (dh->magic == 0) {
+	if (le32_to_cpu(dh->magic) == 0) {
 		*new_snapshot = 1;
 
-	} else if (dh->magic == SNAP_MAGIC) {
+	} else if (le32_to_cpu(dh->magic) == SNAP_MAGIC) {
 		*new_snapshot = 0;
-		ps->valid = dh->valid;
-		ps->version = dh->version;
-		ps->chunk_size = dh->chunk_size;
+		ps->valid = le32_to_cpu(dh->valid);
+		ps->version = le32_to_cpu(dh->version);
+		ps->chunk_size = le32_to_cpu(dh->chunk_size);
 
 	} else {
 		DMWARN("Invalid/corrupt snapshot");
@@ -298,10 +252,10 @@ static int write_header(struct pstore *ps)
 	memset(ps->area, 0, ps->chunk_size << SECTOR_SHIFT);
 
 	dh = (struct disk_header *) ps->area;
-	dh->magic = SNAP_MAGIC;
-	dh->valid = ps->valid;
-	dh->version = ps->version;
-	dh->chunk_size = ps->chunk_size;
+	dh->magic = cpu_to_le32(SNAP_MAGIC);
+	dh->valid = cpu_to_le32(ps->valid);
+	dh->version = cpu_to_le32(ps->version);
+	dh->chunk_size = cpu_to_le32(ps->chunk_size);
 
 	return chunk_io(ps, 0, WRITE);
 }
@@ -428,8 +382,7 @@ static inline struct pstore *get_info(struct exception_store *store)
 }
 
 static void persistent_fraction_full(struct exception_store *store,
-				     sector_t *numerator,
-				     sector_t *denominator)
+				     sector_t *numerator, sector_t *denominator)
 {
 	*numerator = get_info(store)->next_free * store->snap->chunk_size;
 	*denominator = get_dev_size(store->snap->cow->dev);
@@ -439,9 +392,64 @@ static void persistent_destroy(struct exception_store *store)
 {
 	struct pstore *ps = get_info(store);
 
+	dm_io_put(sectors_to_pages(ps->chunk_size));
 	vfree(ps->callbacks);
-	free_iobuf(ps);
+	free_area(ps);
 	kfree(ps);
+}
+
+static int persistent_read_metadata(struct exception_store *store)
+{
+	int r, new_snapshot;
+	struct pstore *ps = get_info(store);
+
+	/*
+	 * Read the snapshot header.
+	 */
+	r = read_header(ps, &new_snapshot);
+	if (r)
+		return r;
+
+	/*
+	 * Do we need to setup a new snapshot ?
+	 */
+	if (new_snapshot) {
+		r = write_header(ps);
+		if (r) {
+			DMWARN("write_header failed");
+			return r;
+		}
+
+		r = zero_area(ps, 0);
+		if (r) {
+			DMWARN("zero_area(0) failed");
+			return r;
+		}
+
+	} else {
+		/*
+		 * Sanity checks.
+		 */
+		if (!ps->valid) {
+			DMWARN("snapshot is marked invalid");
+			return -EINVAL;
+		}
+
+		if (ps->version != SNAPSHOT_DISK_VERSION) {
+			DMWARN("unable to handle snapshot disk version %d",
+			       ps->version);
+			return -EINVAL;
+		}
+
+		/*
+		 * Read the metadata.
+		 */
+		r = read_exceptions(ps);
+		if (r)
+			return r;
+	}
+
+	return 0;
 }
 
 static int persistent_prepare(struct exception_store *store,
@@ -535,13 +543,19 @@ static void persistent_drop(struct exception_store *store)
 
 int dm_create_persistent(struct exception_store *store, uint32_t chunk_size)
 {
-	int r, new_snapshot;
+	int r;
 	struct pstore *ps;
+
+	r = dm_io_get(sectors_to_pages(chunk_size));
+	if (r)
+		return r;
 
 	/* allocate the pstore */
 	ps = kmalloc(sizeof(*ps), GFP_KERNEL);
-	if (!ps)
-		return -ENOMEM;
+	if (!ps) {
+		r = -ENOMEM;
+		goto bad;
+	}
 
 	ps->snap = store->snap;
 	ps->valid = 1;
@@ -552,7 +566,7 @@ int dm_create_persistent(struct exception_store *store, uint32_t chunk_size)
 	ps->next_free = 2;	/* skipping the header and first area */
 	ps->current_committed = 0;
 
-	r = allocate_iobuf(ps);
+	r = alloc_area(ps);
 	if (r)
 		goto bad;
 
@@ -569,77 +583,21 @@ int dm_create_persistent(struct exception_store *store, uint32_t chunk_size)
 		goto bad;
 	}
 
-	/*
-	 * Read the snapshot header.
-	 */
-	r = read_header(ps, &new_snapshot);
-	if (r)
-		goto bad;
-
-	/*
-	 * Do we need to setup a new snapshot ?
-	 */
-	if (new_snapshot) {
-		r = write_header(ps);
-		if (r) {
-			DMWARN("write_header failed");
-			goto bad;
-		}
-
-		r = zero_area(ps, 0);
-		if (r) {
-			DMWARN("zero_area(0) failed");
-			goto bad;
-		}
-
-	} else {
-		/*
-		 * Sanity checks.
-		 */
-		if (!ps->valid) {
-			DMWARN("snapshot is marked invalid");
-			r = -EINVAL;
-			goto bad;
-		}
-
-		if (ps->chunk_size != chunk_size) {
-			DMWARN("chunk size for existing snapshot different "
-			       "from that requested");
-			r = -EINVAL;
-			goto bad;
-		}
-
-		if (ps->version != SNAPSHOT_DISK_VERSION) {
-			DMWARN("unable to handle snapshot disk version %d",
-			       ps->version);
-			r = -EINVAL;
-			goto bad;
-		}
-
-		/*
-		 * Read the metadata.
-		 */
-		r = read_exceptions(ps);
-		if (r)
-			goto bad;
-	}
-
 	store->destroy = persistent_destroy;
+	store->read_metadata = persistent_read_metadata;
 	store->prepare_exception = persistent_prepare;
 	store->commit_exception = persistent_commit;
 	store->drop_snapshot = persistent_drop;
 	store->fraction_full = persistent_fraction_full;
 	store->context = ps;
 
-	return r;
+	return 0;
 
       bad:
+	dm_io_put(sectors_to_pages(chunk_size));
 	if (ps) {
 		if (ps->callbacks)
 			vfree(ps->callbacks);
-
-		if (ps->iobuf)
-			free_iobuf(ps);
 
 		kfree(ps);
 	}
@@ -656,6 +614,11 @@ struct transient_c {
 void transient_destroy(struct exception_store *store)
 {
 	kfree(store->context);
+}
+
+int transient_read_metadata(struct exception_store *store)
+{
+	return 0;
 }
 
 int transient_prepare(struct exception_store *store, struct exception *e)
@@ -682,8 +645,7 @@ void transient_commit(struct exception_store *store,
 }
 
 static void transient_fraction_full(struct exception_store *store,
-				    sector_t *numerator,
-				    sector_t *denominator)
+				    sector_t *numerator, sector_t *denominator)
 {
 	*numerator = ((struct transient_c *) store->context)->next_free;
 	*denominator = get_dev_size(store->snap->cow->dev);
@@ -696,6 +658,7 @@ int dm_create_transient(struct exception_store *store,
 
 	memset(store, 0, sizeof(*store));
 	store->destroy = transient_destroy;
+	store->read_metadata = transient_read_metadata;
 	store->prepare_exception = transient_prepare;
 	store->commit_exception = transient_commit;
 	store->fraction_full = transient_fraction_full;

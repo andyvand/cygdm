@@ -65,7 +65,7 @@ static void linear_dtr(struct dm_target *ti)
 }
 
 static int linear_map(struct dm_target *ti, struct buffer_head *bh, int rw,
-		      void **map_context)
+		      union map_info *map_context)
 {
 	struct linear_c *lc = (struct linear_c *) ti->private;
 
@@ -79,6 +79,7 @@ static int linear_status(struct dm_target *ti, status_type_t type,
 			 char *result, unsigned int maxlen)
 {
 	struct linear_c *lc = (struct linear_c *) ti->private;
+	kdev_t kdev;
 
 	switch (type) {
 	case STATUSTYPE_INFO:
@@ -86,8 +87,9 @@ static int linear_status(struct dm_target *ti, status_type_t type,
 		break;
 
 	case STATUSTYPE_TABLE:
+		kdev = to_kdev_t(lc->dev->bdev->bd_dev);
 		snprintf(result, maxlen, "%s " SECTOR_FORMAT,
-			 kdevname(to_kdev_t(lc->dev->bdev->bd_dev)), lc->start);
+			 dm_kdevname(kdev), lc->start);
 		break;
 	}
 	return 0;

@@ -40,6 +40,12 @@
  */
 #define SNAPSHOT_COPY_PRIORITY 2
 
+/*
+ * Each snapshot reserves this many pages for io
+ * FIXME: calculate this
+ */
+#define SNAPSHOT_PAGES 256
+
 struct pending_exception {
 	struct exception e;
 
@@ -132,7 +138,7 @@ static struct origin *__lookup_origin(kdev_t origin)
 	struct origin *o;
 
 	ol = &_origins[origin_hash(origin)];
-	list_for_each (slist, ol) {
+	list_for_each(slist, ol) {
 		o = list_entry(slist, struct origin, hash_list);
 
 		if (o->dev == origin)
@@ -225,7 +231,7 @@ static void exit_exception_table(struct exception_table *et, kmem_cache_t *mem)
 	for (i = 0; i < size; i++) {
 		slot = et->table + i;
 
-		list_for_each_safe (entry, temp, slot) {
+		list_for_each_safe(entry, temp, slot) {
 			ex = list_entry(entry, struct exception, hash_list);
 			kmem_cache_free(mem, ex);
 		}
@@ -264,7 +270,7 @@ static struct exception *lookup_exception(struct exception_table *et,
 	struct exception *e;
 
 	slot = &et->table[exception_hash(et, chunk)];
-	list_for_each (el, slot) {
+	list_for_each(el, slot) {
 		e = list_entry(el, struct exception, hash_list);
 		if (e->old_chunk == chunk)
 			return e;
@@ -403,7 +409,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (argc < 4) {
 		ti->error = "dm-snapshot: requires exactly 4 arguments";
 		r = -EINVAL;
-		goto bad;
+		goto bad1;
 	}
 
 	origin_path = argv[0];
@@ -413,14 +419,14 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (persistent != 'P' && persistent != 'N') {
 		ti->error = "Persistent flag is not P or N";
 		r = -EINVAL;
-		goto bad;
+		goto bad1;
 	}
 
 	chunk_size = simple_strtoul(argv[3], &value, 10);
 	if (chunk_size == 0 || value == NULL) {
 		ti->error = "Invalid chunk size";
 		r = -EINVAL;
-		goto bad;
+		goto bad1;
 	}
 
 	s = kmalloc(sizeof(*s), GFP_KERNEL);
@@ -428,13 +434,13 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 		ti->error = "Cannot allocate snapshot context private "
 		    "structure";
 		r = -ENOMEM;
-		goto bad;
+		goto bad1;
 	}
 
 	r = dm_get_device(ti, origin_path, 0, ti->len, FMODE_READ, &s->origin);
 	if (r) {
 		ti->error = "Cannot get origin device";
-		goto bad_free;
+		goto bad2;
 	}
 
 	/* FIXME: get cow length */
@@ -443,7 +449,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (r) {
 		dm_put_device(ti, s->origin);
 		ti->error = "Cannot get COW device";
-		goto bad_free;
+		goto bad2;
 	}
 
 	/*
@@ -457,21 +463,21 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (chunk_size % (blocksize / SECTOR_SIZE)) {
 		ti->error = "Chunk size is not a multiple of device blocksize";
 		r = -EINVAL;
-		goto bad_putdev;
+		goto bad3;
 	}
 
 	/* Check the sizes are small enough to fit in one kiovec */
 	if (chunk_size > KIO_MAX_SECTORS) {
 		ti->error = "Chunk size is too big";
 		r = -EINVAL;
-		goto bad_putdev;
+		goto bad3;
 	}
 
 	/* Check chunk_size is a power of 2 */
 	if (chunk_size & (chunk_size - 1)) {
 		ti->error = "Chunk size is not a power of 2";
 		r = -EINVAL;
-		goto bad_putdev;
+		goto bad3;
 	}
 
 	s->chunk_size = chunk_size;
@@ -483,6 +489,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	s->chunk_shift--;
 
 	s->valid = 1;
+	s->have_metadata = 0;
 	s->last_percent = 0;
 	init_rwsem(&s->lock);
 	s->table = ti->table;
@@ -491,7 +498,7 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (init_hash_tables(s)) {
 		ti->error = "Unable to allocate hash table space";
 		r = -ENOMEM;
-		goto bad_putdev;
+		goto bad3;
 	}
 
 	/*
@@ -508,48 +515,46 @@ static int snapshot_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	if (r) {
 		ti->error = "Couldn't create exception store";
 		r = -EINVAL;
-		goto bad_free1;
+		goto bad4;
+	}
+
+	r = kcopyd_client_create(SNAPSHOT_PAGES, &s->kcopyd_client);
+	if (r) {
+		ti->error = "Could not create kcopyd client";
+		goto bad5;
 	}
 
 	/* Flush IO to the origin device */
-#if LVM_VFS_ENHANCEMENT
-	fsync_dev_lockfs(s->origin->dev);
-#else
 	fsync_dev(s->origin->dev);
-#endif
 
 	/* Add snapshot to the list of snapshots for this origin */
 	if (register_snapshot(s)) {
 		r = -EINVAL;
 		ti->error = "Cannot register snapshot origin";
-		goto bad_free2;
+		goto bad6;
 	}
-#if LVM_VFS_ENHANCEMENT
-	unlockfs(s->origin->dev);
-#endif
-	kcopyd_inc_client_count();
 
 	ti->private = s;
 	return 0;
 
-      bad_free2:
-#if LVM_VFS_ENHANCEMENT
-	unlockfs(s->origin->dev);
-#endif
+ bad6:
+	kcopyd_client_destroy(s->kcopyd_client);
+
+ bad5:
 	s->store.destroy(&s->store);
 
-      bad_free1:
+ bad4:
 	exit_exception_table(&s->pending, pending_cache);
 	exit_exception_table(&s->complete, exception_cache);
 
-      bad_putdev:
+ bad3:
 	dm_put_device(ti, s->cow);
 	dm_put_device(ti, s->origin);
 
-      bad_free:
+ bad2:
 	kfree(s);
 
-      bad:
+ bad1:
 	return r;
 }
 
@@ -569,9 +574,8 @@ static void snapshot_dtr(struct dm_target *ti)
 
 	dm_put_device(ti, s->origin);
 	dm_put_device(ti, s->cow);
+	kcopyd_client_destroy(s->kcopyd_client);
 	kfree(s);
-
-	kcopyd_dec_client_count();
 }
 
 /*
@@ -666,9 +670,9 @@ static void pending_complete(struct pending_exception *pe, int success)
 
 	} else {
 		/* Read/write error - snapshot is unusable */
-		DMERR("Error reading/writing snapshot");
-
 		down_write(&s->lock);
+		if (s->valid)
+			DMERR("Error reading/writing snapshot");
 		s->store.drop_snapshot(&s->store);
 		s->valid = 0;
 		remove_exception(&pe->e);
@@ -698,12 +702,12 @@ static void commit_callback(void *context, int success)
  * Called when the copy I/O has finished.  kcopyd actually runs
  * this code so don't block.
  */
-static void copy_callback(int err, void *context)
+static void copy_callback(int read_err, unsigned int write_err, void *context)
 {
 	struct pending_exception *pe = (struct pending_exception *) context;
 	struct dm_snapshot *s = pe->snap;
 
-	if (err)
+	if (read_err || write_err)
 		pending_complete(pe, 0);
 
 	else
@@ -718,19 +722,26 @@ static void copy_callback(int err, void *context)
 static inline void start_copy(struct pending_exception *pe)
 {
 	struct dm_snapshot *s = pe->snap;
-	struct kcopyd_region src, dest;
+	struct io_region src, dest;
+	kdev_t dev = s->origin->dev;
+	int *sizes = blk_size[major(dev)];
+	sector_t dev_size = (sector_t) -1;
 
-	src.dev = s->origin->dev;
+	if (sizes && sizes[minor(dev)])
+		dev_size = sizes[minor(dev)] << 1;
+
+	src.dev = dev;
 	src.sector = chunk_to_sector(s, pe->e.old_chunk);
-	src.count = s->chunk_size;
+	src.count = min(s->chunk_size, dev_size - src.sector);
 
 	dest.dev = s->cow->dev;
 	dest.sector = chunk_to_sector(s, pe->e.new_chunk);
-	dest.count = s->chunk_size;
+	dest.count = src.count;
 
 	if (!pe->started) {
 		/* Hand over to kcopyd */
-		kcopyd_copy(&src, &dest, copy_callback, pe);
+		kcopyd_copy(s->kcopyd_client,
+			    &src, 1, &dest, 0, copy_callback, pe);
 		pe->started = 1;
 	}
 }
@@ -758,11 +769,6 @@ static struct pending_exception *find_pending_exception(struct dm_snapshot *s,
 	} else {
 		/* Create a new pending exception */
 		pe = alloc_pending_exception();
-		if (!pe) {
-			DMWARN("Couldn't allocate pending exception.");
-			return NULL;
-		}
-
 		pe->e.old_chunk = chunk;
 		pe->origin_bhs = pe->snapshot_bhs = NULL;
 		INIT_LIST_HEAD(&pe->siblings);
@@ -790,7 +796,7 @@ static inline void remap_exception(struct dm_snapshot *s, struct exception *e,
 }
 
 static int snapshot_map(struct dm_target *ti, struct buffer_head *bh, int rw,
-			void **map_context)
+			union map_info *map_context)
 {
 	struct exception *e;
 	struct dm_snapshot *s = (struct dm_snapshot *) ti->private;
@@ -824,11 +830,12 @@ static int snapshot_map(struct dm_target *ti, struct buffer_head *bh, int rw,
 			if (!pe) {
 				s->store.drop_snapshot(&s->store);
 				s->valid = 0;
+				r = -EIO;
+			} else {
+				queue_buffer(&pe->snapshot_bhs, bh);
+				start_copy(pe);
+				r = 0;
 			}
-
-			queue_buffer(&pe->snapshot_bhs, bh);
-			start_copy(pe);
-			r = 0;
 		}
 
 		up_write(&s->lock);
@@ -857,6 +864,22 @@ static int snapshot_map(struct dm_target *ti, struct buffer_head *bh, int rw,
 	return r;
 }
 
+void snapshot_resume(struct dm_target *ti)
+{
+	struct dm_snapshot *s = (struct dm_snapshot *) ti->private;
+
+	if (s->have_metadata)
+		return;
+
+	if (s->store.read_metadata(&s->store)) {
+		down_write(&s->lock);
+		s->valid = 0;
+		up_write(&s->lock);
+	}
+
+	s->have_metadata = 1;
+}
+
 static void list_merge(struct list_head *l1, struct list_head *l2)
 {
 	struct list_head *l1_n, *l2_p;
@@ -881,7 +904,7 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 	chunk_t chunk;
 
 	/* Do all the snapshots on this origin */
-	list_for_each (sl, snapshots) {
+	list_for_each(sl, snapshots) {
 		snap = list_entry(sl, struct dm_snapshot, list);
 
 		/* Only deal with valid snapshots */
@@ -960,7 +983,8 @@ static int snapshot_status(struct dm_target *ti, status_type_t type,
 				snprintf(result, maxlen,
 					 SECTOR_FORMAT "/" SECTOR_FORMAT,
 					 numerator, denominator);
-			} else
+			}
+			else
 				snprintf(result, maxlen, "Unknown");
 		}
 		break;
@@ -971,8 +995,8 @@ static int snapshot_status(struct dm_target *ti, status_type_t type,
 		 * to make private copies if the output is to
 		 * make sense.
 		 */
-		strncpy(cow, kdevname(snap->cow->dev), sizeof(cow));
-		strncpy(org, kdevname(snap->origin->dev), sizeof(org));
+		strncpy(cow, dm_kdevname(snap->cow->dev), sizeof(cow));
+		strncpy(org, dm_kdevname(snap->origin->dev), sizeof(org));
 		snprintf(result, maxlen, "%s %s %c %ld", org, cow,
 			 snap->type, snap->chunk_size);
 		break;
@@ -1027,7 +1051,6 @@ static int origin_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	}
 
 	ti->private = dev;
-
 	return 0;
 }
 
@@ -1038,7 +1061,7 @@ static void origin_dtr(struct dm_target *ti)
 }
 
 static int origin_map(struct dm_target *ti, struct buffer_head *bh, int rw,
-		      void **map_context)
+		      union map_info *map_context)
 {
 	struct dm_dev *dev = (struct dm_dev *) ti->private;
 	bh->b_rdev = dev->dev;
@@ -1058,7 +1081,7 @@ static int origin_status(struct dm_target *ti, status_type_t type, char *result,
 		break;
 
 	case STATUSTYPE_TABLE:
-		snprintf(result, maxlen, "%s", kdevname(dev->dev));
+		snprintf(result, maxlen, "%s", dm_kdevname(dev->dev));
 		break;
 	}
 
@@ -1080,6 +1103,7 @@ static struct target_type snapshot_target = {
 	ctr:	snapshot_ctr,
 	dtr:	snapshot_dtr,
 	map:	snapshot_map,
+	resume: snapshot_resume,
 	status:	snapshot_status,
 };
 
@@ -1166,14 +1190,3 @@ void dm_snapshot_exit(void)
 	kmem_cache_destroy(pending_cache);
 	kmem_cache_destroy(exception_cache);
 }
-
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */

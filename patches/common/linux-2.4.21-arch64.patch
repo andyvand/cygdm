@@ -1,5 +1,4 @@
-diff -ru linux-2.4.21-rc6+/arch/mips64/kernel/ioctl32.c linux/arch/mips64/kernel/ioctl32.c
---- linux-2.4.21-rc6+/arch/mips64/kernel/ioctl32.c	Mon Jun  2 14:01:54 2003
+--- linux-2.4.21/arch/mips64/kernel/ioctl32.c	Mon Jun  2 14:01:54 2003
 +++ linux/arch/mips64/kernel/ioctl32.c	Mon Jun  2 19:45:58 2003
 @@ -33,6 +33,7 @@
  #include <linux/auto_fs.h>
@@ -31,8 +30,7 @@ diff -ru linux-2.4.21-rc6+/arch/mips64/kernel/ioctl32.c linux/arch/mips64/kernel
  
  	IOCTL32_DEFAULT(MTIOCTOP),			/* mtio.h ioctls  */
  	IOCTL32_HANDLER(MTIOCGET32, mt_ioctl_trans),
-diff -ru linux-2.4.21-rc6+/arch/parisc/kernel/ioctl32.c linux/arch/parisc/kernel/ioctl32.c
---- linux-2.4.21-rc6+/arch/parisc/kernel/ioctl32.c	Mon Jun  2 14:01:50 2003
+--- linux-2.4.21/arch/parisc/kernel/ioctl32.c	Mon Jun  2 14:01:50 2003
 +++ linux/arch/parisc/kernel/ioctl32.c	Mon Jun  2 19:45:58 2003
 @@ -55,6 +55,7 @@
  #define max max */
@@ -64,8 +62,7 @@ diff -ru linux-2.4.21-rc6+/arch/parisc/kernel/ioctl32.c linux/arch/parisc/kernel
  #if defined(CONFIG_DRM) || defined(CONFIG_DRM_MODULE)
  COMPATIBLE_IOCTL(DRM_IOCTL_GET_MAGIC)
  COMPATIBLE_IOCTL(DRM_IOCTL_IRQ_BUSID)
-diff -ru linux-2.4.21-rc6+/arch/ppc64/kernel/ioctl32.c linux/arch/ppc64/kernel/ioctl32.c
---- linux-2.4.21-rc6+/arch/ppc64/kernel/ioctl32.c	Mon Jun  2 14:02:13 2003
+--- linux-2.4.21/arch/ppc64/kernel/ioctl32.c	Mon Jun  2 14:02:13 2003
 +++ linux/arch/ppc64/kernel/ioctl32.c	Mon Jun  2 19:45:58 2003
 @@ -66,6 +66,7 @@
  #if defined(CONFIG_BLK_DEV_LVM) || defined(CONFIG_BLK_DEV_LVM_MODULE)
@@ -97,8 +94,7 @@ diff -ru linux-2.4.21-rc6+/arch/ppc64/kernel/ioctl32.c linux/arch/ppc64/kernel/i
  /* Remove *PRIVATE in 2.5 */
  COMPATIBLE_IOCTL(SIOCDEVPRIVATE),
  COMPATIBLE_IOCTL(SIOCDEVPRIVATE+1),
-diff -ru linux-2.4.21-rc6+/arch/s390x/kernel/ioctl32.c linux/arch/s390x/kernel/ioctl32.c
---- linux-2.4.21-rc6+/arch/s390x/kernel/ioctl32.c	Mon Jun  2 14:01:16 2003
+--- linux-2.4.21/arch/s390x/kernel/ioctl32.c	Mon Jun  2 14:01:16 2003
 +++ linux/arch/s390x/kernel/ioctl32.c	Mon Jun  2 19:45:58 2003
 @@ -25,6 +25,7 @@
  #include <linux/ext2_fs.h>
@@ -128,8 +124,7 @@ diff -ru linux-2.4.21-rc6+/arch/s390x/kernel/ioctl32.c linux/arch/s390x/kernel/i
  
  	IOCTL32_HANDLER(SIOCGIFNAME, dev_ifname32),
  	IOCTL32_HANDLER(SIOCGIFCONF, dev_ifconf),
-diff -ru linux-2.4.21-rc6+/arch/sparc64/kernel/ioctl32.c linux/arch/sparc64/kernel/ioctl32.c
---- linux-2.4.21-rc6+/arch/sparc64/kernel/ioctl32.c	Mon Jun  2 14:02:58 2003
+--- linux-2.4.21/arch/sparc64/kernel/ioctl32.c	Mon Jun  2 14:02:58 2003
 +++ linux/arch/sparc64/kernel/ioctl32.c	Mon Jun  2 19:52:45 2003
 @@ -56,6 +56,7 @@
  #if defined(CONFIG_BLK_DEV_LVM) || defined(CONFIG_BLK_DEV_LVM_MODULE)
@@ -161,8 +156,7 @@ diff -ru linux-2.4.21-rc6+/arch/sparc64/kernel/ioctl32.c linux/arch/sparc64/kern
  /* Linux-1394 */
  #if defined(CONFIG_IEEE1394) || defined(CONFIG_IEEE1394_MODULE)
  COMPATIBLE_IOCTL(AMDTP_IOC_CHANNEL)
-diff -ru linux-2.4.21-rc6+/arch/x86_64/ia32/ia32_ioctl.c linux/arch/x86_64/ia32/ia32_ioctl.c
---- linux-2.4.21-rc6+/arch/x86_64/ia32/ia32_ioctl.c	Mon Jun  2 14:00:49 2003
+--- linux-2.4.21/arch/x86_64/ia32/ia32_ioctl.c	Mon Jun  2 14:00:49 2003
 +++ linux/arch/x86_64/ia32/ia32_ioctl.c	Mon Jun  2 19:50:57 2003
 @@ -67,6 +67,7 @@
  #define max max

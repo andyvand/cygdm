@@ -13,89 +13,35 @@
 #include <linux/device-mapper.h>
 #include <linux/iobuf.h>
 
-struct kcopyd_region {
-	kdev_t dev;
-	sector_t sector;
-	sector_t count;
-};
+#include "dm-io.h"
 
-#define MAX_KCOPYD_PAGES 128
+int kcopyd_init(void);
+void kcopyd_exit(void);
 
-struct kcopyd_job {
-	struct list_head list;
+/* FIXME: make this configurable */
+#define KCOPYD_MAX_REGIONS 8
 
-	/*
-	 * Error state of the job.
-	 */
-	int err;
-
-	/*
-	 * Either READ or WRITE
-	 */
-	int rw;
-
-	/*
-	 * The source or destination for the transfer.
-	 */
-	struct kcopyd_region disk;
-
-	int nr_pages;
-	struct page *pages[MAX_KCOPYD_PAGES];
-
-	/*
-	 * Shifts and masks that will be useful when dispatching
-	 * each buffer_head.
-	 */
-	sector_t offset;
-	sector_t block_size;
-	sector_t block_shift;
-	sector_t bpp_shift;	/* blocks per page */
-	sector_t bpp_mask;
-
-	/*
-	 * nr_blocks is how many buffer heads will have to be
-	 * displatched to service this job, nr_requested is how
-	 * many have been dispatched and nr_complete is how many
-	 * have come back.
-	 */
-	unsigned int nr_blocks;
-	atomic_t nr_requested;
-	atomic_t nr_incomplete;
-
-	/*
-	 * Set this to ensure you are notified when the job has
-	 * completed.  'context' is for callback to use.
-	 */
-	void (*callback) (struct kcopyd_job * job);
-	void *context;
-};
+#define KCOPYD_IGNORE_ERROR 1
 
 /*
- * Low level async io routines.
+ * To use kcopyd you must first create a kcopyd client object.
  */
-struct kcopyd_job *kcopyd_alloc_job(void);
-void kcopyd_free_job(struct kcopyd_job *job);
-
-int kcopyd_queue_job(struct kcopyd_job *job);
+struct kcopyd_client;
+int kcopyd_client_create(unsigned int num_pages, struct kcopyd_client **result);
+void kcopyd_client_destroy(struct kcopyd_client *kc);
 
 /*
  * Submit a copy job to kcopyd.  This is built on top of the
  * previous three fns.
+ *
+ * read_err is a boolean,
+ * write_err is a bitset, with 1 bit for each destination region
  */
-typedef void (*kcopyd_notify_fn) (int err, void *context);
+typedef void (*kcopyd_notify_fn)(int read_err,
+				 unsigned int write_err, void *context);
 
-int kcopyd_copy(struct kcopyd_region *from, struct kcopyd_region *to,
-		kcopyd_notify_fn fn, void *context);
-
-int kcopyd_write_pages(struct kcopyd_region *to, int nr_pages,
-		       struct page **pages, int offset, kcopyd_notify_fn fn,
-		       void *context);
-
-/*
- * We only want kcopyd to reserve resources if someone is
- * actually using it.
- */
-void kcopyd_inc_client_count(void);
-void kcopyd_dec_client_count(void);
+int kcopyd_copy(struct kcopyd_client *kc, struct io_region *from,
+		unsigned int num_dests, struct io_region *dests,
+		unsigned int flags, kcopyd_notify_fn fn, void *context);
 
 #endif
