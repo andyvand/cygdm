@@ -92,7 +92,7 @@ AC_MSG_CHECKING(file owner)
 OWNER="root"
 
 AC_ARG_WITH(user,
-  [  --with-user=USER        Set the owner of installed files ],
+  [  --with-user=USER        Set the owner of installed files [[USER=root]] ],
   [ OWNER="$withval" ])
 AC_MSG_RESULT($OWNER)
 
@@ -105,13 +105,40 @@ dnl -- Setup the group ownership of the files
 AC_MSG_CHECKING(group owner)
 GROUP="root"
 AC_ARG_WITH(group,
-  [  --with-group=GROUP      Set the group owner of installed files ],
+  [  --with-group=GROUP      Set the group owner of installed files [[GROUP=root]] ],
   [ GROUP="$withval" ])
 AC_MSG_RESULT($GROUP)
 
 if test x$GROUP != x; then
 	GROUP="-g $GROUP"
 fi
+
+################################################################################
+dnl -- Setup device node ownership
+AC_MSG_CHECKING(device node uid)
+
+AC_ARG_WITH(device-uid,
+  [  --with-device-uid=UID   Set the owner used for new device nodes [[UID=0]] ],
+  [ DEVICE_UID="$withval" ], [ DEVICE_UID="0" ] )
+AC_MSG_RESULT($DEVICE_UID)
+
+################################################################################
+dnl -- Setup device group ownership
+AC_MSG_CHECKING(device node gid)
+
+AC_ARG_WITH(device-gid,
+  [  --with-device-gid=UID   Set the group used for new device nodes [[GID=0]] ],
+  [ DEVICE_GID="$withval" ], [ DEVICE_GID="0" ] )
+AC_MSG_RESULT($DEVICE_GID)
+
+################################################################################
+dnl -- Setup device mode
+AC_MSG_CHECKING(device node mode)
+
+AC_ARG_WITH(device-mode,
+  [  --with-device-mode=MODE  Set the mode used for new device nodes [[MODE=0600]] ],
+  [ DEVICE_MODE="$withval" ], [ DEVICE_MODE="0600" ] )
+AC_MSG_RESULT($DEVICE_MODE)
 
 ################################################################################
 dnl -- Enable Debugging
@@ -302,6 +329,9 @@ AC_SUBST(MSGFMT)
 AC_SUBST(LOCALEDIR)
 AC_SUBST(INTL_PACKAGE)
 AC_SUBST(INTL)
+AC_SUBST(DEVICE_UID)
+AC_SUBST(DEVICE_GID)
+AC_SUBST(DEVICE_MODE)
 
 
 ################################################################################

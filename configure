@@ -309,7 +309,7 @@ ac_includes_default="\
 #endif"
 
 ac_default_prefix=/usr
-ac_subst_vars='SHELL PATH_SEPARATOR PACKAGE_NAME PACKAGE_TARNAME PACKAGE_VERSION PACKAGE_STRING PACKAGE_BUGREPORT exec_prefix prefix program_transform_name bindir sbindir libexecdir datadir sysconfdir sharedstatedir localstatedir libdir includedir oldincludedir infodir mandir build_alias host_alias target_alias DEFS ECHO_C ECHO_N ECHO_T LIBS build build_cpu build_vendor build_os host host_cpu host_vendor host_os target target_cpu target_vendor target_os AWK CC CFLAGS LDFLAGS CPPFLAGS ac_ct_CC EXEEXT OBJEXT CPP EGREP INSTALL_PROGRAM INSTALL_SCRIPT INSTALL_DATA LN_S SET_MAKE RANLIB ac_ct_RANLIB LIBOBJS MSGFMT JOBS STATIC_LINK OWNER GROUP interface kerneldir missingkernel kernelvsn tmpdir COPTIMISE_FLAG CLDFLAGS LDDEPS SOFLAG DEBUG DM_LIB_VERSION COMPAT LOCALEDIR INTL_PACKAGE INTL LTLIBOBJS'
+ac_subst_vars='SHELL PATH_SEPARATOR PACKAGE_NAME PACKAGE_TARNAME PACKAGE_VERSION PACKAGE_STRING PACKAGE_BUGREPORT exec_prefix prefix program_transform_name bindir sbindir libexecdir datadir sysconfdir sharedstatedir localstatedir libdir includedir oldincludedir infodir mandir build_alias host_alias target_alias DEFS ECHO_C ECHO_N ECHO_T LIBS build build_cpu build_vendor build_os host host_cpu host_vendor host_os target target_cpu target_vendor target_os AWK CC CFLAGS LDFLAGS CPPFLAGS ac_ct_CC EXEEXT OBJEXT CPP EGREP INSTALL_PROGRAM INSTALL_SCRIPT INSTALL_DATA LN_S SET_MAKE RANLIB ac_ct_RANLIB LIBOBJS MSGFMT JOBS STATIC_LINK OWNER GROUP interface kerneldir missingkernel kernelvsn tmpdir COPTIMISE_FLAG CLDFLAGS LDDEPS SOFLAG DEBUG DM_LIB_VERSION COMPAT LOCALEDIR INTL_PACKAGE INTL DEVICE_UID DEVICE_GID DEVICE_MODE LTLIBOBJS'
 ac_subst_files=''
 
 # Initialize some variables set by options.
@@ -855,8 +855,11 @@ Optional Features:
 Optional Packages:
   --with-PACKAGE[=ARG]    use PACKAGE [ARG=yes]
   --without-PACKAGE       do not use PACKAGE (same as --with-PACKAGE=no)
-  --with-user=USER        Set the owner of installed files
-  --with-group=GROUP      Set the group owner of installed files
+  --with-user=USER        Set the owner of installed files [USER=root]
+  --with-group=GROUP      Set the group owner of installed files [GROUP=root]
+  --with-device-uid=UID   Set the owner used for new device nodes [UID=0]
+  --with-device-gid=UID   Set the group used for new device nodes [GID=0]
+  --with-device-mode=MODE  Set the mode used for new device nodes [MODE=0600]
   --with-optimisation=OPT C optimisation flag OPT=-O2
   --with-localedir=DIR    Translation files in DIR PREFIX/share/locale
   --with-kernel-dir=DIR   linux kernel source in DIR
@@ -4748,6 +4751,51 @@ if test x$GROUP != x; then
 fi
 
 ################################################################################
+echo "$as_me:$LINENO: checking device node uid" >&5
+echo $ECHO_N "checking device node uid... $ECHO_C" >&6
+
+
+# Check whether --with-device-uid or --without-device-uid was given.
+if test "${with_device_uid+set}" = set; then
+  withval="$with_device_uid"
+   DEVICE_UID="$withval"
+else
+   DEVICE_UID="0"
+fi;
+echo "$as_me:$LINENO: result: $DEVICE_UID" >&5
+echo "${ECHO_T}$DEVICE_UID" >&6
+
+################################################################################
+echo "$as_me:$LINENO: checking device node gid" >&5
+echo $ECHO_N "checking device node gid... $ECHO_C" >&6
+
+
+# Check whether --with-device-gid or --without-device-gid was given.
+if test "${with_device_gid+set}" = set; then
+  withval="$with_device_gid"
+   DEVICE_GID="$withval"
+else
+   DEVICE_GID="0"
+fi;
+echo "$as_me:$LINENO: result: $DEVICE_GID" >&5
+echo "${ECHO_T}$DEVICE_GID" >&6
+
+################################################################################
+echo "$as_me:$LINENO: checking device node mode" >&5
+echo $ECHO_N "checking device node mode... $ECHO_C" >&6
+
+
+# Check whether --with-device-mode or --without-device-mode was given.
+if test "${with_device_mode+set}" = set; then
+  withval="$with_device_mode"
+   DEVICE_MODE="$withval"
+else
+   DEVICE_MODE="0600"
+fi;
+echo "$as_me:$LINENO: result: $DEVICE_MODE" >&5
+echo "${ECHO_T}$DEVICE_MODE" >&6
+
+################################################################################
 echo "$as_me:$LINENO: checking whether to enable debugging" >&5
 echo $ECHO_N "checking whether to enable debugging... $ECHO_C" >&6
 # Check whether --enable-debug or --disable-debug was given.
@@ -5199,6 +5247,9 @@ fi
 
 
 ################################################################################
+
+
+
 
 
 
@@ -5917,6 +5968,9 @@ s,@COMPAT@,$COMPAT,;t t
 s,@LOCALEDIR@,$LOCALEDIR,;t t
 s,@INTL_PACKAGE@,$INTL_PACKAGE,;t t
 s,@INTL@,$INTL,;t t
+s,@DEVICE_UID@,$DEVICE_UID,;t t
+s,@DEVICE_GID@,$DEVICE_GID,;t t
+s,@DEVICE_MODE@,$DEVICE_MODE,;t t
 s,@LTLIBOBJS@,$LTLIBOBJS,;t t
 CEOF
 
