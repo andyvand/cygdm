@@ -26,17 +26,20 @@ LN_S = @LN_S@
 
 all: .symlinks_created
 
-.symlinks_created: .symlinks
-	find . -maxdepth 1 -type l -exec $(RM) \{\} \;
+.symlinks_created: .symlinks Makefile
+	find . -maxdepth 2 -type l -exec $(RM) \{\} \;
 	for i in `cat .symlinks`; do $(LN_S) $$i ; done
 	touch $@
+ifeq ("@missingkernel@", "yes")
+	$(LN_S) ../../kernel/ioctl/dm-ioctl.h linux
+endif
 
 install:
 
 clean:
 
 distclean:
-	find . -maxdepth 1 -type l -exec $(RM) \{\} \;
+	find . -maxdepth 2 -type l -exec $(RM) \{\} \;
 	$(RM) Makefile .include_symlinks .symlinks_created
 
 .PHONY: install clean distclean all

@@ -23,9 +23,9 @@ ac_help="$ac_help
 ac_help="$ac_help
   --disable-compat        Disable support for old device-mapper versions"
 ac_help="$ac_help
-  --with-kernel-dir=DIR   linux kernel source in DIR [/usr/src/linux]"
+  --with-kernel-dir=DIR   linux kernel source in DIR []"
 ac_help="$ac_help
-  --with-kernel-version=VERSION   linux kernel version"
+  --with-kernel-version=VERSION   linux kernel version "
 ac_help="$ac_help
   --with-tmp-dir=DIR      temp directory to make kernel patches [/tmp/kerndiff]"
 ac_help="$ac_help
@@ -1322,7 +1322,7 @@ else
 int main() {
 
 /* Ultrix mips cc rejects this.  */
-typedef int charset[2]; const charset x = {0,0};
+typedef int charset[2]; const charset x;
 /* SunOS 4.1.1 cc rejects this.  */
 char const *const *ccp;
 char **p;
@@ -1397,7 +1397,7 @@ for ac_kw in inline __inline__ __inline; do
 #include "confdefs.h"
 
 int main() {
-} int $ac_kw foo() {
+} $ac_kw foo() {
 ; return 0; }
 EOF
 if { (eval echo configure:1404: \"$ac_compile\") 1>&5; (eval $ac_compile) 2>&5; }; then
@@ -1900,9 +1900,7 @@ echo $ac_n "checking for kernel directory""... $ac_c" 1>&6
 # Check whether --with-kerneldir or --without-kerneldir was given.
 if test "${with_kerneldir+set}" = set; then
   withval="$with_kerneldir"
-   kerneldir="$withval" 
-else
-   kerneldir=/usr/src/linux 
+   kerneldir="$withval"  
 fi
 
 if test "${with_kernel_dir+set}" = set; then
@@ -1922,17 +1920,23 @@ if test "${with_kernel+set}" = set; then
 fi
 echo "$ac_t""$kerneldir" 1>&6
 
-test -d $kerneldir || { echo "configure: error: kernel directory $kerneldir not found" 1>&2; exit 1; }
+if test "x${kerneldir}" = x;  then
+  missingkernel=yes
+else
+  test -d "${kerneldir}" || { echo "configure: WARNING: kernel dir $kerneldir not found" 1>&2; missingkernel=yes ; }
+fi
 
 echo $ac_n "checking for kernel version""... $ac_c" 1>&6
 # Check whether --with-kernel-version or --without-kernel-version was given.
 if test "${with_kernel_version+set}" = set; then
   withval="$with_kernel_version"
-   kernelvsn="$withval" 
-else
-   kernelvsn=`awk -F ' = ' '/^VERSION/ {v=$2} /^PATCH/ {p=$2} /^SUBLEVEL/ {s=$2} /^EXTRAVERSION/ {e=$2} END {printf "%d.%d.%d%s",v,p,s,e}' $kerneldir/Makefile` 
+  :
 fi
 
+
+if test "${with_kernel-version+set}" = set; then
+   kernelvsn="$with_kernel-version"
+fi
 if test "${with_kernelvsn+set}" = set; then
    kernelvsn="$with_kernelvsn"
 fi
@@ -1943,9 +1947,12 @@ if test "${with_kernelversion+set}" = set; then
    kernelvsn="$with_kernelversion"
 fi
 
-if test "x$kernelvsn" = x; then
-   echo "configure: error: kernel version not found"
-   exit 1
+if test "x${kernelvsn}" = x; then
+  if test "x${missingkernel}" = "x"; then 
+    kernelvsn=`awk -F ' = ' '/^VERSION/ {v=$2} /^PATCH/ {p=$2} /^SUBLEVEL/ {s=$2} /^EXTRAVERSION/ {e=$2} END {printf "%d.%d.%d%s",v,p,s,e}' $kerneldir/Makefile`
+  else
+    kernelvsn="UNKNOWN"
+  fi
 fi
 echo "$ac_t""$kernelvsn" 1>&6
 
@@ -1985,6 +1992,8 @@ if test "-f VERSION" ; then
 else
   DM_LIB_VERSION="Unknown version ($interface)"
 fi
+
+
 
 
 
@@ -2165,6 +2174,7 @@ s%@OWNER@%$OWNER%g
 s%@GROUP@%$GROUP%g
 s%@interface@%$interface%g
 s%@kerneldir@%$kerneldir%g
+s%@missingkernel@%$missingkernel%g
 s%@kernelvsn@%$kernelvsn%g
 s%@tmpdir@%$tmpdir%g
 s%@DEBUG@%$DEBUG%g
@@ -2290,4 +2300,36 @@ EOF
 chmod +x $CONFIG_STATUS
 rm -fr confdefs* $ac_clean_files
 test "$no_create" = yes || ${CONFIG_SHELL-/bin/sh} $CONFIG_STATUS || exit 1
+
+
+echo
+
+if test "x${kerneldir}" != "x" ; then
+  if test -d "${kerneldir}"; then
+    if test ! -f "${kerneldir}/include/linux/dm-ioctl.h"; then
+      echo "Your kernel source in ${kerneldir} needs patching."
+      echo
+      if test "x${kernelvsn}" != "xUNKNOWN"; then
+        echo "For supported kernels, try 'make apply-patches' next to do this, or apply the"
+	echo "device-mapper patches by hand."
+      fi
+      echo
+    fi
+  else
+    echo "WARNING: kernel directory $kerneldir not found"
+    echo
+  fi
+fi
+
+if test "x${kernelvsn}" = "xUNKNOWN"; then
+  echo "WARNING: kernel version not detected: 'make apply-patches' won't work."
+  echo
+fi
+
+if test "x${missingkernel}" = "xyes"; then
+  echo "WARNING: Using local copy of linux/dm-ioctl.h"
+  echo "         Check it's compatible with the one compiled into your kernel."
+  echo
+fi
+
 

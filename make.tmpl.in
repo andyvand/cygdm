@@ -77,7 +77,12 @@ STRIP=
 LIB_VERSION := $(shell cat $(top_srcdir)/VERSION | \
 		   awk -F '.' '{printf "%s.%s",$$1,$$2}')
 
-INCLUDES+=-I. -I$(top_srcdir)/include -I$(kerneldir)/include
+INCLUDES+=-I. -I$(top_srcdir)/include
+
+ifneq ("@missingkernel@", "yes")
+  INCLUDES+=-I$(kerneldir)/include
+endif
+
 INC_LNS=$(top_srcdir)/include/.symlinks_created
 
 LD_FLAGS+=-L$(interfacedir)

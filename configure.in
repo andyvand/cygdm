@@ -82,9 +82,8 @@ AC_CHECK_FUNCS(mkdir rmdir uname)
 echo $ac_n "checking for kernel directory""... $ac_c" 1>&6
 dnl -- Where the linux src tree is
 AC_ARG_WITH(kerneldir,
-  [  --with-kernel-dir=DIR   linux kernel source in DIR [/usr/src/linux]],
-  [ kerneldir="$withval" ],
-  [ kerneldir=/usr/src/linux ])
+  [  --with-kernel-dir=DIR   linux kernel source in DIR []],
+  [ kerneldir="$withval" ] )
 if test "${with_kernel_dir+set}" = set; then
    kerneldir="$with_kernel_dir"
 fi
@@ -102,14 +101,20 @@ if test "${with_kernel+set}" = set; then
 fi
 echo "$ac_t""$kerneldir" 1>&6
 
-test -d $kerneldir || { echo "configure: error: kernel directory $kerneldir not found" 1>&2; exit 1; }
+if test "x${kerneldir}" = x;  then
+  missingkernel=yes
+else
+  test -d "${kerneldir}" || { echo "configure: WARNING: kernel dir $kerneldir not found" 1>&2; missingkernel=yes ; }
+fi
 
 echo $ac_n "checking for kernel version""... $ac_c" 1>&6
 dnl -- Kernel version string
 AC_ARG_WITH(kernel-version,
-  [  --with-kernel-version=VERSION   linux kernel version],
-  [ kernelvsn="$withval" ],
-  [ kernelvsn=`awk -F ' = ' '/^VERSION/ {v=$2} /^PATCH/ {p=$2} /^SUBLEVEL/ {s=$2} /^EXTRAVERSION/ {e=$2} END {printf "%d.%d.%d%s",v,p,s,e}' $kerneldir/Makefile` ])
+  [  --with-kernel-version=VERSION   linux kernel version] )
+
+if test "${with_kernel-version+set}" = set; then
+   kernelvsn="$with_kernel-version"
+fi
 if test "${with_kernelvsn+set}" = set; then
    kernelvsn="$with_kernelvsn"
 fi
@@ -120,9 +125,12 @@ if test "${with_kernelversion+set}" = set; then
    kernelvsn="$with_kernelversion"
 fi
 
-if test "x$kernelvsn" = x; then
-   echo "configure: error: kernel version not found"
-   exit 1
+if test "x${kernelvsn}" = x; then
+  if test "x${missingkernel}" = "x"; then 
+    kernelvsn=`awk -F ' = ' '/^VERSION/ {v=$2} /^PATCH/ {p=$2} /^SUBLEVEL/ {s=$2} /^EXTRAVERSION/ {e=$2} END {printf "%d.%d.%d%s",v,p,s,e}' $kerneldir/Makefile`
+  else
+    kernelvsn="UNKNOWN"
+  fi
 fi
 echo "$ac_t""$kernelvsn" 1>&6
 
@@ -157,12 +165,14 @@ else
   DM_LIB_VERSION="Unknown version ($interface)"
 fi
 
+
 AC_SUBST(JOBS)
 AC_SUBST(OWNER)
 AC_SUBST(GROUP)
 AC_SUBST(LIBS)
 AC_SUBST(interface)
 AC_SUBST(kerneldir)
+AC_SUBST(missingkernel)
 AC_SUBST(kernelvsn)
 AC_SUBST(tmpdir)
 AC_SUBST(DEBUG)
@@ -180,3 +190,35 @@ lib/libdm-common.h						 	\
 kernel/Makefile								\
 man/Makefile								\
 )
+
+echo
+
+if test "x${kerneldir}" != "x" ; then
+  if test -d "${kerneldir}"; then
+    if test ! -f "${kerneldir}/include/linux/dm-ioctl.h"; then
+      echo "Your kernel source in ${kerneldir} needs patching."
+      echo
+      if test "x${kernelvsn}" != "xUNKNOWN"; then
+        echo "For supported kernels, try 'make apply-patches' next to do this, or apply the"
+	echo "device-mapper patches by hand."
+      fi
+      echo
+    fi
+  else
+    echo "WARNING: kernel directory $kerneldir not found"
+    echo
+  fi
+fi
+
+if test "x${kernelvsn}" = "xUNKNOWN"; then
+  echo "WARNING: kernel version not detected: 'make apply-patches' won't work."
+  echo
+fi
+
+if test "x${missingkernel}" = "xyes"; then
+  echo "WARNING: Using local copy of linux/dm-ioctl.h"
+  echo "         Check it's compatible with the one compiled into your kernel."
+  echo
+fi
+
+
