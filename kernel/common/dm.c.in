@@ -732,6 +732,7 @@ static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 				       int minor)
 {
 	struct mapped_device *md = kmalloc(sizeof(*md), GFP_KERNEL);
+	int len;
 
 	if (!md) {
 		DMWARN("unable to allocate device, out of memory.");
@@ -757,14 +758,14 @@ static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 	md->name[sizeof(md->name) - 1] = '\0';
 
 	if (*uuid) {
-		if (!(md->uuid = kmalloc(strnlen(uuid, DM_UUID_LEN) + 1,
-					 GFP_KERNEL))) {
+		len = strnlen(uuid, DM_UUID_LEN) + 1;
+		if (!(md->uuid = kmalloc(len, GFP_KERNEL))) {
 			DMWARN("unable to allocate uuid - out of memory.");
 			return NULL;
 		}
 
-		strncpy(md->uuid, uuid, DM_UUID_LEN - 1);
-		md->uuid[DM_UUID_LEN] = '\0';
+		strncpy(md->uuid, uuid, len - 1);
+		md->uuid[len - 1] = '\0';
 	}
 
 	init_waitqueue_head(&md->wait);
