@@ -36,11 +36,6 @@
 #define WAKE_UP_PERCENT 5
 
 /*
- * Hard sector size used all over the kernel
- */
-#define SECTOR_SIZE 512
-
-/*
  * kcopyd priority of snapshot operations
  */
 #define SNAPSHOT_COPY_PRIORITY 2
@@ -538,6 +533,9 @@ static int snapshot_ctr(struct dm_target *ti, int argc, char **argv)
 	return 0;
 
       bad_free2:
+#if LVM_VFS_ENHANCEMENT
+	unlockfs(s->origin->dev);
+#endif
 	s->store.destroy(&s->store);
 
       bad_free1:

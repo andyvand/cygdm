@@ -14,9 +14,6 @@
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
 
-#define SECTOR_SIZE 512
-#define SECTOR_SHIFT 9
-
 /*-----------------------------------------------------------------
  * Persistent snapshots, by persistent we mean that the snapshot
  * will survive a reboot.
@@ -452,7 +449,7 @@ static int persistent_prepare(struct exception_store *store,
 	sector_t size = get_dev_size(store->snap->cow->dev);
 
 	/* Is there enough room ? */
-	if (size <= (ps->next_free * store->snap->chunk_size))
+	if (size < ((ps->next_free + 1) * store->snap->chunk_size))
 		return -ENOSPC;
 
 	e->new_chunk = ps->next_free;
@@ -462,7 +459,7 @@ static int persistent_prepare(struct exception_store *store,
 	 * into account the location of the metadata chunks.
 	 */
 	stride = (ps->exceptions_per_area + 1);
-	if (!(++ps->next_free % stride))
+	if ((++ps->next_free % stride) == 1)
 		ps->next_free++;
 
 	atomic_inc(&ps->pending_count);
@@ -593,6 +590,12 @@ int dm_create_persistent(struct exception_store *store, uint32_t chunk_size)
 		/*
 		 * Sanity checks.
 		 */
+		if (!ps->valid) {
+			DMWARN("snapshot is marked invalid");
+			r = -EINVAL;
+			goto bad;   
+		}
+
 		if (ps->chunk_size != chunk_size) {
 			DMWARN("chunk size for existing snapshot different "
 			       "from that requested");

@@ -43,8 +43,9 @@ typedef int (*dm_map_fn) (struct dm_target * ti, struct buffer_head * bh,
  * 1   : for some reason the io has still not completed (eg,
  *       multipath target might want to requeue a failed io).
  */
-typedef int (*dm_endio_fn) (struct dm_target * ti, struct buffer_head * bh,
-			    int rw, int error, void *map_context);
+typedef int (*dm_endio_fn) (struct dm_target * ti,
+			    struct buffer_head * bh, int rw, int error,
+			    void *map_context);
 typedef int (*dm_status_fn) (struct dm_target * ti, status_type_t status_type,
 			     char *result, int maxlen);
 

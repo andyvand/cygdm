@@ -19,7 +19,6 @@
 
 static const char *_name = DM_NAME;
 #define MAX_DEVICES (1 << MINORBITS)
-#define SECTOR_SHIFT 9
 #define DEFAULT_READ_AHEAD 64
 
 static int major = 0;
@@ -344,31 +343,26 @@ static void dec_pending(struct buffer_head *bh, int uptodate)
 /*
  * Do the bh mapping for a given leaf
  */
-static inline int __map_buffer(struct mapped_device *md,
-			       int rw, struct buffer_head *bh, struct dm_io *io)
+static inline int __map_buffer(struct mapped_device *md, int rw,
+			       struct buffer_head *bh, struct dm_io *io)
 {
-	int r;
 	struct dm_target *ti;
 
 	ti = dm_table_find_target(md->map, bh->b_rsector);
-	if (!ti)
+	if (!ti || !ti->type)
 		return -EINVAL;
 
-	r = ti->type->map(ti, bh, rw, &io->map_context);
+	/* hook the end io request fn */
+	atomic_inc(&md->pending);
+	io->md = md;
+	io->ti = ti;
+	io->rw = rw;
+	io->end_io = bh->b_end_io;
+	io->context = bh->b_private;
+	bh->b_end_io = dec_pending;
+	bh->b_private = io;
 
-	if (r >= 0) {
-		/* hook the end io request fn */
-		atomic_inc(&md->pending);
-		io->md = md;
-		io->ti = ti;
-		io->rw = rw;
-		io->end_io = bh->b_end_io;
-		io->context = bh->b_private;
-		bh->b_end_io = dec_pending;
-		bh->b_private = io;
-	}
-
-	return r;
+	return ti->type->map(ti, bh, rw, &io->map_context);
 }
 
 /*
@@ -402,7 +396,7 @@ static inline int __deferring(struct mapped_device *md, int rw,
 			return r;
 
 		if (r == 0)
-			return 1;	/* deferred successfully */
+			return 1; /* deferred successfully */
 
 	}
 
@@ -441,7 +435,6 @@ static int dm_request(request_queue_t *q, int rw, struct buffer_head *bh)
 	return r;
 
       bad:
-	free_io(md, io);
 	buffer_IO_error(bh);
 	up_read(&md->lock);
 	dm_put(md);
@@ -819,7 +812,8 @@ int dm_resume(struct mapped_device *md)
 	struct deferred_io *def;
 
 	down_write(&md->lock);
-	if (!test_bit(DMF_SUSPENDED, &md->flags) || !dm_table_get_size(md->map)) {
+	if (!test_bit(DMF_SUSPENDED, &md->flags) ||
+	    !dm_table_get_size(md->map)) {
 		up_write(&md->lock);
 		return -EINVAL;
 	}

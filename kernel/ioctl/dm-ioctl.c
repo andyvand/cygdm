@@ -315,6 +315,7 @@ int dm_hash_rename(const char *old, const char *new)
 	return 0;
 }
 
+
 /*-----------------------------------------------------------------
  * Implementation of the ioctl commands
  *---------------------------------------------------------------*/
@@ -323,7 +324,7 @@ int dm_hash_rename(const char *old, const char *new)
  * All the ioctl commands get dispatched to functions with this
  * prototype.
  */
-typedef int (*ioctl_fn) (struct dm_ioctl * param, struct dm_ioctl * user);
+typedef int (*ioctl_fn)(struct dm_ioctl *param, struct dm_ioctl *user);
 
 /*
  * Check a string doesn't overrun the chunk of
@@ -386,7 +387,7 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 					spec->sector_start, spec->length,
 					params);
 		if (r) {
-			DMWARN("internal error adding target to table");
+			DMWARN("error adding target to table");
 			return -EINVAL;
 		}
 
@@ -921,6 +922,7 @@ static int rename(struct dm_ioctl *param, struct dm_ioctl *user)
 	return dm_hash_rename(param->name, new_name);
 }
 
+
 /*-----------------------------------------------------------------
  * Implementation of open/close/ioctl on the special char
  * device.
@@ -1121,7 +1123,7 @@ int __init dm_interface_init(void)
 	r = devfs_generate_path(_dm_misc.devfs_handle, rname + 3,
 				sizeof rname - 3);
 	if (r == -ENOSYS)
-		return 0;	/* devfs not present */
+		goto done;	/* devfs not present */
 
 	if (r < 0) {
 		DMERR("devfs_generate_path failed for control device");
@@ -1137,6 +1139,7 @@ int __init dm_interface_init(void)
 	}
 	devfs_auto_unregister(_dm_misc.devfs_handle, _ctl_handle);
 
+      done:
 	DMINFO("%d.%d.%d%s initialised: %s", DM_VERSION_MAJOR,
 	       DM_VERSION_MINOR, DM_VERSION_PATCHLEVEL, DM_VERSION_EXTRA,
 	       DM_DRIVER_EMAIL);

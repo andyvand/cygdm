@@ -29,6 +29,9 @@
 #define SECTOR_FORMAT "%lu"
 #endif
 
+#define SECTOR_SHIFT 9
+#define SECTOR_SIZE (1 << SECTOR_SHIFT)
+
 extern struct block_device_operations dm_blk_dops;
 
 /*
@@ -91,7 +94,7 @@ void dm_table_get(struct dm_table *t);
 void dm_table_put(struct dm_table *t);
 
 int dm_table_add_target(struct dm_table *t, const char *type,
-			sector_t start, sector_t len, char *params);
+			sector_t start,	sector_t len, char *params);
 int dm_table_complete(struct dm_table *t);
 void dm_table_event(struct dm_table *t);
 sector_t dm_table_get_size(struct dm_table *t);
@@ -109,6 +112,7 @@ int dm_target_init(void);
 void dm_target_exit(void);
 struct target_type *dm_get_target_type(const char *name);
 void dm_put_target_type(struct target_type *t);
+
 
 /*-----------------------------------------------------------------
  * Useful inlines.

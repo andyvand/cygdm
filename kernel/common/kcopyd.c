@@ -24,12 +24,6 @@
 /* FIXME: this is only needed for the DMERR macros */
 #include "dm.h"
 
-/*
- * Hard sector size used all over the kernel.
- */
-#define SECTOR_SIZE 512
-#define SECTOR_SHIFT 9
-
 static void wake_kcopyd(void);
 
 /*-----------------------------------------------------------------

@@ -44,31 +44,31 @@ struct exception_store {
 	/*
 	 * Destroys this object when you've finished with it.
 	 */
-	void (*destroy) (struct exception_store * store);
+	void (*destroy) (struct exception_store *store);
 
 	/*
 	 * Find somewhere to store the next exception.
 	 */
-	int (*prepare_exception) (struct exception_store * store,
-				  struct exception * e);
+	int (*prepare_exception) (struct exception_store *store,
+				  struct exception *e);
 
 	/*
 	 * Update the metadata with this exception.
 	 */
-	void (*commit_exception) (struct exception_store * store,
-				  struct exception * e,
+	void (*commit_exception) (struct exception_store *store,
+				  struct exception *e,
 				  void (*callback) (void *, int success),
 				  void *callback_context);
 
 	/*
 	 * The snapshot is invalid, note this in the metadata.
 	 */
-	void (*drop_snapshot) (struct exception_store * store);
+	void (*drop_snapshot) (struct exception_store *store);
 
 	/*
 	 * Return the %age full of the snapshot
 	 */
-	int (*percent_full) (struct exception_store * store);
+	int (*percent_full) (struct exception_store *store);
 
 	struct dm_snapshot *snap;
 	void *context;
