@@ -23,6 +23,10 @@ kernelvsn = @kernelvsn@
 
 SUBDIRS = include lib dmsetup
 
+ifeq ($(MAKECMDGOALS),distclean)
+  SUBDIRS += kernel
+endif
+
 include make.tmpl
 
 apply-patches:
