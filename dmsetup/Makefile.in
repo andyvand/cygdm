@@ -31,13 +31,11 @@ include ../make.tmpl
 
 dmsetup: $(OBJECTS) $(interfacedir)/libdevmapper.so
 	$(CC) -o $@ $(OBJECTS) $(LD_FLAGS) \
-	      -L$(interfacedir) -L$(DESTDIR)/lib $(LIBS) \
-	      -ldevmapper
+	      -L$(interfacedir) -L$(DESTDIR)/lib -ldevmapper $(LIBS)
 
 dmsetup.static: $(OBJECTS) $(interfacedir)/libdevmapper.a
 	$(CC) -o $@ $(OBJECTS) $(LD_FLAGS) -static \
-	      -L$(interfacedir) -L$(DESTDIR)/lib $(LIBS) \
-	      -ldevmapper
+	      -L$(interfacedir) -L$(DESTDIR)/lib -ldevmapper $(LIBS)
 
 install: $(INSTALL_TYPE)
 
