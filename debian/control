@@ -10,7 +10,7 @@ Section: devel
 Architecture: any
 Depends: patch
 Suggests: libdevmapper0, kernel-source-2.4.18
-Description: The Linux Kernel Device Mapper header files
+Description: The Linux Kernel Device Mapper kernel patch
  The Linux Kernel Device Mapper is the LVM (Linux Logical Volume Management)
  Team's implementation of a minimalistic kernel-space driver that handles
  volume management, while keeping knowledge of the underlying device layout
