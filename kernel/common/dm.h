@@ -130,6 +130,7 @@ void dm_put_w(int minor);
 int dm_create(const char *name, const char *uuid,
 	      int minor, struct dm_table *table);
 int dm_set_name(const char *oldname, const char *newname);
+void dm_destroy_all(void);
 
 /*
  * You must have the write lock before calling the remaining md

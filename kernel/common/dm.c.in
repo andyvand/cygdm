@@ -26,7 +26,7 @@ struct io_hook {
 	struct target *target;
 	int rw;
 
-	void (*end_io)(struct buffer_head *bh, int uptodate);
+	void (*end_io) (struct buffer_head * bh, int uptodate);
 	void *context;
 };
 
@@ -49,7 +49,7 @@ static int _hardsect_size[MAX_DEVICES];
 
 static devfs_handle_t _dev_dir;
 
-static int request(request_queue_t *q, int rw, struct buffer_head *bh);
+static int request(request_queue_t * q, int rw, struct buffer_head *bh);
 static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb);
 
 /*
@@ -271,7 +271,6 @@ static int __init dm_init(void)
 	if (r)
 		goto out_mirror;
 
-
 	return 0;
 
       out_mirror:
@@ -296,6 +295,7 @@ static int __init dm_init(void)
 
 static void __exit dm_exit(void)
 {
+	dm_destroy_all();
 	dm_interface_exit();
 	dm_stripe_exit();
 	dm_linear_exit();
@@ -372,13 +372,13 @@ static int dm_blk_ioctl(struct inode *inode, struct file *file,
 
 	case BLKGETSIZE:
 		size = VOLUME_SIZE(minor);
-		if (copy_to_user((void *)a, &size, sizeof(long)))
+		if (copy_to_user((void *) a, &size, sizeof(long)))
 			return -EFAULT;
 		break;
 
 	case BLKGETSIZE64:
 		size = VOLUME_SIZE(minor);
-		if (put_user((u64)size, (u64 *)a))
+		if (put_user((u64) size, (u64 *) a))
 			return -EFAULT;
 		break;
 
@@ -556,7 +556,7 @@ static inline int __find_node(struct dm_table *t, struct buffer_head *bh)
 	return (KEYS_PER_NODE * n) + k;
 }
 
-static int request(request_queue_t *q, int rw, struct buffer_head *bh)
+static int request(request_queue_t * q, int rw, struct buffer_head *bh)
 {
 	struct mapped_device *md;
 	int r, minor = MINOR(bh->b_rdev);
@@ -595,7 +595,6 @@ static int request(request_queue_t *q, int rw, struct buffer_head *bh)
 			return 0;
 		}
 	}
-
 
 	if ((r = __map_buffer(md, bh, rw, __find_node(md->map, bh))) < 0)
 		goto bad;
@@ -758,7 +757,7 @@ static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 	md->name[sizeof(md->name) - 1] = '\0';
 
 	if (*uuid) {
-		if (!(md->uuid = kmalloc(strnlen(uuid, DM_UUID_LEN), 
+		if (!(md->uuid = kmalloc(strnlen(uuid, DM_UUID_LEN),
 					 GFP_KERNEL))) {
 			DMWARN("unable to allocate uuid - out of memory.");
 			return NULL;
@@ -900,7 +899,7 @@ int dm_create(const char *name, const char *uuid,
 	spin_unlock(&_create_lock);
 	return 0;
 
- err:
+      err:
 	_devs[minor] = NULL;
 	if (md->uuid)
 		kfree(md->uuid);
@@ -970,6 +969,24 @@ int dm_destroy(struct mapped_device *md)
 	kfree(md);
 
 	return 0;
+}
+
+/*
+ * Destroy all devices - except suspended ones...
+ */
+void dm_destroy_all(void)
+{
+	int i;
+	struct mapped_device *md;
+
+	for (i = 0; i < MAX_DEVICES; i++) {
+		md = dm_get_w(i);
+		if (!md)
+			continue;
+
+		dm_destroy(md);
+		dm_put_w(i);
+	}
 }
 
 /*

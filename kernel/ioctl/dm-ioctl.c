@@ -17,7 +17,7 @@ static void free_params(struct dm_ioctl *p)
 
 static int version(struct dm_ioctl *user)
 {
-        return copy_to_user(user, DM_DRIVER_VERSION, sizeof(DM_DRIVER_VERSION));
+	return copy_to_user(user, DM_DRIVER_VERSION, sizeof(DM_DRIVER_VERSION));
 }
 
 static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
@@ -66,10 +66,10 @@ static int next_target(struct dm_target_spec *last, unsigned long next,
 		       struct dm_target_spec **spec, char **params)
 {
 	*spec = (struct dm_target_spec *)
-		((unsigned char *) last + next);
+	    ((unsigned char *) last + next);
 	*params = (char *) (*spec + 1);
 
-	if (*spec < (last + 1) || ((void *)*spec > end))
+	if (*spec < (last + 1) || ((void *) *spec > end))
 		return -EINVAL;
 
 	return valid_str(*params, begin, end);
@@ -111,11 +111,10 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 
 	for (i = 0; i < args->target_count; i++) {
 
-		r = first ? next_target((struct dm_target_spec *)args,
+		r = first ? next_target((struct dm_target_spec *) args,
 					args->data_start,
 					begin, end, &spec, &params) :
-			    next_target(spec, spec->next,
-					begin, end, &spec, &params);
+		    next_target(spec, spec->next, begin, end, &spec, &params);
 
 		if (r)
 			PARSE_ERROR("unable to find target");
@@ -135,8 +134,8 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 		/* Build the target */
 		if (ttype->ctr(table, spec->sector_start, spec->length,
 			       argc, argv, &context)) {
-			DMWARN("%s: target constructor failed", 
-			       (char *)context);
+			DMWARN("%s: target constructor failed",
+			       (char *) context);
 			return -EINVAL;
 		}
 
@@ -240,7 +239,7 @@ static int info(struct dm_ioctl *param, struct dm_ioctl *user)
 	__info(md, param);
 	dm_put_r(minor);
 
- out:
+      out:
 	return results_to_user(user, param, NULL, 0);
 }
 
@@ -270,7 +269,7 @@ static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
 	 */
 	count = 0;
 	list_for_each(tmp, &md->map->devices)
-		count++;
+	    count++;
 
 	/*
 	 * Allocate a kernel space version of the dm_target_status
@@ -288,13 +287,13 @@ static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
 	 */
 	deps->count = count;
 	count = 0;
-	list_for_each (tmp, &md->map->devices) {
+	list_for_each(tmp, &md->map->devices) {
 		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
 		deps->dev[count++] = kdev_t_to_nr(dd->dev);
 	}
 	dm_put_r(minor);
 
- out:
+      out:
 	r = results_to_user(user, param, deps, len);
 
 	kfree(deps);
@@ -319,7 +318,7 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 	}
 
 	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
-		MINOR(to_kdev_t(param->dev)) : -1;
+	    MINOR(to_kdev_t(param->dev)) : -1;
 
 	r = dm_create(param->name, param->uuid, minor, t);
 	if (r) {
@@ -366,8 +365,7 @@ static int suspend(struct dm_ioctl *param)
 		return -ENXIO;
 
 	minor = MINOR(md->dev);
-	r = (param->flags & DM_SUSPEND_FLAG) ?
-	     dm_suspend(md) : dm_resume(md);
+	r = (param->flags & DM_SUSPEND_FLAG) ? dm_suspend(md) : dm_resume(md);
 	dm_put_w(minor);
 
 	return r;
@@ -447,13 +445,20 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 	struct dm_ioctl *p;
 	uint cmd = _IOC_NR(command);
 
-	if (cmd == DM_VERSION_CMD)
+	switch (cmd) {
+	case DM_REMOVE_ALL_CMD:
+		dm_destroy_all();
+	case DM_VERSION_CMD:
 		return version((struct dm_ioctl *) a);
+	default:
+		break;
+	}
 
 	r = copy_params((struct dm_ioctl *) a, &p);
 	if (r)
 		return r;
 
+	/* FIXME: Change to use size 0 next time ioctl version gets changed */
 	switch (cmd) {
 	case DM_CREATE_CMD:
 		r = create(p, (struct dm_ioctl *) a);
@@ -522,7 +527,7 @@ int __init dm_interface_init(void)
 	r = devfs_generate_path(_dm_misc.devfs_handle, rname + 3,
 				sizeof rname - 3);
 	if (r == -ENOSYS)
-		return 0; 	/* devfs not present */
+		return 0;	/* devfs not present */
 
 	if (r < 0) {
 		DMERR("devfs_generate_path failed for control device");
@@ -531,8 +536,7 @@ int __init dm_interface_init(void)
 
 	strncpy(rname + r, "../", 3);
 	r = devfs_mk_symlink(NULL, DM_DIR "/control",
-			     DEVFS_FL_DEFAULT, rname + r,
-			     &_ctl_handle, NULL);
+			     DEVFS_FL_DEFAULT, rname + r, &_ctl_handle, NULL);
 	if (r) {
 		DMERR("devfs_mk_symlink failed for control device");
 		goto failed;
