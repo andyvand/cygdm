@@ -288,10 +288,16 @@ int dm_table_get_device(struct dm_table *t, const char *path,
 	int r;
 	kdev_t dev;
 	struct dm_dev *dd;
+	int major, minor;
 
-	/* convert the path to a device */
-	if ((r = lookup_device(path, &dev)))
-		return r;
+	if (sscanf(path, "%x:%x", &major, &minor) == 2) {
+		/* Extract the major/minor numbers */
+		dev = MKDEV(major, minor);
+	} else {
+		/* convert the path to a device */
+		if ((r = lookup_device(path, &dev)))
+			return r;
+	}
 
 	dd = find_device(&t->devices, dev);
 	if (!dd) {
@@ -365,7 +371,7 @@ static int setup_indexes(struct dm_table *t)
 		total += t->counts[i];
 	}
 
-	indexes = (offset_t *) vmalloc((unsigned long)NODE_SIZE * total);
+	indexes = (offset_t *) vmalloc((unsigned long) NODE_SIZE * total);
 	if (!indexes)
 		return -ENOMEM;
 

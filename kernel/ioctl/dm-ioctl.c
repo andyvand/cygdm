@@ -9,6 +9,7 @@
 #include <linux/miscdevice.h>
 #include <linux/dm-ioctl.h>
 #include <linux/init.h>
+#include <linux/wait.h>
 
 static void free_params(struct dm_ioctl *param)
 {
@@ -246,6 +247,185 @@ static inline char *lookup_name(struct dm_ioctl *param)
 static inline int lookup_type(struct dm_ioctl *param)
 {
 	return (*param->uuid) ? DM_LOOKUP_BY_UUID : DM_LOOKUP_BY_NAME;
+}
+
+#define ALIGNMENT sizeof(int)
+static void *_align(void *ptr, unsigned int a)
+{
+	register unsigned long align = --a;
+
+	return (void *) (((unsigned long) ptr + align) & ~align);
+}
+
+/*
+ * Build up the status struct for each target
+ */
+static int __status(struct mapped_device *md, struct dm_ioctl *param,
+		    char *outbuf, int *len)
+{
+	int i;
+	struct dm_target_spec *spec;
+	unsigned long long sector = 0LL;
+	char *outptr;
+	status_type_t type;
+
+	if (param->flags & DM_STATUS_TABLE_FLAG)
+		type = STATUSTYPE_TABLE;
+	else
+		type = STATUSTYPE_INFO;
+
+	outptr = outbuf;
+
+	/* Get all the target info */
+	for (i = 0; i < md->map->num_targets; i++) {
+		struct target_type *tt = md->map->targets[i].type;
+		offset_t high = md->map->highs[i];
+
+		if (outptr - outbuf +
+		    sizeof(struct dm_target_spec) > param->data_size)
+			return -ENOMEM;
+
+		spec = (struct dm_target_spec *) outptr;
+
+		spec->status = 0;
+		spec->sector_start = sector;
+		spec->length = high - sector + 1;
+		strncpy(spec->target_type, tt->name, sizeof(spec->target_type));
+
+		outptr += sizeof(struct dm_target_spec);
+
+		/* Get the status/table string from the target driver */
+		if (tt->sts)
+			tt->sts(type, outptr,
+				outbuf + param->data_size - outptr,
+				md->map->targets[i].private);
+		else
+			outptr[0] = '\0';
+
+		outptr += strlen(outptr) + 1;
+		_align(outptr, ALIGNMENT);
+
+		sector = high + 1;
+
+		spec->next = outptr - outbuf;
+	}
+
+	param->target_count = md->map->num_targets;
+	*len = outptr - outbuf;
+
+	return 0;
+}
+
+static int __wait(struct mapped_device *md, struct dm_ioctl *param)
+{
+	int waiting = 0;
+	int i;
+	DECLARE_WAITQUEUE(waitq, current);
+
+	/* Get all the target info */
+	for (i = 0; i < md->map->num_targets; i++) {
+		struct target_type *tt = md->map->targets[i].type;
+
+		set_task_state(current, TASK_INTERRUPTIBLE);
+
+		/* Add ourself to the target's wait queue */
+		if (tt->wait &&
+		    (!tt->wait(md->map->targets[i].private, &waitq, 1)))
+			waiting = 1;
+	}
+
+	/* If at least one call succeeded then sleep */
+	if (waiting) {
+		schedule();
+
+		for (i = 0; i < md->map->num_targets; i++) {
+			struct target_type *tt = md->map->targets[i].type;
+
+			/* And remove ourself */
+			if (tt->wait)
+				tt->wait(md->map->targets[i].private,
+					 &waitq, 0);
+		}
+	}
+
+	set_task_state(current, TASK_RUNNING);
+
+	return 0;
+}
+
+/*
+ * Return the status of a device as a text string for each
+ * target.
+ */
+static int get_status(struct dm_ioctl *param, struct dm_ioctl *user)
+{
+	struct mapped_device *md;
+	int len = 0;
+	int ret;
+	char *outbuf = NULL;
+
+	md = dm_get_name_r(lookup_name(param), lookup_type(param));
+	if (!md)
+		/*
+		 * Device not found - returns cleared exists flag.
+		 */
+		goto out;
+
+	/* We haven't a clue how long the resultant data will be so
+	   just allocate as much as userland has allowed us and make sure
+	   we don't overun it */
+	outbuf = kmalloc(param->data_size, GFP_KERNEL);
+	if (!outbuf)
+		goto out;
+	/*
+	 * Get the status of all targets
+	 */
+	__status(md, param, outbuf, &len);
+
+	/*
+	 * Setup the basic dm_ioctl structure.
+	 */
+	__info(md, param);
+
+      out:
+	if (md)
+		dm_put_r(md);
+
+	ret = results_to_user(user, param, outbuf, len);
+
+	if (outbuf)
+		kfree(outbuf);
+
+	return ret;
+}
+
+/*
+ * Wait for a device to report an event
+ */
+static int wait_device_event(struct dm_ioctl *param, struct dm_ioctl *user)
+{
+	struct mapped_device *md;
+
+	md = dm_get_name_r(lookup_name(param), lookup_type(param));
+	if (!md)
+		/*
+		 * Device not found - returns cleared exists flag.
+		 */
+		goto out;
+	/*
+	 * Setup the basic dm_ioctl structure.
+	 */
+	__info(md, param);
+
+	/*
+	 * Wait for anotification event
+	 */
+	__wait(md, param);
+
+	dm_put_r(md);
+
+      out:
+	return results_to_user(user, param, NULL, 0);
 }
 
 /*
@@ -515,6 +695,14 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 		r = dep(param, user);
 		break;
 
+	case DM_GET_STATUS_CMD:
+		r = get_status(param, user);
+		break;
+
+	case DM_WAIT_EVENT_CMD:
+		r = wait_device_event(param, user);
+		break;
+
 	default:
 		DMWARN("dm_ctl_ioctl: unknown command 0x%x", command);
 		r = -EINVAL;
@@ -529,18 +717,18 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 }
 
 static struct file_operations _ctl_fops = {
-	open:		ctl_open,
-	release:	ctl_close,
-	ioctl:		ctl_ioctl,
-	owner:		THIS_MODULE,
+	open:	ctl_open,
+	release:ctl_close,
+	ioctl:	ctl_ioctl,
+	owner:	THIS_MODULE,
 };
 
 static devfs_handle_t _ctl_handle;
 
 static struct miscdevice _dm_misc = {
-	minor:		MISC_DYNAMIC_MINOR,
-	name:		DM_NAME,
-	fops:		&_ctl_fops
+	minor:	MISC_DYNAMIC_MINOR,
+	name:	DM_NAME,
+	fops:	&_ctl_fops
 };
 
 /* Create misc character device and link to DM_DIR/control */

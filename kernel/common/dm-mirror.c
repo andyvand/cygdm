@@ -30,8 +30,10 @@ struct mirror_c {
 	unsigned long topos;
 
 	unsigned long got_to;
+	unsigned long size;	/* for %age calculation */
 	struct rw_semaphore lock;
 	struct buffer_head *bhstring;
+	wait_queue_head_t waitq;
 	int error;
 };
 
@@ -44,9 +46,10 @@ static void mirror_end_io(struct buffer_head *bh, int uptodate)
 	if (!uptodate) {
 		DMERR("Mirror copy to %s failed", kdevname(lc->todev->dev));
 		lc->error = 1;
-		dm_notify(lc);	/* TODO: interface ?? */
+		wake_up_interruptible(&lc->waitq);
 	}
 	kmem_cache_free(bh_cachep, bh);
+	wake_up_interruptible(&lc->waitq);
 }
 
 static void mirror_bh(struct mirror_c *mc, struct buffer_head *bh)
@@ -176,6 +179,8 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	lc->topos = offset2;
 	lc->error = 0;
 	lc->bhstring = NULL;
+	lc->size = l - offset1;
+	init_waitqueue_head(&lc->waitq);
 	init_rwsem(&lc->lock);
 	*context = lc;
 
@@ -207,6 +212,9 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 static void mirror_dtr(struct dm_table *t, void *c)
 {
 	struct mirror_c *lc = (struct mirror_c *) c;
+
+	/* Just in case anyone is still waiting... */
+	wake_up_interruptible(&lc->waitq);
 
 	dm_table_put_device(t, lc->fromdev);
 	dm_table_put_device(t, lc->todev);
@@ -249,12 +257,50 @@ static int mirror_map(struct buffer_head *bh, int rw, void *context)
 	return 1;
 }
 
+static int mirror_sts(status_type_t sts_type, char *result, int maxlen,
+		      void *context)
+{
+	struct mirror_c *mc = (struct mirror_c *) context;
+
+	switch (sts_type) {
+	case STATUSTYPE_INFO:
+		if (mc->error)
+			snprintf(result, maxlen, "Error");
+		else
+			snprintf(result, maxlen, "%ld%%",
+				 (mc->got_to -
+				  mc->from_delta) * 100 / mc->size);
+		break;
+
+	case STATUSTYPE_TABLE:
+		snprintf(result, maxlen, "%s %ld %s %ld %d",
+			 kdevname(mc->fromdev->dev), mc->frompos,
+			 kdevname(mc->todev->dev), mc->topos, 0);
+		break;
+	}
+	return 0;
+}
+
+static int mirror_wait(wait_queue_t *wq, void *context)
+{
+	struct mirror_c *mc = (struct mirror_c *) context;
+
+	if (add)
+		add_wait_queue(&mc->waitq, wq);
+	else
+		remove_wait_queue(&mc->waitq, wq);
+
+	return 0;
+}
+
 static struct target_type mirror_target = {
 	name:	"mirror",
 	module:	THIS_MODULE,
 	ctr:	mirror_ctr,
 	dtr:	mirror_dtr,
 	map:	mirror_map,
+	sts:	mirror_sts,
+	wait:	mirror_wait,
 };
 
 int __init dm_mirror_init(void)
@@ -265,9 +311,8 @@ int __init dm_mirror_init(void)
 				      sizeof(struct buffer_head),
 				      __alignof__(struct buffer_head),
 				      0, NULL, NULL);
-	if (!bh_cachep) {
+	if (!bh_cachep)
 		return -1;
-	}
 
 	r = dm_register_target(&mirror_target);
 	if (r < 0) {

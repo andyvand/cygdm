@@ -29,6 +29,11 @@
 #endif
 
 /*
+ * The percentage increment we will wake up users at
+ */
+#define WAKE_UP_PERCENT 5
+
+/*
  * Hard sector size used all over the kernel
  */
 #define SECTOR_SIZE 512
@@ -225,7 +230,7 @@ static int init_exception_table(struct exception_table *et, uint32_t size)
 	return 0;
 }
 
-static void exit_exception_table(struct exception_table *et, kmem_cache_t * mem)
+static void exit_exception_table(struct exception_table *et, kmem_cache_t *mem)
 {
 	struct list_head *slot, *entry, *temp;
 	struct exception *ex;
@@ -285,7 +290,13 @@ static struct exception *lookup_exception(struct exception_table *et,
 
 static inline struct exception *alloc_exception(void)
 {
-	return kmem_cache_alloc(exception_cache, GFP_NOIO);
+	struct exception *e;
+
+	e = kmem_cache_alloc(exception_cache, GFP_NOIO);
+	if (!e)
+		e = kmem_cache_alloc(exception_cache, GFP_ATOMIC);
+
+	return e;
 }
 
 static inline void free_exception(struct exception *e)
@@ -382,7 +393,7 @@ static int init_hash_tables(struct dm_snapshot *s)
 
 /*
  * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n>
- * <chunk-size> <extent-size>
+ * <chunk-size>
  */
 static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 			int argc, char **argv, void **context)
@@ -490,6 +501,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad_putdev;
 	}
 
+	init_waitqueue_head(&s->waitq);
 	s->chunk_size = chunk_size;
 	s->chunk_mask = chunk_size - 1;
 	for (s->chunk_shift = 0; chunk_size;
@@ -498,6 +510,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	s->chunk_shift--;
 
 	s->valid = 1;
+	s->last_percent = 0;
 	init_rwsem(&s->lock);
 
 	/* Allocate hash table for COW data */
@@ -522,13 +535,6 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	if (r) {
 		*context = "Couldn't create exception store";
 		r = -EINVAL;
-		goto bad_free1;
-	}
-
-	/* Allocate the COW iobuf and set associated variables */
-	r = store_int_fn(s, init, blocksize, extent_size, context);
-	if (r) {
-		*context = "Couldn't initialise exception store";
 		goto bad_free1;
 	}
 
@@ -574,6 +580,8 @@ static void snapshot_dtr(struct dm_table *t, void *context)
 {
 	struct dm_snapshot *s = (struct dm_snapshot *) context;
 
+	wake_up_interruptible(&s->waitq);
+
 	unregister_snapshot(s);
 
 	exit_exception_table(&s->pending, pending_cache);
@@ -612,6 +620,7 @@ static void flush_buffers(struct buffer_head *bh)
 		bh = n;
 	}
 
+	/* FIXME: not sure we can this from this context. */
 	run_task_queue(&tq_disk);
 }
 
@@ -630,22 +639,19 @@ static void error_buffers(struct buffer_head *bh)
 	}
 }
 
-/*
- * Called when the copy I/O has finished
- */
-static void copy_callback(int err, void *context)
+static void pending_complete(struct pending_exception *pe, int success)
 {
-	struct pending_exception *pe = (struct pending_exception *) context;
-	struct dm_snapshot *s = pe->snap;
 	struct exception *e;
+	struct dm_snapshot *s = pe->snap;
 
-	if (!err) {
-		/* Update the metadata if we are persistent */
-		store_fn(s, commit_exception, &pe->e);
-
+	if (success) {
 		e = alloc_exception();
 		if (!e) {
-			/* FIXME: what do we do now ? */
+			printk("Unable to allocate exception.");
+			down_write(&s->lock);
+			store_fn(s, drop_snapshot);
+			s->valid = 0;
+			up_write(&s->lock);
 			return;
 		}
 
@@ -653,30 +659,41 @@ static void copy_callback(int err, void *context)
 		 * Add a proper exception, and remove the
 		 * inflight exception from the list.
 		 */
-		down_write(&pe->snap->lock);
+		down_write(&s->lock);
 
 		memcpy(e, &pe->e, sizeof(*e));
 		insert_exception(&s->complete, e);
 		remove_exception(&pe->e);
 
 		/* Submit any pending write BHs */
-		up_write(&pe->snap->lock);
+		up_write(&s->lock);
 
 		flush_buffers(pe->snapshot_bhs);
 		DMDEBUG("Exception completed successfully.");
+
+		/* Notify any interested parties */
+		if (s->store.percent_full) {
+			int pc = s->store.percent_full(&s->store);
+
+			if (pc >= s->last_percent + WAKE_UP_PERCENT) {
+				wake_up_interruptible(&s->waitq);
+				s->last_percent = pc - pc % WAKE_UP_PERCENT;
+			}
+		}
 
 	} else {
 		/* Read/write error - snapshot is unusable */
 		DMERR("Error reading/writing snapshot");
 
-		down_write(&pe->snap->lock);
-		store_fn(pe->snap, drop_snapshot);
-		pe->snap->valid = 0;
+		down_write(&s->lock);
+		store_fn(s, drop_snapshot);
+		s->valid = 0;
 		remove_exception(&pe->e);
-		up_write(&pe->snap->lock);
+		up_write(&s->lock);
 
 		error_buffers(pe->snapshot_bhs);
 
+		wake_up_interruptible(&s->waitq);
 		DMDEBUG("Exception failed.");
 	}
 
@@ -686,6 +703,30 @@ static void copy_callback(int err, void *context)
 		list_del(&pe->siblings);
 
 	free_pending_exception(pe);
+}
+
+static void commit_callback(void *context, int success)
+{
+	struct pending_exception *pe = (struct pending_exception *) context;
+	pending_complete(pe, success);
+}
+
+/*
+ * Called when the copy I/O has finished.  kcopyd actually runs
+ * this code so don't block.
+ */
+static void copy_callback(int err, void *context)
+{
+	struct pending_exception *pe = (struct pending_exception *) context;
+	struct dm_snapshot *s = pe->snap;
+
+	if (err)
+		pending_complete(pe, 0);
+
+	else
+		/* Update the metadata if we are persistent */
+		s->store.commit_exception(&s->store, &pe->e, commit_callback,
+					  pe);
 }
 
 /*
@@ -868,8 +909,8 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 			if (!pe) {
 				store_fn(snap, drop_snapshot);
 				snap->valid = 0;
-			} else {
 
+			} else {
 				if (last)
 					list_splice(&pe->siblings,
 						    &last->siblings);
@@ -899,6 +940,53 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 	}
 
 	return r;
+}
+
+static int snapshot_sts(status_type_t sts_type, char *result,
+			int maxlen, void *context)
+{
+	struct dm_snapshot *snap = (struct dm_snapshot *) context;
+	char cowdevname[PATH_MAX];
+	char orgdevname[PATH_MAX];
+
+	switch (sts_type) {
+	case STATUSTYPE_INFO:
+		if (!snap->valid)
+			snprintf(result, maxlen, "Invalid");
+		else {
+			if (snap->store.percent_full)
+				snprintf(result, maxlen, "%d%%",
+					 snap->store.percent_full(&snap->
+								  store));
+			else
+				snprintf(result, maxlen, "Unknown");
+		}
+		break;
+
+	case STATUSTYPE_TABLE:
+		/* kdevname returns a static pointer so we
+		   need to make private copies if the output is to make sense */
+		strcpy(cowdevname, kdevname(snap->cow->dev));
+		strcpy(orgdevname, kdevname(snap->origin->dev));
+		snprintf(result, maxlen, "%s %s %c %ld", orgdevname, cowdevname,
+			 'N',	/* TODO persistent snaps */
+			 snap->chunk_size);
+		break;
+	}
+
+	return 0;
+}
+
+static int snapshot_wait(void *context, wait_queue_t *wq, int add)
+{
+	struct dm_snapshot *snap = (struct dm_snapshot *) context;
+
+	if (add)
+		add_wait_queue(&snap->waitq, wq);
+	else
+		remove_wait_queue(&snap->waitq, wq);
+
+	return 0;
 }
 
 /*
@@ -966,12 +1054,32 @@ static int origin_map(struct buffer_head *bh, int rw, void *context)
 	return (rw == WRITE) ? do_origin(dev, bh) : 1;
 }
 
+static int origin_sts(status_type_t sts_type, char *result,
+		      int maxlen, void *context)
+{
+	struct dm_dev *dev = (struct dm_dev *) context;
+
+	switch (sts_type) {
+	case STATUSTYPE_INFO:
+		result[0] = '\0';
+		break;
+
+	case STATUSTYPE_TABLE:
+		snprintf(result, maxlen, "%s", kdevname(dev->dev));
+		break;
+	}
+
+	return 0;
+}
+
 static struct target_type origin_target = {
 	name:	"snapshot-origin",
 	module:	THIS_MODULE,
 	ctr:	origin_ctr,
 	dtr:	origin_dtr,
 	map:	origin_map,
+	sts:	origin_sts,
+	wait:	NULL,
 	err:	NULL
 };
 
@@ -981,6 +1089,8 @@ static struct target_type snapshot_target = {
 	ctr:	snapshot_ctr,
 	dtr:	snapshot_dtr,
 	map:	snapshot_map,
+	sts:	snapshot_sts,
+	wait:	snapshot_wait,
 	err:	NULL
 };
 

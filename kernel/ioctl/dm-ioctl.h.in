@@ -15,7 +15,9 @@
 
 /*
  * All ioctl arguments consist of a single chunk of memory, with
- * this structure at the start.
+ * this structure at the start.  If a uuid is specified any
+ * lookup (eg. for a DM_INFO) will be done on that, *not* the
+ * name.
  */
 struct dm_ioctl {
 	char version[16];
@@ -26,16 +28,16 @@ struct dm_ioctl {
 	unsigned long data_start;	/* offset to start of data
 					 * relative to start of this struct */
 
-	char name[DM_NAME_LEN];		/* device name */
+	char name[DM_NAME_LEN];	/* device name */
 
 	unsigned int target_count;	/* in/out */
 	unsigned int open_count;	/* out */
-	unsigned int flags;		/* in/out */
+	unsigned int flags;	/* in/out */
 
-	__kernel_dev_t dev;		/* in/out */
+	__kernel_dev_t dev;	/* in/out */
 
-	char uuid[DM_UUID_LEN];		/* unique identifier for
-					 * the block device */
+	char uuid[DM_UUID_LEN];	/* unique identifier for
+				 * the block device */
 };
 
 /*
@@ -78,18 +80,22 @@ enum {
 	DM_RENAME_CMD,
 	DM_VERSION_CMD,
 	DM_DEPS_CMD,
-	DM_REMOVE_ALL_CMD
+	DM_REMOVE_ALL_CMD,
+	DM_GET_STATUS_CMD,
+	DM_WAIT_EVENT_CMD
 };
 
-#define	DM_CREATE	_IOWR(DM_IOCTL, DM_CREATE_CMD, struct dm_ioctl)
-#define	DM_REMOVE	_IOW(DM_IOCTL, DM_REMOVE_CMD, struct dm_ioctl)
-#define	DM_SUSPEND	_IOW(DM_IOCTL, DM_SUSPEND_CMD, struct dm_ioctl)
-#define	DM_RELOAD	_IOW(DM_IOCTL, DM_RELOAD_CMD, struct dm_ioctl)
-#define DM_INFO		_IOWR(DM_IOCTL, DM_INFO_CMD, struct dm_ioctl)
-#define DM_RENAME	_IOW(DM_IOCTL, DM_RENAME_CMD, struct dm_ioctl)
-#define DM_VERSION	_IOR(DM_IOCTL, DM_VERSION_CMD, struct dm_ioctl)
-#define DM_DEPS		_IOR(DM_IOCTL, DM_DEPS_CMD, struct dm_ioctl)
-#define DM_REMOVE_ALL	_IOR(DM_IOCTL, DM_REMOVE_ALL_CMD, struct dm_ioctl)
+#define DM_CREATE       _IOWR(DM_IOCTL, DM_CREATE_CMD, struct dm_ioctl)
+#define DM_REMOVE       _IOW(DM_IOCTL, DM_REMOVE_CMD, struct dm_ioctl)
+#define DM_SUSPEND      _IOW(DM_IOCTL, DM_SUSPEND_CMD, struct dm_ioctl)
+#define DM_RELOAD       _IOW(DM_IOCTL, DM_RELOAD_CMD, struct dm_ioctl)
+#define DM_INFO         _IOWR(DM_IOCTL, DM_INFO_CMD, struct dm_ioctl)
+#define DM_RENAME       _IOW(DM_IOCTL, DM_RENAME_CMD, struct dm_ioctl)
+#define DM_VERSION      _IOWR(DM_IOCTL, DM_VERSION_CMD, struct dm_ioctl)
+#define DM_DEPS         _IOWR(DM_IOCTL, DM_DEPS_CMD, struct dm_ioctl)
+#define DM_REMOVE_ALL   _IOR(DM_IOCTL, DM_REMOVE_ALL_CMD, struct dm_ioctl)
+#define DM_GET_STATUS   _IOWR(DM_IOCTL, DM_GET_STATUS_CMD, struct dm_ioctl)
+#define DM_WAIT_EVENT   _IOR(DM_IOCTL, DM_WAIT_EVENT_CMD, struct dm_ioctl)
 
 #define DM_IOCTL_VERSION @DM_IOCTL_VERSION@
 #define DM_DRIVER_VERSION @DM_DRIVER_VERSION@
@@ -99,5 +105,9 @@ enum {
 #define DM_SUSPEND_FLAG		0x00000002
 #define DM_EXISTS_FLAG		0x00000004
 #define DM_PERSISTENT_DEV_FLAG	0x00000008
+
+/* Flag passed into ioctl STATUS command to get table information
+   rather than current status */
+#define DM_STATUS_TABLE_FLAG	0x00000010
 
 #endif				/* _LINUX_DM_IOCTL_H */

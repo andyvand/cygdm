@@ -82,7 +82,7 @@ static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
 		return -EINVAL;
 	}
 
-	chunk_size =simple_strtoul(argv[1], &end, 10);
+	chunk_size = simple_strtoul(argv[1], &end, 10);
 	if (*end) {
 		*context = "dm-stripe: Invalid chunk_size";
 		return -EINVAL;
@@ -90,14 +90,14 @@ static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
 
 	if (l % stripes) {
 		*context = "dm-stripe: Target length not divisable by "
-			   "number of stripes";
+		    "number of stripes";
 		return -EINVAL;
 	}
 
 	sc = alloc_context(stripes);
 	if (!sc) {
 		*context = "dm-stripe: Memory allocation for striped context "
-			   "failed";
+		    "failed";
 		return -ENOMEM;
 	}
 
@@ -125,7 +125,7 @@ static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
 	for (i = 0; i < stripes; i++) {
 		if (argc < 2) {
 			*context = "dm-stripe: Not enough destinations "
-				   "specified";
+			    "specified";
 			kfree(sc);
 			return -EINVAL;
 		}
@@ -135,7 +135,7 @@ static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
 		r = get_stripe(t, sc, i, argv);
 		if (r < 0) {
 			*context = "dm-stripe: Couldn't parse stripe "
-				   "destination";
+			    "destination";
 			while (i--)
 				dm_table_put_device(t, sc->stripe[i].dev);
 			kfree(sc);
@@ -173,12 +173,41 @@ static int stripe_map(struct buffer_head *bh, int rw, void *context)
 	return 1;
 }
 
+static int stripe_sts(status_type_t sts_type, char *result, int maxlen,
+		      void *context)
+{
+	struct stripe_c *sc = (struct stripe_c *) context;
+	int offset;
+	int i;
+
+	switch (sts_type) {
+	case STATUSTYPE_INFO:
+		result[0] = '\0';
+		break;
+
+	case STATUSTYPE_TABLE:
+		offset = snprintf(result, maxlen, "%d %ld",
+				  sc->stripes, sc->chunk_mask + 1);
+		for (i = 0; i < sc->stripes; i++) {
+			offset +=
+			    snprintf(result + offset, maxlen - offset,
+				     " %s %ld",
+				     kdevname(sc->stripe[i].dev->dev),
+				     sc->stripe[i].physical_start);
+		}
+		break;
+	}
+	return 0;
+}
+
 static struct target_type stripe_target = {
 	name:	"striped",
 	module:	THIS_MODULE,
 	ctr:	stripe_ctr,
 	dtr:	stripe_dtr,
 	map:	stripe_map,
+	sts:	stripe_sts,
+	wait:	NULL,
 };
 
 int __init dm_stripe_init(void)
@@ -199,4 +228,3 @@ void dm_stripe_exit(void)
 
 	return;
 }
-

@@ -15,6 +15,7 @@
  */
 struct linear_c {
 	long delta;		/* FIXME: we need a signed offset type */
+	long start;		/* For display only */
 	struct dm_dev *dev;
 };
 
@@ -51,6 +52,7 @@ static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
 	}
 
 	lc->delta = (int) start - (int) b;
+	lc->start = start;
 	*context = lc;
 	return 0;
 
@@ -77,12 +79,32 @@ static int linear_map(struct buffer_head *bh, int rw, void *context)
 	return 1;
 }
 
+static int linear_sts(status_type_t sts_type, char *result, int maxlen,
+		      void *context)
+{
+	struct linear_c *lc = (struct linear_c *) context;
+
+	switch (sts_type) {
+	case STATUSTYPE_INFO:
+		result[0] = '\0';
+		break;
+
+	case STATUSTYPE_TABLE:
+		snprintf(result, maxlen, "%s %ld", kdevname(lc->dev->dev),
+			 lc->start);
+		break;
+	}
+	return 0;
+}
+
 static struct target_type linear_target = {
 	name:	"linear",
 	module:	THIS_MODULE,
 	ctr:	linear_ctr,
 	dtr:	linear_dtr,
 	map:	linear_map,
+	sts:	linear_sts,
+	wait:	NULL,		/* No wait function */
 };
 
 int __init dm_linear_init(void)
@@ -102,4 +124,3 @@ void dm_linear_exit(void)
 	if (r < 0)
 		DMERR("linear: unregister failed %d", r);
 }
-

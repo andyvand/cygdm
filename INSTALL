@@ -20,8 +20,8 @@ Device Mapper installation
    appropriate parameters in step 1, you can just run 'make apply-patches' 
    from the top directory.
    
-   If you are using User Mode Linux, you may also need to apply the patch 
-   patches/misc/uml_config.patch
+   If you are using an old version of User Mode Linux, you may also 
+   need to apply the patch patches/misc/uml_config.patch.
 
    Configure, build and install your kernel in the normal way, selecting
    'Device mapper support' from the 'Multiple devices driver support' menu.

@@ -157,11 +157,10 @@ static void exit_buffers(void)
 
 static struct buffer_head *alloc_buffer(void)
 {
-	int state = current->state;
 	struct buffer_head *r;
+	int flags;
 
-	set_current_state(TASK_UNINTERRUPTIBLE);
-	spin_lock(&_buffer_lock);
+	spin_lock_irqsave(&_buffer_lock, flags);
 
 	if (!_free_buffers)
 		r = NULL;
@@ -171,8 +170,7 @@ static struct buffer_head *alloc_buffer(void)
 		r->b_reqnext = NULL;
 	}
 
-	spin_unlock(&_buffer_lock);
-	set_current_state(state);
+	spin_unlock_irqrestore(&_buffer_lock, flags);
 
 	return r;
 }
@@ -182,10 +180,12 @@ static struct buffer_head *alloc_buffer(void)
  */
 static void free_buffer(struct buffer_head *bh)
 {
-	spin_lock(&_buffer_lock);
+	int flags;
+
+	spin_lock_irqsave(&_buffer_lock, flags);
 	bh->b_reqnext = _free_buffers;
 	_free_buffers = bh;
-	spin_unlock(&_buffer_lock);
+	spin_unlock_irqrestore(&_buffer_lock, flags);
 }
 
 /*-----------------------------------------------------------------
@@ -227,8 +227,7 @@ static __init int init_jobs(void)
 	if (!_job_cache)
 		return -ENOMEM;
 
-	_job_pool = mempool_create(MIN_JOBS,
-				   mempool_alloc_slab,
+	_job_pool = mempool_create(MIN_JOBS, mempool_alloc_slab,
 				   mempool_free_slab, _job_cache);
 	if (!_job_pool) {
 		kmem_cache_destroy(_job_cache);
@@ -248,7 +247,7 @@ struct kcopyd_job *kcopyd_alloc_job(void)
 {
 	struct kcopyd_job *job;
 
-	job = mempool_alloc(_job_pool, GFP_KERNEL);;
+	job = mempool_alloc(_job_pool, GFP_KERNEL);
 	if (!job)
 		return NULL;
 
@@ -265,45 +264,29 @@ void kcopyd_free_job(struct kcopyd_job *job)
  * Functions to push and pop a job onto the head of a given job
  * list.
  */
-static inline struct kcopyd_job *__pop(struct list_head *jobs)
+static inline struct kcopyd_job *pop(struct list_head *jobs)
 {
 	struct kcopyd_job *job = NULL;
+	int flags;
 
-	spin_lock(&_job_lock);
+	spin_lock_irqsave(&_job_lock, flags);
+
 	if (!list_empty(jobs)) {
 		job = list_entry(jobs->next, struct kcopyd_job, list);
 		list_del(&job->list);
 	}
-	spin_unlock(&_job_lock);
+	spin_unlock_irqrestore(&_job_lock, flags);
 
 	return job;
 }
 
-static struct kcopyd_job *pop(struct list_head *jobs)
+static inline void push(struct list_head *jobs, struct kcopyd_job *job)
 {
-	int state = current->state;
-	struct kcopyd_job *job;
+	int flags;
 
-	set_current_state(TASK_UNINTERRUPTIBLE);
-	job = __pop(jobs);
-	set_current_state(state);
-	return job;
-}
-
-static inline void __push(struct list_head *jobs, struct kcopyd_job *job)
-{
-	spin_lock(&_job_lock);
+	spin_lock_irqsave(&_job_lock, flags);
 	list_add(&job->list, jobs);
-	spin_unlock(&_job_lock);
-}
-
-static void push(struct list_head *jobs, struct kcopyd_job *job)
-{
-	int state = current->state;
-
-	set_current_state(TASK_UNINTERRUPTIBLE);
-	__push(jobs, job);
-	set_current_state(state);
+	spin_unlock_irqrestore(&_job_lock, flags);
 }
 
 /*
@@ -321,7 +304,7 @@ static void end_bh(struct buffer_head *bh, int uptodate)
 
 	/* are we the last ? */
 	if (atomic_dec_and_test(&job->nr_incomplete)) {
-		__push(&_complete_jobs, job);
+		push(&_complete_jobs, job);
 		wake_kcopyd();
 	}
 
@@ -480,25 +463,10 @@ static atomic_t _kcopyd_must_die;
 static DECLARE_MUTEX(_run_lock);
 static DECLARE_WAIT_QUEUE_HEAD(_job_queue);
 
-/*
- * A day in the life of a little daemon.
- */
-static void kcopyd_cycle(void)
+static int kcopyd(void *start_lock)
 {
 	DECLARE_WAITQUEUE(wq, current);
 
-	set_current_state(TASK_INTERRUPTIBLE);
-	add_wait_queue(&_job_queue, &wq);
-
-	do_work();
-	schedule();
-
-	set_current_state(TASK_RUNNING);
-	remove_wait_queue(&_job_queue, &wq);
-}
-
-static int kcopyd(void *start_lock)
-{
 	daemonize();
 	strcpy(current->comm, "kcopyd");
 	_kcopyd_task = current;
@@ -506,8 +474,20 @@ static int kcopyd(void *start_lock)
 	down(&_run_lock);
 	up((struct semaphore *) start_lock);
 
-	while (!atomic_read(&_kcopyd_must_die))
-		kcopyd_cycle();
+	add_wait_queue(&_job_queue, &wq);
+
+	while (1) {
+		set_current_state(TASK_INTERRUPTIBLE);
+
+		if (atomic_read(&_kcopyd_must_die))
+			break;
+
+		do_work();
+		schedule();
+	}
+
+	set_current_state(TASK_RUNNING);
+	remove_wait_queue(&_job_queue, &wq);
 
 	up(&_run_lock);
 	DMINFO("kcopyd shutting down");
@@ -613,8 +593,7 @@ static __init int init_copier(void)
 	if (!_copy_cache)
 		return -ENOMEM;
 
-	_copy_pool = mempool_create(MIN_INFOS,
-				    mempool_alloc_slab,
+	_copy_pool = mempool_create(MIN_INFOS, mempool_alloc_slab,
 				    mempool_free_slab, _copy_cache);
 	if (!_copy_pool) {
 		kmem_cache_destroy(_copy_cache);
@@ -681,8 +660,8 @@ void copy_write(struct kcopyd_job *job)
 	kcopyd_io(job);
 }
 
-int kcopyd_copy(struct kcopyd_region *from,
-		struct kcopyd_region *to, kcopyd_notify_fn fn, void *context)
+int kcopyd_copy(struct kcopyd_region *from, struct kcopyd_region *to,
+		kcopyd_notify_fn fn, void *context)
 {
 	struct copy_info *info;
 	struct kcopyd_job *job;

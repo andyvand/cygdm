@@ -44,30 +44,31 @@ struct exception_store {
 	/*
 	 * Destroys this object when you've finished with it.
 	 */
-	void (*destroy)(struct exception_store *store);
-
-	/*
-	 * Read the metadata and populate the snapshot.
-	 */
-	int (*init)(struct exception_store *store,
-		     int blocksize, unsigned long extent_size, void **context);
+	void (*destroy) (struct exception_store *store);
 
 	/*
 	 * Find somewhere to store the next exception.
 	 */
-	int (*prepare_exception)(struct exception_store *store,
+	int (*prepare_exception) (struct exception_store *store,
 				  struct exception *e);
 
 	/*
 	 * Update the metadata with this exception.
 	 */
-	int (*commit_exception)(struct exception_store *store,
-				 struct exception *e);
+	void (*commit_exception) (struct exception_store *store,
+				  struct exception *e,
+				  void (*callback) (void *, int success),
+				  void *callback_context);
 
 	/*
 	 * The snapshot is invalid, note this in the metadata.
 	 */
-	void (*drop_snapshot)(struct exception_store *store);
+	void (*drop_snapshot) (struct exception_store *store);
+
+	/*
+	 * Return the %age full of the snapshot
+	 */
+	int (*percent_full) (struct exception_store *store);
 
 	struct dm_snapshot *snap;
 	void *context;
@@ -82,6 +83,9 @@ struct dm_snapshot {
 	/* List of snapshots per Origin */
 	struct list_head list;
 
+	/* Processes wait on this when they want to block on status changes */
+	wait_queue_head_t waitq;
+
 	/* Size of data blocks saved - must be a power of 2 */
 	chunk_t chunk_size;
 	chunk_t chunk_mask;
@@ -89,6 +93,9 @@ struct dm_snapshot {
 
 	/* You can't use a snapshot if this is 0 (e.g. if full) */
 	int valid;
+
+	/* The last percentage we notified */
+	int last_percent;
 
 	struct exception_table pending;
 	struct exception_table complete;
@@ -108,14 +115,11 @@ int dm_add_exception(struct dm_snapshot *s, chunk_t old, chunk_t new);
  * store.
  */
 int dm_create_persistent(struct exception_store *store,
-				struct dm_snapshot *s,
-				int blocksize,
-				offset_t extent_size,
-				void **error);
+			 struct dm_snapshot *s,
+			 int blocksize, offset_t extent_size, void **error);
 
 int dm_create_transient(struct exception_store *store,
-			struct dm_snapshot *s,
-			int blocksize, void **error);
+			struct dm_snapshot *s, int blocksize, void **error);
 
 /*
  * Return the number of sectors in the device.

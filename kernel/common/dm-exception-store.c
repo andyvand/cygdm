@@ -7,8 +7,37 @@
  */
 
 #include "dm-snapshot.h"
+#include "kcopyd.h"
+#include <linux/mm.h>
 
 #define SECTOR_SIZE 512
+#define SECTOR_SHIFT 9
+
+/*-----------------------------------------------------------------
+ * Persistent snapshots, by persistent we mean that the snapshot
+ * will survive a reboot.
+ *---------------------------------------------------------------*/
+
+/*
+ * We need to store a record of which parts of the origin have
+ * been copied to the snapshot device.  The snapshot code
+ * requires that we copy exception chunks to chunk aligned areas
+ * of the COW store.  It makes sense therefore, to store the
+ * metadata in chunk size blocks.
+ *
+ * There is no backward or forward compatibility implemented,
+ * snapshots with different disk versions than the kernel will
+ * not be usable.  It is expected that "lvcreate" will blank out
+ * the start of a fresh COW device before calling the snapshot
+ * constructor.
+ *
+ * The very first metadata block, which is also the first chunk
+ * on the COW device, will include a header struct followed by
+ * exception info.  All other metadata chunks will solely consist
+ * of exception info.  All on disk structures are in
+ * little-endian format.  The end of the exceptions info is
+ * indicated by an exception with a new_chunk of 0.
+ */
 
 /*
  * Magic for persistent snapshots: "SnAp" - Feeble isn't it.
@@ -16,661 +45,459 @@
 #define SNAP_MAGIC 0x70416e53
 
 /*
- * The on-disk version of the metadata. Only applicable to
- * persistent snapshots.
- * There is no backward or forward compatibility implemented, snapshots
- * with different disk versions than the kernel will not be usable. It is
- * expected that "lvcreate" will blank out the start of the COW device
- * before calling the snapshot constructor.
+ * The on-disk version of the metadata.
  */
 #define SNAPSHOT_DISK_VERSION 1
 
-/*
- * Metadata format: (please keep this up-to-date!)
- * Persistent snapshots have a 1 block header (see below for structure) at
- * the very start of the device. The COW metadata starts at
- * .start_of_exceptions.
- *
- * COW metadata is stored in blocks that are "extent-size" sectors long as
- * an array of disk_exception structures in Little-Endian format.
- * The last entry in this array has rsector_new set to 0 (this cannot be a
- * legal redirection as the header is here) and if rsector_org has a value
- * it is the sector number of the next COW metadata sector on the disk. if
- * rsector_org is also zero then this is the end of the COW metadata.
- *
- * The metadata is written in hardblocksize lumps rather than in units of
- * extents for efficiency so don't expect a whole extent to be zeroed out
- * at any time.
- *
- * Non-persistent snapshots simple have redirected blocks stored
- * (in chunk_size sectors) from hard block 1 to avoid inadvertantly
- * creating a bad header.
- */
-
-/*
- * Internal snapshot structure
- */
-struct persistent_info {
-	/* Size of extents used for COW blocks */
-	long extent_size;
-
-	/* Number of the next free sector for COW/data */
-	unsigned long next_free_sector;
-
-	/* Where the metadata starts */
-	unsigned long start_of_exceptions;
-
-	/* Where we are currently writing the metadata */
-	unsigned long current_metadata_sector;
-
-	/* Index into disk_cow array */
-	int current_metadata_entry;
-
-	/* Index into mythical extent array */
-	int current_metadata_number;
-
-	/* Number of metadata entries in the disk_cow array */
-	int highest_metadata_entry;
-
-	/* Number of metadata entries per hard disk block */
-	int md_entries_per_block;
-
-	int full;
-
-	/* kiobuf for doing I/O to header & metadata */
-	struct kiobuf *cow_iobuf;
-
-	/*
-	 * Disk extent with COW data in it. as an array of
-	 * exception tables. The first one points to the next
-	 * block of metadata or 0 if this is the last
-	 */
-	struct disk_exception *disk_cow;
-};
-
-/*
- * An array of these is held in each disk block. LE format
- */
-struct disk_exception {
-	uint64_t rsector_org;
-	uint64_t rsector_new;
-};
-
-/*
- * Structure of a (persistent) snapshot header on disk. in LE format
- */
-struct snap_disk_header {
+#if 0
+struct disk_header {
 	uint32_t magic;
 
-	/* Simple, incrementing version. no backward compatibility */
+	/*
+	 * Is this snapshot valid.  There is no way of recovering
+	 * an invalid snapshot.
+	 */
+	int valid;
+
+	/*
+	 * Simple, incrementing version. no backward
+	 * compatibility.
+	 */
 	uint32_t version;
 
-	/* In 512 byte sectors */
+	/* In sectors */
 	uint32_t chunk_size;
+};
+#endif
 
-	/* In 512 byte sectors */
-	uint32_t extent_size;
-	uint64_t start_of_exceptions;
-	uint32_t full;
+struct disk_exception {
+	uint64_t old_chunk;
+	uint64_t new_chunk;
 };
 
-static inline struct persistent_info *get_info(struct exception_store *store)
-{
-	return (struct persistent_info *) store->context;
-}
+/*
+ * The top level structure for a persistent exception store.
+ */
+struct pstore {
+	struct dm_snapshot *snap;	/* up pointer to my snapshot */
+	int valid;
+	uint32_t chunk_size;
+	uint32_t exceptions_per_area;
+
+	/*
+	 * Now that we have an asynchronous kcopyd there is no
+	 * need for large chunk sizes, so it wont hurt to have a
+	 * whole chunks worth of metadata in memory at once.
+	 */
+	void *area;
+	struct kiobuf *iobuf;
+
+	/*
+	 * Used to keep track of which metadata area the data in
+	 * 'chunk' refers to.
+	 */
+	uint32_t current_area;
+
+	/*
+	 * The next free chunk for an exception.
+	 */
+	uint32_t next_free;
+
+	/*
+	 * The index of next free exception in the current
+	 * metadata area.
+	 */
+	uint32_t current_committed;
+};
 
 /*
- * READ or WRITE some blocks to/from a device
+ * For performance reasons we want to defer writing a committed
+ * exceptions metadata to disk so that we can amortise away this
+ * exensive operation.
+ *
+ * For the initial version of this code we will remain with
+ * synchronous io.  There are some deadlock issues with async
+ * that I haven't yet worked out.
  */
-static int do_io(int rw, struct kiobuf *iobuf, kdev_t dev,
-		 unsigned long start, int nr_sectors)
+static int do_io(int rw, struct kcopyd_region *where, struct kiobuf *iobuf)
 {
-	int i, sectors_per_block, nr_blocks;
-	int blocksize = get_hardsect_size(dev);
+	int i, sectors_per_block, nr_blocks, start;
+	int blocksize = get_hardsect_size(where->dev);
 	int status;
 
 	sectors_per_block = blocksize / SECTOR_SIZE;
 
-	nr_blocks = nr_sectors / sectors_per_block;
-	start /= sectors_per_block;
+	nr_blocks = where->count / sectors_per_block;
+	start = where->sector / sectors_per_block;
 
 	for (i = 0; i < nr_blocks; i++)
 		iobuf->blocks[i] = start++;
 
-	iobuf->length = nr_sectors << 9;
+	iobuf->length = where->count << 9;
 
-	status = brw_kiovec(rw, 1, &iobuf, dev, iobuf->blocks, blocksize);
-	return (status != (nr_sectors << 9));
-}
-
-/*
- * Write the latest COW metadata block.
- */
-static int write_metadata(struct dm_snapshot *s, struct persistent_info *pi)
-{
-	kdev_t dev = s->cow->dev;
-	int blocksize = get_hardsect_size(dev);
-	int writesize = blocksize / SECTOR_SIZE;
-
-	if (do_io(WRITE, pi->cow_iobuf, dev,
-		  pi->current_metadata_sector, writesize) != 0) {
-		DMERR("Error writing COW block");
-		return -1;
-	}
+	status = brw_kiovec(rw, 1, &iobuf, where->dev, iobuf->blocks,
+			    blocksize);
+	if (status != (where->count << 9))
+		return -EIO;
 
 	return 0;
 }
 
 /*
- * Allocate a kiobuf. This is the only code nicked from the old
- * snapshot driver and I've changed it anyway.
+ * FIXME: Remove once 2.4.19 has been released.
  */
-static int alloc_iobuf_pages(struct kiobuf *iobuf, int nr_sectors)
+struct page *vmalloc_to_page(void *vmalloc_addr)
 {
-	int nr_pages, r, i;
+	unsigned long addr = (unsigned long) vmalloc_addr;
+	struct page *page = NULL;
+	pmd_t *pmd;
+	pte_t *pte;
+	pgd_t *pgd;
 
-	if (nr_sectors > KIO_MAX_SECTORS)
-		return -1;
-
-	nr_pages = nr_sectors / (PAGE_SIZE / SECTOR_SIZE);
-	r = expand_kiobuf(iobuf, nr_pages);
-	if (r)
-		goto out;
-
-	r = -ENOMEM;
-	iobuf->locked = 1;
-	iobuf->nr_pages = 0;
-	for (i = 0; i < nr_pages; i++) {
-		struct page *page;
-
-		page = alloc_page(GFP_KERNEL);
-		if (!page)
-			goto out;
-
-		iobuf->maplist[i] = page;
-		LockPage(page);
-		iobuf->nr_pages++;
-	}
-
-	iobuf->offset = 0;
-	r = 0;
-
-      out:
-	return r;
-}
-
-/*
- * Read on-disk COW metadata and populate the hash table.
- */
-static int read_metadata(struct dm_snapshot *s, struct persistent_info *pi)
-{
-	int status;
-	int i;
-	int entry = 0;
-	int map_page = 0;
-	int nr_sectors = pi->extent_size;
-	kdev_t dev = s->cow->dev;
-	int blocksize = get_hardsect_size(dev);
-	unsigned long cur_sector = pi->start_of_exceptions;
-	unsigned long last_sector;
-	unsigned long first_free_sector = 0;
-	int entries_per_page = PAGE_SIZE / sizeof(struct disk_exception);
-	struct disk_exception *cow_block;
-	struct kiobuf *read_iobuf;
-	int r = 0;
-	int devsize = get_dev_size(dev);
-
-	/*
-	 * Allocate our own iovec for this operation 'cos the
-	 * others are way too small.
-	 */
-	if (alloc_kiovec(1, &read_iobuf)) {
-		DMERR("Error allocating iobuf for %s", kdevname(dev));
-		return -1;
-	}
-
-	if (alloc_iobuf_pages(read_iobuf, pi->extent_size)) {
-		DMERR("Error allocating iobuf space for %s", kdevname(dev));
-		free_kiovec(1, &read_iobuf);
-		return -1;
-	}
-	cow_block = page_address(read_iobuf->maplist[0]);
-
-	do {
-		/* Make sure the chain does not go off the end of
-		 * the device, or backwards */
-		if (cur_sector > devsize || cur_sector < first_free_sector) {
-			DMERR("COW table chain pointers are inconsistent, "
-			      "can't activate snapshot");
-			r = -1;
-			goto out;
-		}
-
-		first_free_sector = max(first_free_sector,
-					cur_sector + pi->extent_size);
-		status = do_io(READ, read_iobuf, dev, cur_sector, nr_sectors);
-		if (status == 0) {
-			map_page = 0;
-			entry = 0;
-
-			cow_block = page_address(read_iobuf->maplist[0]);
-
-			/* Now populate the hash table from this data */
-			for (i = 0; i <= pi->highest_metadata_entry &&
-			     cow_block[entry].rsector_new != 0; i++) {
-
-				chunk_t old =
-				    sector_to_chunk(s,
-						    le64_to_cpu(cow_block
-								[entry].
-								rsector_org));
-				chunk_t new =
-				    sector_to_chunk(s,
-						    le64_to_cpu(cow_block
-								[entry].
-								rsector_new));
-
-				if ((r = dm_add_exception(s, old, new)))
-					goto out;
-
-				first_free_sector = max(first_free_sector,
-							(unsigned
-							 long) (le64_to_cpu
-								(cow_block
-								 [entry].
-								 rsector_new) +
-								s->chunk_size));
-
-				/* Do we need to move onto the next page? */
-				if (++entry >= entries_per_page) {
-					entry = 0;
-					cow_block =
-					    page_address(read_iobuf->
-							 maplist[++map_page]);
-				}
+	pgd = pgd_offset_k(addr);
+	if (!pgd_none(*pgd)) {
+		pmd = pmd_offset(pgd, addr);
+		if (!pmd_none(*pmd)) {
+			pte = pte_offset(pmd, addr);
+			if (pte_present(*pte)) {
+				page = pte_page(*pte);
 			}
-		} else {
-			DMERR("Error reading COW metadata for %s",
-			      kdevname(dev));
-			r = -1;
-			goto out;
-		}
-		last_sector = cur_sector;
-		cur_sector = le64_to_cpu(cow_block[entry].rsector_org);
-
-	} while (cur_sector != 0);
-
-	pi->current_metadata_sector = last_sector +
-	    map_page * PAGE_SIZE / SECTOR_SIZE +
-	    entry / (SECTOR_SIZE / sizeof(struct disk_exception));
-	pi->current_metadata_entry = entry;
-	pi->current_metadata_number = i;
-	pi->next_free_sector = first_free_sector;
-
-	/* Copy last block into cow_iobuf */
-	memcpy(pi->disk_cow, (char *) ((long) &cow_block[entry] -
-				       ((long) &cow_block[entry] &
-					(blocksize - 1))), blocksize);
-
-      out:
-	unmap_kiobuf(read_iobuf);
-	free_kiovec(1, &read_iobuf);
-
-	return r;
-}
-
-/*
- * Read the snapshot volume header, returns 0 only if it read OK
- * and it was valid. returns 1 if no header was found, -1 on
- * error.  All fields are checked against the snapshot structure
- * itself to make sure we don't corrupt the data.
- */
-static int read_header(struct dm_snapshot *s, struct persistent_info *pi)
-{
-	int status;
-	struct snap_disk_header *header;
-	kdev_t dev = s->cow->dev;
-	int blocksize = get_hardsect_size(dev);
-	unsigned long devsize;
-
-	/* Get it */
-	status = do_io(READ, pi->cow_iobuf, dev, 0L, blocksize / SECTOR_SIZE);
-	if (status != 0) {
-		DMERR("Snapshot dev %s error reading header", kdevname(dev));
-		return -1;
-	}
-
-	header = (struct snap_disk_header *)
-	    page_address(pi->cow_iobuf->maplist[0]);
-
-	/*
-	 * Check the magic. It's OK if this fails, we just create
-	 * a new snapshot header and start from scratch.
-	 */
-	if (le32_to_cpu(header->magic) != SNAP_MAGIC) {
-		return 1;
-	}
-
-	/* Check the version matches */
-	if (le32_to_cpu(header->version) != SNAPSHOT_DISK_VERSION) {
-		DMWARN("Snapshot dev %s version mismatch. Stored: %d, "
-		       "driver: %d", kdevname(dev),
-		       le32_to_cpu(header->version), SNAPSHOT_DISK_VERSION);
-		return -1;
-	}
-
-	/* Check the chunk sizes match */
-	if (le32_to_cpu(header->chunk_size) != s->chunk_size) {
-		DMWARN("Snapshot dev %s chunk size mismatch. Stored: %d, "
-		       "requested: %ld", kdevname(dev),
-		       le32_to_cpu(header->chunk_size), s->chunk_size);
-		return -1;
-	}
-
-	/* Check the extent sizes match */
-	if (le32_to_cpu(header->extent_size) != pi->extent_size) {
-		DMWARN("Snapshot dev %s extent size mismatch. Stored: %d, "
-		       "requested: %ld", kdevname(dev),
-		       le32_to_cpu(header->extent_size), pi->extent_size);
-		return -1;
-	}
-
-	/* Get the rest of the data */
-	pi->start_of_exceptions = le64_to_cpu(header->start_of_exceptions);
-	if (header->full) {
-		DMWARN("Snapshot dev %s is full. It cannot be used",
-		       kdevname(dev));
-		return -1;
-	}
-
-	/* Validate against the size of the volume */
-	devsize = get_dev_size(dev);
-	if (pi->start_of_exceptions > devsize) {
-		DMWARN("Snapshot metadata error on %s. start exceptions > "
-		       "device size (%ld > %ld)",
-		       kdevname(dev), pi->start_of_exceptions, devsize);
-		return -1;
-	}
-
-	/* Read metadata into the hash table and update pointers */
-	return read_metadata(s, pi);
-}
-
-/*
- * Write (or update) the header. The only time we should need to
- * do an update is when the snapshot becomes full.
- */
-static int write_header(struct dm_snapshot *s, struct persistent_info *pi)
-{
-	struct snap_disk_header *header;
-	struct kiobuf *head_iobuf;
-	kdev_t dev = s->cow->dev;
-	int blocksize = get_hardsect_size(dev);
-	int status;
-
-	/*
-	 * Allocate our own iobuf for this so we don't corrupt
-	 * any of the other writes that may be going on.
-	 */
-	if (alloc_kiovec(1, &head_iobuf)) {
-		DMERR("Error allocating iobuf for header on %s", kdevname(dev));
-		return -1;
-	}
-
-	if (alloc_iobuf_pages(head_iobuf, PAGE_SIZE / SECTOR_SIZE)) {
-		DMERR("Error allocating iobuf space for header on %s",
-		      kdevname(dev));
-		free_kiovec(1, &head_iobuf);
-		return -1;
-	}
-
-	header = (struct snap_disk_header *)
-	    page_address(head_iobuf->maplist[0]);
-
-	header->magic = cpu_to_le32(SNAP_MAGIC);
-	header->version = cpu_to_le32(SNAPSHOT_DISK_VERSION);
-	header->chunk_size = cpu_to_le32(s->chunk_size);
-	header->extent_size = cpu_to_le32(pi->extent_size);
-	header->full = cpu_to_le32(pi->full);
-
-	header->start_of_exceptions = cpu_to_le64(pi->start_of_exceptions);
-
-	/* Must write at least a full block */
-	status = do_io(WRITE, head_iobuf, dev, 0, blocksize / SECTOR_SIZE);
-
-	unmap_kiobuf(head_iobuf);
-	free_kiovec(1, &head_iobuf);
-	return status;
-}
-
-static void destroy_persistent(struct exception_store *store)
-{
-	struct persistent_info *pi = get_info(store);
-	unmap_kiobuf(pi->cow_iobuf);
-	free_kiovec(1, &pi->cow_iobuf);
-	kfree(pi);
-}
-
-static int init_persistent(struct exception_store *store, int blocksize,
-			   unsigned long extent_size, void **context)
-{
-	struct persistent_info *pi = get_info(store);
-	struct dm_snapshot *s = store->snap;
-	int status;
-
-	*context = "Error in disk header";
-	/* Check for a header on disk and create a new one if not */
-	if ((status = read_header(s, pi)) == 1) {
-
-		/* Write a new header */
-		pi->start_of_exceptions = pi->next_free_sector;
-		pi->next_free_sector += pi->extent_size;
-		pi->current_metadata_sector = pi->start_of_exceptions;
-		pi->current_metadata_entry = 0;
-		pi->current_metadata_number = 0;
-
-		*context = "Unable to write snapshot header";
-		if (write_header(s, pi) != 0) {
-			DMERR("Error writing header to snapshot volume %s",
-			      kdevname(s->cow->dev));
-			goto free_ret;
-		}
-
-		/* Write a blank metadata block to the device */
-		if (write_metadata(s, pi) != 0) {
-			DMERR("Error writing initial COW table to "
-			      "snapshot volume %s", kdevname(s->cow->dev));
-			goto free_ret;
 		}
 	}
+	return page;
+}
+
+static int allocate_iobuf(struct pstore *ps)
+{
+	size_t i, r, len, nr_pages;
+	struct page *page;
+
+	len = ps->chunk_size * SECTOR_SIZE;
 
 	/*
-	 * There is a header but it doesn't match - fail so we
-	 * don't destroy what might be useful data on disk.  If
-	 * the user really wants to use this COW device for a
-	 * snapshot then the first sector should be zeroed out
-	 * first.
+	 * Allocate the chunk_size block of memory that will hold
+	 * a single metadata area.
 	 */
-	if (status == -1)
-		goto free_ret;
-
-	return 0;
-
-      free_ret:
-	unmap_kiobuf(pi->cow_iobuf);
-	free_kiovec(1, &pi->cow_iobuf);
-	return -1;
-}
-
-/*
- * Finds a suitable destination for the exception.
- */
-static int prepare_persistent(struct exception_store *store,
-			      struct exception *e)
-{
-	struct persistent_info *pi = get_info(store);
-	struct dm_snapshot *s = store->snap;
-	offset_t dev_size;
-
-	/*
-	 * Check for full snapshot. Doing the size calculation here means that
-	 * the COW device can be resized without us being told
-	 */
-	dev_size = get_dev_size(s->cow->dev);
-	if (pi->next_free_sector + s->chunk_size >= dev_size) {
-		/* Snapshot is full, we can't use it */
-		DMWARN("Snapshot %s is full (sec=%ld, size=%ld)",
-		       kdevname(s->cow->dev),
-		       pi->next_free_sector + s->chunk_size, dev_size);
-		pi->full = 1;
-
-		/* Mark it full on the device */
-		write_header(s, pi);
-
-		return -1;
-
-	} else {
-		e->new_chunk = sector_to_chunk(s, pi->next_free_sector);
-		pi->next_free_sector += s->chunk_size;
-	}
-
-	return 0;
-}
-
-/*
- * Add a new exception entry to the on-disk metadata.
- */
-static int commit_persistent(struct exception_store *store, struct exception *e)
-{
-	struct persistent_info *pi = get_info(store);
-	struct dm_snapshot *s = store->snap;
-
-	int i = pi->current_metadata_entry++;
-	unsigned long next_md_block = pi->current_metadata_sector;
-
-	pi->current_metadata_number++;
-
-	/* Update copy of disk COW */
-	pi->disk_cow[i].rsector_org =
-	    cpu_to_le64(chunk_to_sector(s, e->old_chunk));
-	pi->disk_cow[i].rsector_new =
-	    cpu_to_le64(chunk_to_sector(s, e->new_chunk));
-
-	/* Have we filled this extent ? */
-	if (pi->current_metadata_number >= pi->highest_metadata_entry) {
-		/* Fill in pointer to next metadata extent */
-		i++;
-		pi->current_metadata_entry++;
-
-		next_md_block = pi->next_free_sector;
-		pi->next_free_sector += pi->extent_size;
-
-		pi->disk_cow[i].rsector_org = cpu_to_le64(next_md_block);
-		pi->disk_cow[i].rsector_new = 0;
-	}
-
-	/* Commit to disk */
-	if (write_metadata(s, pi)) {
-		pi->full = 1;	/* Failed. don't try again */
-		return -1;
-	}
-
-	/*
-	 * Write a new (empty) metadata block if we are at the
-	 * end of an existing block so that read_metadata finds a
-	 * terminating zero entry.
-	 */
-	if (pi->current_metadata_entry == pi->md_entries_per_block) {
-		memset(pi->disk_cow, 0, PAGE_SIZE);
-		pi->current_metadata_sector = next_md_block;
-
-		/*
-		 * If this is also the end of an extent then go
-		 * back to the start.
-		 */
-		if (pi->current_metadata_number >= pi->highest_metadata_entry) {
-			pi->current_metadata_number = 0;
-
-		} else {
-			int blocksize = get_hardsect_size(s->cow->dev);
-			pi->current_metadata_sector += blocksize / SECTOR_SIZE;
-		}
-
-		pi->current_metadata_entry = 0;
-		if (write_metadata(s, pi) != 0) {
-			pi->full = 1;
-			return -1;
-		}
-	}
-
-	return 0;
-}
-
-/*
- * Sets the full flag in the metadata.  A quick hack for now.
- */
-static void drop_persistent(struct exception_store *store)
-{
-	get_info(store)->full = 1;
-	write_header(store->snap, get_info(store));
-}
-
-int dm_create_persistent(struct exception_store *store, struct dm_snapshot *s,
-			 int blocksize, offset_t extent_size, void **error)
-{
-	struct persistent_info *pi;
-	int i, r;
-	int cow_sectors;
-
-	pi = kmalloc(sizeof(*pi), GFP_KERNEL);
-	if (!pi)
+	ps->area = vmalloc(len);
+	if (!ps->area)
 		return -ENOMEM;
 
-	memset(store, 0, sizeof(*store));
-	store->destroy = destroy_persistent;
-	store->init = init_persistent;
-	store->prepare_exception = prepare_persistent;
-	store->commit_exception = commit_persistent;
-	store->drop_snapshot = drop_persistent;
-	store->snap = s;
-	store->context = pi;
-
-	pi->extent_size = extent_size;
-
-	/* Leave the first block alone */
-	pi->next_free_sector = blocksize / SECTOR_SIZE;
-	pi->disk_cow = NULL;
-
-	pi->highest_metadata_entry = (pi->extent_size * SECTOR_SIZE) /
-	    sizeof(struct disk_exception) - 1;
-	pi->md_entries_per_block = blocksize / sizeof(struct disk_exception);
-
-	/* Allocate and set up iobuf for metadata I/O */
-	*error = "Unable to allocate COW iovec";
-	if ((r = alloc_kiovec(1, &pi->cow_iobuf)))
-		return r;
-
-	/*
-	 * Allocate space for the COW buffer. It should be at
-	 * least PAGE_SIZE.
-	 */
-	cow_sectors = blocksize / SECTOR_SIZE + PAGE_SIZE / SECTOR_SIZE;
-	*error = "Unable to allocate COW I/O buffer space";
-	if ((r = alloc_iobuf_pages(pi->cow_iobuf, cow_sectors))) {
-		free_kiovec(1, &pi->cow_iobuf);
-		return r;
+	if (alloc_kiovec(1, &ps->iobuf)) {
+		vfree(ps->area);
+		return -ENOMEM;
 	}
 
-	for (i = 0; i < pi->cow_iobuf->nr_pages; i++)
-		memset(page_address(pi->cow_iobuf->maplist[i]), 0, PAGE_SIZE);
+	nr_pages = ps->chunk_size / (PAGE_SIZE / SECTOR_SIZE);
+	r = expand_kiobuf(ps->iobuf, nr_pages);
+	if (r) {
+		vfree(ps->area);
+		return -ENOMEM;
+	}
 
-	pi->disk_cow = page_address(pi->cow_iobuf->maplist[0]);
+	/*
+	 * We lock the pages for ps->area into memory since they'll be
+	 * doing a lot of io.
+	 *
+	 * FIXME: Check that there's no race, ie. the pages can't
+	 * be swapped out before we lock them, we may have to
+	 * allocate them as seperate pages after all :(
+	 */
+	for (i = 0; i < len; i += PAGE_SIZE) {
+		page = vmalloc_to_page(ps->area + i);
+		LockPage(page);
+		ps->iobuf->maplist[i] = page;
+		ps->iobuf->nr_pages++;
+	}
+
+	ps->iobuf->offset = 0;
+	return 0;
+}
+
+static void free_iobuf(struct pstore *ps)
+{
+	int i;
+
+	for (i = 0; i < ps->iobuf->nr_pages; i++)
+		UnlockPage(ps->iobuf->maplist[i]);
+
+	free_kiovec(1, &ps->iobuf);
+	vfree(ps->area);
+}
+
+/*
+ * Read or write a metadata area.
+ */
+static int area_io(struct pstore *ps, uint32_t area, int rw)
+{
+	int r;
+	struct kcopyd_region where;
+
+	where.dev = ps->snap->cow->dev;
+	where.sector = ((ps->exceptions_per_area + 1) * ps->chunk_size) * area;
+	where.count = ps->chunk_size;
+
+	r = do_io(rw, &where, ps->area);
+	if (r)
+		return r;
+
+	ps->current_area = area;
+	return 0;
+}
+
+static int zero_area(struct pstore *ps, uint32_t area)
+{
+	memset(ps, 0, ps->chunk_size);
+	return area_io(ps, area, WRITE);
+}
+
+/*
+ * Access functions for the disk exceptions, these do the endian conversions.
+ */
+static struct disk_exception *get_exception(struct pstore *ps, uint32_t index)
+{
+	if (index > ps->exceptions_per_area)
+		return NULL;
+
+	return ((struct disk_exception *) ps->area) + index;
+}
+
+static int read_exception(struct pstore *ps,
+			  uint32_t index, struct disk_exception *result)
+{
+	struct disk_exception *e;
+
+	e = get_exception(ps, index);
+	if (!e)
+		return -EINVAL;
+
+	/* copy it */
+	memcpy(result, e, sizeof(&result));
+
+	result->old_chunk = le64_to_cpu(result->old_chunk);
+	result->new_chunk = le64_to_cpu(result->new_chunk);
+
+	return 0;
+}
+
+static int write_exception(struct pstore *ps,
+			   uint32_t index, struct disk_exception *de)
+{
+	struct disk_exception *e;
+
+	e = get_exception(ps, index);
+	if (!e)
+		return -EINVAL;
+
+	/* copy it */
+	e->old_chunk = cpu_to_le64(e->old_chunk);
+	e->new_chunk = cpu_to_le64(e->new_chunk);
+
 	return 0;
 }
 
 /*
- * Implementation of the store for non-persistent snapshots.
+ * Registers the exceptions that are present in the current area.
+ * 'full' is filled in to indicate if the area has been
+ * filled.
  */
+static int insert_exceptions(struct pstore *ps, int *full)
+{
+	int i, r;
+	struct disk_exception de;
+
+	/* presume the area is full */
+	*full = 1;
+
+	for (i = 0; i < ps->exceptions_per_area; i++) {
+		r = read_exception(ps, i, &de);
+
+		if (r)
+			return r;
+
+		/*
+		 * If the new_chunk is pointing at the start of
+		 * the COW device, where the first metadata area
+		 * is we know that we've hit the end of the
+		 * exceptions.  Therefor the area is not full.
+		 */
+		if (de.new_chunk) {
+			ps->current_committed = i;
+			*full = 0;
+			break;
+		}
+
+		/*
+		 * Keep track of the start of the free chunks.
+		 */
+		if (ps->next_free <= de.new_chunk)
+			ps->next_free = de.new_chunk + 1;
+
+		/*
+		 * Otherwise we add the exception to the snapshot.
+		 */
+		r = dm_add_exception(ps->snap, de.old_chunk, de.new_chunk);
+		if (r)
+			return r;
+	}
+
+	return 0;
+}
+
+static int read_exceptions(struct pstore *ps)
+{
+	uint32_t area;
+	int r, full = 0;
+
+	/*
+	 * Keeping reading chunks and inserting exceptions until
+	 * we find a partially full area.
+	 */
+	for (area = 0; !full; area++) {
+		r = area_io(ps, area, READ);
+		if (r)
+			return r;
+
+		r = insert_exceptions(ps, &full);
+		if (r)
+			return r;
+
+		area++;
+	}
+
+	return 0;
+}
+
+static inline struct pstore *get_info(struct exception_store *store)
+{
+	return (struct pstore *) store->context;
+}
+
+static void persistent_destroy(struct exception_store *store)
+{
+	struct pstore *ps = get_info(store);
+
+	free_iobuf(ps);
+	vfree(ps->area);
+	kfree(ps);
+}
+
+static int persistent_prepare(struct exception_store *store,
+			      struct exception *e)
+{
+	struct pstore *ps = get_info(store);
+	uint32_t stride;
+
+	e->new_chunk = ps->next_free;
+
+	/*
+	 * Move onto the next free pending, making sure to take
+	 * into account the location of the metadata chunks.
+	 */
+	stride = (ps->exceptions_per_area + 1);
+	if (!(++ps->next_free % stride))
+		ps->next_free++;
+
+	return 0;
+}
+
+static void persistent_commit(struct exception_store *store,
+			      struct exception *e,
+			      void (*callback) (void *, int success),
+			      void *callback_context)
+{
+	int r;
+	struct pstore *ps = get_info(store);
+	struct disk_exception de;
+
+	de.old_chunk = e->old_chunk;
+	de.new_chunk = e->new_chunk;
+	write_exception(ps, ps->current_committed, &de);
+
+	/*
+	 * Write the whole area to the disk for now, later we'll
+	 * try and defer the write.
+	 */
+	r = area_io(ps, ps->current_area, WRITE);
+	if (r)
+		goto bad;
+
+	/*
+	 * Notify the snapshot that the commit has actually
+	 * happened.
+	 */
+	callback(callback_context, 1);
+
+	/*
+	 * Have we completely filled the current area ?
+	 */
+	if (++ps->current_committed > ps->exceptions_per_area) {
+		ps->current_committed = 0;
+		r = zero_area(ps, ps->current_area + 1);
+		if (r)
+			goto bad;
+	}
+
+	return;
+
+      bad:
+	ps->valid = 0;
+	callback(callback_context, 0);
+}
+
+static void persistent_drop(struct exception_store *store)
+{
+	struct pstore *ps = get_info(store);
+
+	/*
+	 * FIXME: This function is pointless until we have the
+	 * header.
+	 */
+	ps->valid = 0;
+}
+
+int persistent_init(struct exception_store *store, uint32_t chunk_size)
+{
+	int r;
+	struct pstore *ps;
+
+	/* allocate the pstore */
+	ps = kmalloc(sizeof(*ps), GFP_KERNEL);
+	if (!ps)
+		return -ENOMEM;
+
+	r = allocate_iobuf(ps);
+	if (r)
+		return r;
+
+	ps->snap = store->snap;
+	ps->valid = 1;
+	ps->chunk_size = chunk_size;
+	ps->exceptions_per_area = (chunk_size << SECTOR_SHIFT) /
+	    sizeof(struct disk_exception);
+	ps->next_free = 1;
+	ps->current_committed = 0;
+
+	/*
+	 * Read the metadata.
+	 */
+	r = read_exceptions(ps);
+	if (r) {
+		free_iobuf(ps);
+		kfree(ps);
+	}
+
+	store->destroy = persistent_destroy;
+	store->prepare_exception = persistent_prepare;
+	store->commit_exception = persistent_commit;
+	store->drop_snapshot = persistent_drop;
+	store->context = ps;
+
+	return r;
+}
+
+/*-----------------------------------------------------------------
+ * Implementation of the store for non-persistent snapshots.
+ *---------------------------------------------------------------*/
 struct transient_c {
 	offset_t next_free;
 };
@@ -691,12 +518,22 @@ int prepare_transient(struct exception_store *store, struct exception *e)
 	e->new_chunk = sector_to_chunk(store->snap, tc->next_free);
 	tc->next_free += store->snap->chunk_size;
 
-#if 0
-	DMWARN("Preparing exception, chunk %lu -> %lu.",
-	       (unsigned long) e->old_chunk, (unsigned long) e->new_chunk);
-#endif
-
 	return 0;
+}
+
+void commit_transient(struct exception_store *store,
+		      struct exception *e,
+		      void (*callback) (void *, int success),
+		      void *callback_context)
+{
+	/* Just succeed */
+	callback(callback_context, 1);
+}
+
+int percentfull_transient(struct exception_store *store)
+{
+	struct transient_c *tc = (struct transient_c *) store->context;
+	return (tc->next_free * 100) / get_dev_size(store->snap->cow->dev);
 }
 
 int dm_create_transient(struct exception_store *store,
@@ -707,6 +544,8 @@ int dm_create_transient(struct exception_store *store,
 	memset(store, 0, sizeof(*store));
 	store->destroy = destroy_transient;
 	store->prepare_exception = prepare_transient;
+	store->commit_exception = commit_transient;
+	store->percent_full = percentfull_transient;
 	store->snap = s;
 
 	tc = kmalloc(sizeof(struct transient_c), GFP_KERNEL);
