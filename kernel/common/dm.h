@@ -124,6 +124,7 @@ int dm_create(const char *name, int minor, struct dm_table *table,
 int dm_destroy(struct mapped_device *md);
 void dm_set_ro(struct mapped_device *md, int ro);
 int dm_set_name(struct mapped_device *md, const char *newname);
+void dm_notify(void *target);
 
 /*
  * The device must be suspended before calling this method.
@@ -143,6 +144,12 @@ void dm_table_destroy(struct dm_table *t);
 int dm_table_add_target(struct dm_table *t, offset_t highs,
 			struct target_type *type, void *private);
 int dm_table_complete(struct dm_table *t);
+
+/* kcopyd.c */
+int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_sectors,
+		 kdev_t fromdev, kdev_t todev,
+		 int throttle, void (*callback)(int, void *), void *context);
+
 
 #define DMWARN(f, x...) printk(KERN_WARNING DM_NAME ": " f "\n" , ## x)
 #define DMERR(f, x...) printk(KERN_ERR DM_NAME ": " f "\n" , ## x)

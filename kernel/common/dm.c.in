@@ -879,6 +879,11 @@ int dm_set_name(struct mapped_device *md, const char *newname)
 }
 
 
+/* A target is notifying us of some event */
+void dm_notify(void *target)
+{
+}
+
 /*
  * Requeue the deferred buffer_heads by calling generic_make_request.
  */
