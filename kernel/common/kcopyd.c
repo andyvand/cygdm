@@ -84,7 +84,7 @@ static struct copy_work *get_work_struct(void)
 		}
 
 		/* Failed...wait for IO to finish */
-		while (!entry) {
+		if (!entry) {
 			DECLARE_WAITQUEUE(wq, current);
 
 			set_task_state(current, TASK_INTERRUPTIBLE);
@@ -396,6 +396,7 @@ static int allocate_free_list(void)
 		newwork = kmalloc(sizeof(struct copy_work), GFP_KERNEL);
 		if (!newwork)
 			return i;
+		newwork->freelist = 1;
 		list_add(&newwork->list, &free_list);
 	}
 	return i;
