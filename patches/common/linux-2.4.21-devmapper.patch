@@ -1,5 +1,5 @@
 --- linux-2.4.21/drivers/md/dm-daemon.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.c	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-daemon.c	Wed Aug 13 14:59:40 2003
 @@ -0,0 +1,113 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -84,7 +84,7 @@
 +	down(&dd->start_lock);
 +	pid = kernel_thread(daemon, dd, 0);
 +	if (pid <= 0) {
-+		DMERR("Failed to start kcopyd thread");
++		DMERR("Failed to start %s thread", name);
 +		return -EAGAIN;
 +	}
 +
@@ -115,7 +115,7 @@
 +EXPORT_SYMBOL(dm_daemon_stop);
 +EXPORT_SYMBOL(dm_daemon_wake);
 --- linux-2.4.21/drivers/md/dm-daemon.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.h	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-daemon.h	Wed Aug 13 14:56:11 2003
 @@ -0,0 +1,29 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -147,8 +147,8 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-exception-store.c	Sat Jul 12 17:42:25 2003
-@@ -0,0 +1,675 @@
++++ linux/drivers/md/dm-exception-store.c	Wed Aug 13 14:57:15 2003
+@@ -0,0 +1,673 @@
 +/*
 + * dm-snapshot.c
 + *
@@ -520,8 +520,6 @@
 +		r = insert_exceptions(ps, &full);
 +		if (r)
 +			return r;
-+
-+		area++;
 +	}
 +
 +	return 0;
@@ -825,7 +823,7 @@
 +	return 0;
 +}
 --- linux-2.4.21/drivers/md/dm-io.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.c	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-io.c	Wed Aug 13 14:56:11 2003
 @@ -0,0 +1,344 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -1172,7 +1170,7 @@
 +EXPORT_SYMBOL(dm_io_sync);
 +EXPORT_SYMBOL(dm_io_async);
 --- linux-2.4.21/drivers/md/dm-io.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.h	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-io.h	Wed Aug 13 14:56:11 2003
 @@ -0,0 +1,86 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -1261,8 +1259,8 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Sat Jul 12 17:42:25 2003
-@@ -0,0 +1,1272 @@
++++ linux/drivers/md/dm-ioctl.c	Wed Aug 13 15:00:01 2003
+@@ -0,0 +1,1274 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
 + *
@@ -1858,7 +1856,7 @@
 +	return dm_hash_rename(param->name, new_name);
 +}
 +
-+static int suspend(struct dm_ioctl *param)
++static int do_suspend(struct dm_ioctl *param)
 +{
 +	int r = 0;
 +	struct mapped_device *md;
@@ -1877,7 +1875,7 @@
 +	return r;
 +}
 +
-+static int resume(struct dm_ioctl *param)
++static int do_resume(struct dm_ioctl *param)
 +{
 +	int r = 0;
 +	struct hash_cell *hc;
@@ -1940,9 +1938,9 @@
 +static int dev_suspend(struct dm_ioctl *param, size_t param_size)
 +{
 +	if (param->flags & DM_SUSPEND_FLAG)
-+		return suspend(param);
++		return do_suspend(param);
 +
-+	return resume(param);
++	return do_resume(param);
 +}
 +
 +/*
@@ -2081,6 +2079,8 @@
 +		return -ENXIO;
 +	}
 +
++	if (hc->new_map)
++		dm_table_put(hc->new_map);
 +	hc->new_map = t;
 +	param->flags |= DM_INACTIVE_PRESENT_FLAG;
 +
@@ -2536,7 +2536,7 @@
 +	dm_hash_exit();
 +}
 --- linux-2.4.21/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-linear.c	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,123 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -2662,7 +2662,7 @@
 +		DMERR("linear: unregister failed %d", r);
 +}
 --- linux-2.4.21/drivers/md/dm-log.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.c	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-log.c	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,302 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -2967,7 +2967,7 @@
 +EXPORT_SYMBOL(dm_create_dirty_log);
 +EXPORT_SYMBOL(dm_destroy_dirty_log);
 --- linux-2.4.21/drivers/md/dm-log.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.h	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-log.h	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,112 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -3082,7 +3082,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-raid1.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-raid1.c	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-raid1.c	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,1297 @@
 +/*
 + * Copyright (C) 2003 Sistina Software Limited.
@@ -4382,7 +4382,7 @@
 +MODULE_AUTHOR("Heinz Mauelshagen <mge@sistina.com>");
 +MODULE_LICENSE("GPL");
 --- linux-2.4.21/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.c	Sat Jul 12 17:45:13 2003
++++ linux/drivers/md/dm-snapshot.c	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,1235 @@
 +/*
 + * dm-snapshot.c
@@ -5620,7 +5620,7 @@
 +	kmem_cache_destroy(exception_cache);
 +}
 --- linux-2.4.21/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.h	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-snapshot.h	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,158 @@
 +/*
 + * dm-snapshot.c
@@ -5781,7 +5781,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-stripe.c	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,258 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6042,7 +6042,7 @@
 +	return;
 +}
 --- linux-2.4.21/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-table.c	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-table.c	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,687 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6732,7 +6732,7 @@
 +EXPORT_SYMBOL(dm_table_event);
 +EXPORT_SYMBOL(dm_table_get_mode);
 --- linux-2.4.21/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-target.c	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm-target.c	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,188 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
@@ -6923,7 +6923,7 @@
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
 --- linux-2.4.21/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm.c	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,1115 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -8041,7 +8041,7 @@
 +
 +EXPORT_SYMBOL(dm_kdevname);
 --- linux-2.4.21/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/dm.h	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,175 @@
 +/*
 + * Internal header file for device mapper
@@ -8219,7 +8219,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.c	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/kcopyd.c	Wed Aug 13 14:58:15 2003
 @@ -0,0 +1,650 @@
 +/*
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
@@ -8406,8 +8406,8 @@
 +/* FIXME: this should scale with the number of pages */
 +#define MIN_JOBS 512
 +
-+static kmem_cache_t *_job_cache = NULL;
-+static mempool_t *_job_pool = NULL;
++static kmem_cache_t *_job_cache;
++static mempool_t *_job_pool;
 +
 +/*
 + * We maintain three lists of jobs:
@@ -8872,7 +8872,7 @@
 +EXPORT_SYMBOL(kcopyd_copy);
 +EXPORT_SYMBOL(kcopyd_cancel);
 --- linux-2.4.21/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.h	Sat Jul 12 17:42:25 2003
++++ linux/drivers/md/kcopyd.h	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,47 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
@@ -8922,7 +8922,7 @@
 +
 +#endif
 --- linux-2.4.21/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Sat Jul 12 17:42:25 2003
++++ linux/include/linux/device-mapper.h	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,104 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -9029,7 +9029,7 @@
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 --- linux-2.4.21/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Sat Jul 12 17:42:25 2003
++++ linux/include/linux/dm-ioctl.h	Wed Aug 13 14:56:12 2003
 @@ -0,0 +1,237 @@
 +/*
 + * Copyright (C) 2001 - 2003 Sistina Software (UK) Limited.
