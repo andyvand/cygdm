@@ -1,30 +1,28 @@
-This directory contains the supporting userspace files (libdevmapper and
-dmsetup) for the device-mapper to work with all supported kernel versions.
+This directory tree contains the supporting userspace files
+(libdevmapper and dmsetup) you need when working with device-mapper.  
 
-Kernel patches for 2.4.20, 2.4.21 and 2.4.22 are also included here in the
-patches subdirectory.
+The patches subdirectory also includes device-mapper kernel patches
+for 2.4.20, 2.4.21 and 2.4.22 onwards.  2.6 kernels already contain
+the device-mapper core, but (as at Feb 2004) you need to apply
+development patches if you want snapshot and pvmove functionality.
 
-2.6 kernels already contain device-mapper.  For additional patches
-you may wish to apply look at the 2.6 subdirectories under:
-  http://people.sistina.com/~thornber/patches/
-and the dm-devel mailing list archives at:
-  https://www.redhat.com/archives/dm-devel/
-
-
-For more information about the device mapper please read the INTRO file.
+For more information about device-mapper please read the INTRO file.
 Installation instructions are in INSTALL.
 
-Tarballs are available from ftp://ftp.sistina.com/pub/LVM2/device-mapper/
+The Device-mapper Resource Page has links to all the primary resources
+for device-mapper, including additional patches undergoing development
+and testing:
+
+  http://sources.redhat.com/dm/
+
+Tarballs are available from ftp://sources.redhat.com/pub/dm/
 
 To access the CVS tree use:
   cvs -d :pserver:cvs@sources.redhat.com:/cvs/dm login
   CVS password: cvs
   cvs -d :pserver:cvs@sources.redhat..com:/cvs/dm checkout device-mapper
 
-Additional patches undergoing development/testing may be found at:
-  http://people.sistina.com/~thornber/patches/
-
-Mailing list for discussion/bug reports etc.
+The mailing list for discussions and bug reports is:
   dm-devel@redhat.com
   Subscribe from https://www.redhat.com/mailman/listinfo/dm-devel
 
