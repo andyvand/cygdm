@@ -21,75 +21,50 @@
 /*
  * Origin: maps a linear range of a device, with hooks for snapshotting.
  */
-struct origin_c {
-	struct dm_dev *target_dev;
-};
 
 /*
- * Construct an origin mapping: <dev_path> <offset>
+ * Construct an origin mapping: <dev_path>
+ * The context for an origin is merely a 'struct dm_dev *'
+ * pointing to the real device.
  */
 static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
 		      int argc, char **argv, void **context)
 {
-	struct origin_c *lc;
-	unsigned int start;
-	char *value;
-	int r = -EINVAL;
-	char *path;
+	int r;
+	struct dm_dev *dev;
 
-	if (argc < 2) {
-		*context = "dm-origin: Not enough arguments";
+	if (argc != 1) {
+		*context = "dm-origin: incorrect number of arguments";
 		return -EINVAL;
 	}
 
-	path = argv[0];
-	start = simple_strtoul(argv[1], &value, 10);
-	if (value == NULL) {
-		*context = "Invalid offset";
-		goto bad;
-	}
-
-	*context = "Cannot allocate origin context private structure";
-	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
-	if (lc == NULL)
-		goto bad;
-
-	*context = "Cannot get target device";
-	r = dm_table_get_device(t, path, start, l, &lc->target_dev);
+	r = dm_table_get_device(t, argv[0], 0, l, &dev);
 	if (r) {
-		kfree(lc);
-		goto bad;
+		*context = "Cannot get target device";
+		return r;
 	}
 
-	*context = lc;
+	*context = dev;
 
 	return 0;
-
-      bad:
-	return r;
 }
 
 static void origin_dtr(struct dm_table *t, void *c)
 {
-	struct origin_c *lc = (struct origin_c *) c;
+	struct dm_dev *dev = (struct dm_dev *) c;
 
-	dm_table_put_device(t, lc->target_dev);
-	kfree(c);
+	dm_table_put_device(t, dev);
 }
 
 static int origin_map(struct buffer_head *bh, int rw, void *context)
 {
-	struct origin_c *lc = (struct origin_c *) context;
+	struct dm_dev *dev = (struct dm_dev *) context;
 
-	bh->b_rdev = lc->target_dev->dev;
+	bh->b_rdev = dev->dev;
 	bh->b_rsector = bh->b_rsector;
 
 	/* Only tell snapshots if this is a write */
-	if (rw != READ && rw != READA) {
-		return dm_do_snapshot(lc->target_dev, bh);
-	}
-
-	return 1;
+	return (rw == WRITE) ? dm_do_snapshot(dev, bh) : 1;
 }
 
 static struct target_type origin_target = {
@@ -124,9 +99,8 @@ void dm_origin_exit(void)
  * Emacs will notice this stuff at the end of the file and automatically
  * adjust the settings for this buffer only.  This must remain at the end
  * of the file.
-* ---------------------------------------------------------------------------
-* Local variables:
-* c-file-style: "linux"
-* End:
-*/
-
+ * ---------------------------------------------------------------------------
+ * Local variables:
+ * c-file-style: "linux"
+ * End:
+ */
