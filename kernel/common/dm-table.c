@@ -640,7 +640,7 @@ struct dm_target *dm_table_find_target(struct dm_table *t, sector_t sector)
 	return &t->targets[(KEYS_PER_NODE * n) + k];
 }
 
-unsigned int dm_table_get_num_targets(struct dm_table *t)
+int dm_table_get_num_targets(struct dm_table *t)
 {
 	return t->num_targets;
 }
