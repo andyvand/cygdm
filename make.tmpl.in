@@ -54,7 +54,7 @@ endif
 SUFFIXES=
 SUFFIXES=.c .d .o .so
 
-CFLAGS+=-Wall 
+CFLAGS+=-Wall -fPIC
 #CFLAGS+=-O2
 CFLAGS+=-g -fno-omit-frame-pointer
 
