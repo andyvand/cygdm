@@ -91,7 +91,7 @@ struct mapped_device *dm_get_w(int minor)
  * some point if people start playing with *large* numbers of dm
  * devices.
  */
-struct mapped_device *dm_get_name_r(const char *name)
+struct mapped_device *dm_get_name_r(const char *name, const char *uuid)
 {
 	int i;
 	struct mapped_device *md;
@@ -99,7 +99,8 @@ struct mapped_device *dm_get_name_r(const char *name)
 	for (i = 0; i < MAX_DEVICES; i++) {
 		md = dm_get_r(i);
 		if (md) {
-			if (!strcmp(md->name, name))
+			if (!strcmp(md->name, name) ||
+			    (*uuid && !strcmp(md->uuid, uuid)))
 				return md;
 
 			dm_put_r(i);
@@ -109,7 +110,7 @@ struct mapped_device *dm_get_name_r(const char *name)
 	return NULL;
 }
 
-struct mapped_device *dm_get_name_w(const char *name)
+struct mapped_device *dm_get_name_w(const char *name, const char *uuid)
 {
 	int i;
 	struct mapped_device *md;
@@ -125,7 +126,8 @@ struct mapped_device *dm_get_name_w(const char *name)
 	for (i = 0; i < MAX_DEVICES; i++) {
 		md = dm_get_r(i);
 		if (md) {
-			if (strcmp(md->name, name))
+			if (strcmp(md->name, name) &&
+			    (!*uuid || strcmp(md->uuid, uuid)))
 				dm_put_r(i);
 			else {
 				/* found it */
@@ -134,7 +136,8 @@ struct mapped_device *dm_get_name_w(const char *name)
 				md = dm_get_w(i);
 				if (!md)
 					goto restart;
-				if (strcmp(md->name, name)) {
+				if (strcmp(md->name, name) &&
+				    (!*uuid || strcmp(md->uuid, uuid))) {
 					dm_put_w(i);
 					goto restart;
 				}
@@ -758,7 +761,7 @@ static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 	md->name[sizeof(md->name) - 1] = '\0';
 
 	if (*uuid) {
-		len = strnlen(uuid, DM_UUID_LEN) + 1;
+		len = strnlen(uuid, DM_UUID_LEN - 1) + 1;
 		if (!(md->uuid = kmalloc(len, GFP_KERNEL))) {
 			DMWARN("unable to allocate uuid - out of memory.");
 			return NULL;
@@ -846,7 +849,7 @@ static void __unbind(struct mapped_device *md)
 	_hardsect_size[minor] = 0;
 }
 
-static int check_name(const char *name)
+static int check_name(const char *name, const char *uuid)
 {
 	struct mapped_device *md;
 
@@ -855,11 +858,16 @@ static int check_name(const char *name)
 		return -1;
 	}
 
-	md = dm_get_name_r(name);
+	if (strnlen(uuid, DM_UUID_LEN + 1) > DM_UUID_LEN) {
+		DMWARN("uuid too long");
+		return -1;
+	}
+
+	md = dm_get_name_r(name, uuid);
 
 	if (md) {
 		dm_put_r(MINOR(md->dev));
-		DMWARN("device name already in use");
+		DMWARN("device name or uuid already in use");
 		return -1;
 	}
 
@@ -876,7 +884,7 @@ int dm_create(const char *name, const char *uuid,
 	struct mapped_device *md;
 
 	spin_lock(&_create_lock);
-	if (check_name(name) < 0) {
+	if (check_name(name, uuid) < 0) {
 		spin_unlock(&_create_lock);
 		return -EINVAL;
 	}
@@ -920,12 +928,12 @@ int dm_set_name(const char *oldname, const char *newname)
 	struct mapped_device *md;
 
 	spin_lock(&_create_lock);
-	if (check_name(newname) < 0) {
+	if (check_name(newname, "") < 0) {
 		spin_unlock(&_create_lock);
 		return -EINVAL;
 	}
 
-	md = dm_get_name_w(oldname);
+	md = dm_get_name_w(oldname, "");
 	if (!md) {
 		spin_unlock(&_create_lock);
 		return -ENXIO;

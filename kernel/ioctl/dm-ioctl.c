@@ -228,7 +228,7 @@ static int info(struct dm_ioctl *param, struct dm_ioctl *user)
 
 	param->flags = 0;
 
-	md = dm_get_name_r(param->name);
+	md = dm_get_name_r(param->name, param->uuid);
 	if (!md)
 		/*
 		 * Device not found - returns cleared exists flag.
@@ -254,7 +254,7 @@ static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
 	size_t len = 0;
 	struct dm_target_deps *deps = NULL;
 
-	md = dm_get_name_r(param->name);
+	md = dm_get_name_r(param->name, param->uuid);
 	if (!md)
 		goto out;
 	minor = MINOR(md->dev);
@@ -326,7 +326,7 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 		return r;
 	}
 
-	md = dm_get_name_w(param->name);
+	md = dm_get_name_w(param->name, param->uuid);
 	if (!md)
 		/* shouldn't get here */
 		return -EINVAL;
@@ -344,7 +344,7 @@ static int remove(struct dm_ioctl *param)
 	int r, minor;
 	struct mapped_device *md;
 
-	md = dm_get_name_w(param->name);
+	md = dm_get_name_w(param->name, param->uuid);
 	if (!md)
 		return -ENXIO;
 
@@ -360,7 +360,7 @@ static int suspend(struct dm_ioctl *param)
 	int r, minor;
 	struct mapped_device *md;
 
-	md = dm_get_name_w(param->name);
+	md = dm_get_name_w(param->name, param->uuid);
 	if (!md)
 		return -ENXIO;
 
@@ -387,7 +387,7 @@ static int reload(struct dm_ioctl *param)
 		return r;
 	}
 
-	md = dm_get_name_w(param->name);
+	md = dm_get_name_w(param->name, param->uuid);
 	if (!md) {
 		dm_table_destroy(t);
 		return -ENXIO;

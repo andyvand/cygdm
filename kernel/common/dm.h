@@ -118,8 +118,8 @@ int split_args(int max, int *argc, char **argv, char *input);
 /* dm.c */
 struct mapped_device *dm_get_r(int minor);
 struct mapped_device *dm_get_w(int minor);
-struct mapped_device *dm_get_name_r(const char *name);
-struct mapped_device *dm_get_name_w(const char *name);
+struct mapped_device *dm_get_name_r(const char *name, const char *uuid);
+struct mapped_device *dm_get_name_w(const char *name, const char *uuid);
 
 void dm_put_r(int minor);
 void dm_put_w(int minor);
