@@ -30,37 +30,31 @@ major=2
 #major=`ls src/.libs/lib*.so.* | \
 # awk '{if (match($$0,/\.so\.[0-9]+$$/)) print substr($$0,RSTART+4)}'`
 
+header-update:
+	# This isn't actually used; it's here for my own personal reference.
+	cd debian && tar jxvf /usr/src/kernel-source-2.4.18.tar.bz2 && \
+			./scripts/strippatch.pl \
+			./patches/linux-2.4.18-devmapper-ioctl.patch  | \
+			./scripts/includes.pl kernel-source-2.4.18/ | \
+			patch -p1 
+
 configure: configure-stamp
 configure-stamp:
 	dh_testdir
-	
-	if test -f /usr/src/kernel-source-2.4.18.tar.bz2; then \
-		tar jxvf /usr/src/kernel-source-2.4.18.tar.bz2 -C debian; \
-	elif test -f /usr/src/kernel-source-2.4.17.tar.bz2; then \
-		tar jxvf /usr/src/kernel-source-2.4.17.tar.bz2 -C debian; \
-	elif test -f /usr/src/kernel-source-2.4.16.tar.bz2; then \
-		tar jxvf /usr/src/kernel-source-2.4.16.tar.bz2 -C debian; \
-	else \
-		printf "\n\n*** Error: No kernel-source tarball found!\n\n"; \
-		exit 2; \
-	fi
-	mv debian/kernel-source-2.4.* debian/kernel-source
-	
+
 	# Add here commands to configure the package.
 	./configure --host=$(DEB_HOST_GNU_TYPE) --build=$(DEB_BUILD_GNU_TYPE) \
 			--prefix=/usr --mandir=\$${prefix}/share/man \
 			--infodir=\$${prefix}/share/info \
-			--with-kernel-dir=$(CURDIR)/debian/kernel-source
+			--with-kernel-dir=$(CURDIR)/debian \
+			--with-kernel-version=2.4.18
 	touch configure-stamp
 
 build: build-stamp
 build-stamp: configure-stamp 
 	dh_testdir
 
-	#  First, we need to patch the kernel
-	$(MAKE) apply-patches
-
-	# We now continue w/ our regularly scheduled programming
+	# Build
 	$(MAKE)
 
 	touch build-stamp
@@ -69,11 +63,9 @@ clean:
 	dh_testdir
 	dh_testroot
 	rm -f build-stamp configure-stamp
-	rm -rf debian/kernel-source*
 
 	# Add here commands to clean up after the build process.
 	-$(MAKE) distclean
-	-rm -f lib/libdm-common.h
 	-test -r /usr/share/misc/config.sub && \
 	  cp -f /usr/share/misc/config.sub config.sub
 	-test -r /usr/share/misc/config.guess && \

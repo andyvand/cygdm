@@ -1,3 +1,13 @@
+devmapper (0.95.07-1) unstable; urgency=low
+
+  * New release (Beta2).
+  * Remove 2.4.16 and 2.4.17 patches from kpatches.
+  * Reworked the build system to supply its own headers, instead of
+    depending upon kernel-source packages.  Makes building much faster.
+  * Added scripts/ directory, and scripts to keep kernel headers up-to-date.
+
+ -- Andres Salomon <dilinger@mp3revolution.net>  Thu, 25 Apr 2002 01:01:41 -0500
+
 devmapper (0.95.06-1) unstable; urgency=low
 
   * New release.
