@@ -199,9 +199,6 @@ static int write_metadata(struct snapshot_c *lc);
  */
 #define ORIGIN_HASH_SIZE 256
 #define ORIGIN_MASK      0xFF
-#define ORIGIN_HASH_FN(x)  (MINOR(x) & ORIGIN_MASK)
-#define EX_HASH_FN(sector, snap) ((((sector) - ((sector) & snap->chunk_size_mask)) >> snap->chunk_size_shift) & snap->hash_mask)
-#define EX_INFLIGHT_HASH_FN(sector, snap) ((((sector) - ((sector) & snap->chunk_size_mask)) >> snap->chunk_size_shift) & snap->inflight_hash_mask)
 
 /*
  * Hash table mapping origin volumes to lists of snapshots and
@@ -211,21 +208,41 @@ static struct list_head *snapshot_origins = NULL;
 static struct rw_semaphore origin_hash_lock;
 
 /*
+ * Hash functions
+ */
+static inline unsigned int origin_hash(kdev_t dev)
+{
+       return MINOR(dev) & ORIGIN_MASK;
+}
+
+static inline uint32_t exception_hash(offset_t sector, struct snapshot_c *e)
+{
+       unsigned int chunk = (sector & ~e->chunk_size_mask) >> e->chunk_size_shift;
+       return chunk & e->hash_mask;
+}
+
+static inline uint32_t inflight_exception_hash(offset_t sector, struct snapshot_c *e)
+{
+       unsigned int chunk = (sector & ~e->chunk_size_mask) >> e->chunk_size_shift;
+       return chunk & e->inflight_hash_mask;
+}
+
+/*
  * One of these per registered origin, held in the snapshot_origins hash
  */
 struct origin_list
 {
 	/* The origin device */
-	kdev_t              origin_dev;
+	kdev_t origin_dev;
 
 	 /* To serialise access to the metadata */
 	struct rw_semaphore lock;
 
 	/* List pointers for this list */
-	struct list_head    list;
+	struct list_head list;
 
 	/* List of snapshots for this origin */
-	struct list_head    snap_list;
+	struct list_head snap_list;
 };
 
 
@@ -252,7 +269,7 @@ static struct origin_list *__lookup_snapshot_list(kdev_t origin)
         struct list_head *slist;
 	struct list_head *snapshot_list;
 
-	snapshot_list = &snapshot_origins[ORIGIN_HASH_FN(origin)];
+	snapshot_list = &snapshot_origins[origin_hash(origin)];
 	list_for_each(slist, snapshot_list) {
 		struct origin_list *ol;
 		ol = list_entry(slist, struct origin_list, list);
@@ -333,7 +350,7 @@ static int update_metadata_block(struct snapshot_c *sc, unsigned long org, unsig
  */
 static struct exception *add_exception(struct snapshot_c *sc, unsigned long org, unsigned long new)
 {
-	struct list_head *l = &sc->hash_table[EX_HASH_FN(org, sc)];
+	struct list_head *l = &sc->hash_table[exception_hash(org, sc)];
 	struct exception *new_ex;
 
 	new_ex = kmalloc(sizeof(struct exception), GFP_KERNEL);
@@ -420,7 +437,7 @@ static int register_snapshot(kdev_t origin_dev, struct snapshot_c *snap)
 		init_rwsem(&ol->lock);
 
 		/* Add this origin to the hash table */
-		snapshot_list = &snapshot_origins[ORIGIN_HASH_FN(origin_dev)];
+		snapshot_list = &snapshot_origins[origin_hash(origin_dev)];
 		list_add_tail(&ol->list, snapshot_list);
 	}
 
@@ -437,7 +454,7 @@ static int register_snapshot(kdev_t origin_dev, struct snapshot_c *snap)
  */
 static struct exception *find_exception(struct snapshot_c *sc, uint32_t b_rsector)
 {
-	struct list_head *l = &sc->hash_table[EX_HASH_FN(b_rsector, sc)];
+	struct list_head *l = &sc->hash_table[exception_hash(b_rsector, sc)];
         struct list_head *slist;
 
 	list_for_each(slist, l) {
@@ -455,7 +472,7 @@ static struct exception *find_exception(struct snapshot_c *sc, uint32_t b_rsecto
  */
 static struct inflight_exception *find_inflight_exception(struct snapshot_c *sc, uint32_t b_rsector)
 {
-	struct list_head *l = &sc->inflight_hash_table[EX_INFLIGHT_HASH_FN(b_rsector, sc)];
+	struct list_head *l = &sc->inflight_hash_table[inflight_exception_hash(b_rsector, sc)];
         struct list_head *slist;
 
 	list_for_each(slist, l) {
@@ -472,7 +489,7 @@ static struct inflight_exception *find_inflight_exception(struct snapshot_c *sc,
  */
 static struct inflight_exception *add_inflight_exception(struct snapshot_c *sc, unsigned long org, unsigned long new)
 {
-	struct list_head *l = &sc->inflight_hash_table[EX_INFLIGHT_HASH_FN(org, sc)];
+	struct list_head *l = &sc->inflight_hash_table[inflight_exception_hash(org, sc)];
 	struct inflight_exception *new_ex;
 
 	new_ex = kmalloc(sizeof(struct inflight_exception), GFP_KERNEL);
