@@ -26,10 +26,10 @@ MAN8DIR=${mandir}/man8
 include ../make.tmpl
 
 install:
-	@echo "*** Installing $(ALL_MANUALS) in $(DESTDIR)$(MAN8DIR) ***"
+	@echo "*** Installing $(ALL_MANUALS) in $(MAN8DIR) ***"
 	@for f in $(MANUALS); \
 	do \
-	   $(RM) $(DESTDIR)$(MAN8DIR)/$$f; \
-	   @INSTALL@ -D -o $(OWNER) -g $(GROUP) -m 444 $$f $(DESTDIR)$(MAN8DIR)/$$f; \
+	   $(RM) $(MAN8DIR)/$$f; \
+	   @INSTALL@ -D -o $(OWNER) -g $(GROUP) -m 444 $$f $(MAN8DIR)/$$f; \
 	done
 
