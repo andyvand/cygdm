@@ -131,10 +131,10 @@ enum {
 #define DM_TARGET_STATUS _IOWR(DM_IOCTL, DM_TARGET_STATUS_CMD, struct dm_ioctl)
 #define DM_TARGET_WAIT   _IOWR(DM_IOCTL, DM_TARGET_WAIT_CMD, struct dm_ioctl)
 
-#define DM_VERSION_MAJOR	3
+#define DM_VERSION_MAJOR	4
 #define DM_VERSION_MINOR	0
-#define DM_VERSION_PATCHLEVEL	6
-#define DM_VERSION_EXTRA	"-ioctl-cvs (2003-04-26)"
+#define DM_VERSION_PATCHLEVEL	0
+#define DM_VERSION_EXTRA	"-ioctl-cvs (2003-04-29)"
 
 /* Status bits */
 #define DM_READONLY_FLAG	0x00000001	/* In/Out */
@@ -147,6 +147,7 @@ enum {
  */
 #define DM_STATUS_TABLE_FLAG	0x00000010	/* In     */
 
+/* For future use */
 #define DM_ERROR_DEFERRED_FLAG	0x00000020	/* In     */
 
 /*
