@@ -149,7 +149,7 @@ $(TARGETS): $(OBJECTS)
 
 $(LIB_SHARED): $(OBJECTS) $(LD_DEPS)
 	$(CC) $(SOFLAG) -Wl,-soname,$(notdir $@).$(LIB_VERSION) \
-	$(CLDFLAGS) $(OBJECTS) -o $@
+	$(CLDFLAGS) $(OBJECTS) $(LIBS) -o $@
 
 $(LIB_STATIC): $(OBJECTS)
 	$(RM) $@
