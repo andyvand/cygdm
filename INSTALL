@@ -58,11 +58,23 @@ Device Mapper installation
         e.g. add to /etc/rc*
 
       Or whenever the device-mapper is loaded (if you built it as a module)
-        e.g. add a "post-install" line to /etc/modules.conf.
+        e.g. add the following line to /etc/modules.conf and run depmod -a
+	     and use modprobe dm-mod to load the module
+	post-install dm-mod /etc/init.d/devmap_mknod.sh
+	
+   The script creates the /dev/device-mapper/control device for the ioctl
+   interface using the major and minor numbers that have been allocated
+   dynamically.  It prints a message if it works or else it fails silently 
+   with a non-zero status code.
+
+   If you want the block devices created by the device-mapper to have a 
+   specific major number, then specify this when loading the module
+      e.g. modprobe dm-mod major=123
+   This major number is visible in /proc/devices.
 
 
 5) You can now use 'dmsetup' to test the API.
    If you chose the filesystem interface you will first need to mount dmfs.
-   e.g. mount -t dmfs dmfs /dmfs
+   e.g. mount -t dmfs dmfs /dmfs  (or add it to /etc/fstab)
    Read the dmsetup man page for more information.
 

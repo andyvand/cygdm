@@ -17,7 +17,7 @@ make_dir()
 
 make_node()
 {
-    rm $control || true
+    rm -f $control || true
     echo Creating $control character device with major:$major minor:$minor
     mknod --mode=600 $control c $major $minor
 }
