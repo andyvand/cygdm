@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Thu Dec  6 22:03:46 2001
++++ linux/drivers/md/Config.in	Fri Dec  7 20:42:52 2001
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Thu Dec  6 22:03:46 2001
++++ linux/drivers/md/Makefile	Fri Dec  7 20:42:52 2001
 @@ -4,9 +4,11 @@
  
  O_TARGET	:= mddev.o
@@ -39,8 +39,8 @@ diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 +	$(LD) -r -o $@ $(dm-mod-objs)
 diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper.h
 --- linux-2.4.16/drivers/md/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/device-mapper.h	Thu Dec  6 21:58:48 2001
-@@ -0,0 +1,63 @@
++++ linux/drivers/md/device-mapper.h	Fri Dec  7 13:16:25 2001
+@@ -0,0 +1,64 @@
 +/*
 + * device-mapper.h
 + *
@@ -54,6 +54,7 @@ diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +
 +#define DM_DIR "device-mapper"
 +#define DM_MAX_TYPE_NAME 16
++#define DM_NAME_LEN 128
 +
 +#ifdef __KERNEL__
 +
@@ -2279,8 +2280,8 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +
 diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 --- linux-2.4.16/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Thu Dec  6 20:36:54 2001
-@@ -0,0 +1,243 @@
++++ linux/drivers/md/dm.h	Fri Dec  7 13:16:42 2001
+@@ -0,0 +1,242 @@
 +/*
 + * dm.h
 + *
@@ -2406,7 +2407,6 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +#define NODE_SIZE L1_CACHE_BYTES
 +#define KEYS_PER_NODE (NODE_SIZE / sizeof(offset_t))
 +#define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
-+#define DM_NAME_LEN 128
 +
 +/*
 + * list of devices that a metadevice uses
@@ -2526,8 +2526,8 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +#endif
 diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-mapper.h
 --- linux-2.4.16/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Thu Dec  6 21:58:48 2001
-@@ -0,0 +1,63 @@
++++ linux/include/linux/device-mapper.h	Fri Dec  7 13:16:25 2001
+@@ -0,0 +1,64 @@
 +/*
 + * device-mapper.h
 + *
@@ -2541,6 +2541,7 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +
 +#define DM_DIR "device-mapper"
 +#define DM_MAX_TYPE_NAME 16
++#define DM_NAME_LEN 128
 +
 +#ifdef __KERNEL__
 +
