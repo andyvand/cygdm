@@ -1,0 +1,11 @@
+diff -ruN linux-2.4.17/include/linux/seq_file.h linux/include/linux/seq_file.h
+--- linux-2.4.17/include/linux/seq_file.h	Thu Dec  6 15:57:56 2001
++++ linux/include/linux/seq_file.h	Wed Jan  2 19:34:54 2002
+@@ -12,6 +12,7 @@
+ 	loff_t index;
+ 	struct semaphore sem;
+ 	struct seq_operations *op;
++	void *context;
+ };
+ 
+ struct seq_operations {

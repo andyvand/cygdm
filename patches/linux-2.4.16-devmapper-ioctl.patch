@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Fri Dec 21 20:28:58 2001
++++ linux/drivers/md/Config.in	Wed Jan  2 20:00:16 2002
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Fri Dec 21 20:28:58 2001
++++ linux/drivers/md/Makefile	Wed Jan  2 20:00:16 2002
 @@ -4,9 +4,11 @@
  
  O_TARGET	:= mddev.o
@@ -101,8 +101,8 @@ diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 --- linux-2.4.16/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Fri Dec 21 19:29:43 2001
-@@ -0,0 +1,333 @@
++++ linux/drivers/md/dm-ioctl.c	Wed Jan  2 17:17:27 2002
+@@ -0,0 +1,344 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -288,6 +288,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	if ((r = dm_create(param->name, param->minor, t, &md)))
 +		goto bad;
 +
++	dm_set_ro(md, param->read_only);
++
 +	if ((r = info(param->name, user))) {
 +		dm_destroy(md);
 +		goto bad;
@@ -343,6 +345,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		return r;
 +	}
 +
++	dm_set_ro(md, param->read_only);
++
 +	return 0;
 +}
 +
@@ -372,6 +376,12 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	if ((r = copy_params((struct dm_ioctl *) a, &p)))
 +		return r;
 +
++	if (strcmp(DM_IOCTL_VERSION, p->version)) {
++		WARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
++		r = -EINVAL;
++		goto out;
++	}
++
 +	switch (command) {
 +	case DM_CREATE:
 +		r = create(p, (struct dm_ioctl *) a);
@@ -398,6 +408,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		r = -EINVAL;
 +	}
 +
++      out:
 +	free_params(p);
 +	return r;
 +}
@@ -1418,8 +1429,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +EXPORT_SYMBOL(dm_unregister_target);
 diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.16/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Fri Dec 21 20:28:26 2001
-@@ -0,0 +1,921 @@
++++ linux/drivers/md/dm.c	Wed Jan  2 19:59:44 2002
+@@ -0,0 +1,932 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -1439,7 +1450,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +#define DEVICE_NAME "device-mapper"	/* Name for messaging */
 +
 +static const char *_name = DEVICE_NAME;
-+static const char *_version = "0.90.04-ioctl (2001-12-21)";
++static const char *_version = "0.91.00-ioctl (2002-01-02)";
 +static const char *_email = "lvm-devel@lists.sistina.com";
 +
 +static int _major = 0;
@@ -2204,6 +2215,17 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +}
 +
 +/*
++ * Sets or clears the read-only flag for the device.
++ */
++void dm_set_ro(struct mapped_device *md, int ro)
++{
++	if (md->read_only != ro) {
++		md->read_only = ro;
++		set_device_ro(md->dev, ro);
++	}
++}
++
++/*
 + * Requeue the deferred buffer_heads by calling generic_make_request.
 + */
 +static void flush_deferred_io(struct deferred_io *c)
@@ -2343,8 +2365,8 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +MODULE_LICENSE("GPL");
 diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 --- linux-2.4.16/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Fri Dec 21 19:28:50 2001
-@@ -0,0 +1,164 @@
++++ linux/drivers/md/dm.h	Wed Jan  2 16:07:33 2002
+@@ -0,0 +1,166 @@
 +/*
 + * Internal header file for device mapper
 + *
@@ -2431,6 +2453,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +
 +	int use_count;
 +	int suspended;
++	int read_only;
 +
 +	/* a list of io's that arrived while we were suspended */
 +	atomic_t pending;
@@ -2459,9 +2482,10 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +
 +/* dm.c */
 +struct mapped_device *dm_get(const char *name);
-+int dm_create(const char *name, int minor, struct dm_table *table, 
++int dm_create(const char *name, int minor, struct dm_table *table,
 +	      struct mapped_device **result);
 +int dm_destroy(struct mapped_device *md);
++void dm_set_ro(struct mapped_device *md, int ro);
 +
 +/*
 + * The device must be suspended before calling this method.
@@ -2573,8 +2597,8 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 --- linux-2.4.16/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Wed Dec 19 15:42:14 2001
-@@ -0,0 +1,55 @@
++++ linux/include/linux/dm-ioctl.h	Wed Jan  2 19:59:44 2002
+@@ -0,0 +1,59 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -2600,7 +2624,7 @@ diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +	unsigned long next;	/* offset in bytes to next target_spec */
 +
 +	/*
-+	 * Parameter string starts immediately after this object.  
++	 * Parameter string starts immediately after this object.
 +	 * Be careful to add padding after string to ensure correct
 +	 * alignment of subsequent dm_target_spec.
 +	 */
@@ -2608,6 +2632,7 @@ diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +
 +struct dm_ioctl {
 +	unsigned long data_size;	/* the size of this structure */
++	char version[16];
 +	char name[DM_NAME_LEN];
 +
 +	int exists;		/* out */
@@ -2615,6 +2640,7 @@ diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +	int open_count;		/* out */
 +	int major;		/* out */
 +	int minor;		/* in/out */
++	int read_only;		/* in/out */
 +
 +	int target_count;	/* in/out */
 +};
@@ -2628,5 +2654,7 @@ diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +#define	DM_SUSPEND _IOW(DM_IOCTL, 0x02, struct dm_ioctl)
 +#define	DM_RELOAD _IOWR(DM_IOCTL, 0x03, struct dm_ioctl)
 +#define DM_INFO _IOWR(DM_IOCTL, 0x04, struct dm_ioctl)
++
++#define DM_IOCTL_VERSION "0.91"
 +
 +#endif /* _LINUX_DM_IOCTL_H */

@@ -99,7 +99,8 @@ patches:
 		$(LN_S) `pwd`/$(ioctl_hdr) $(tmpdir)/linux/include/linux ; \
 	fi
 	
-	for i in ../patches/common/* ../patches/$(interface)/* ; do \
+	for i in ../patches/common/linux-$(kernelvsn)* \
+		 ../patches/$(interface)/linux-$(kernelvsn)* ; do \
 		patch -d $(tmpdir)/linux -p1 -i `pwd`/$$i ; \
 	done
 	

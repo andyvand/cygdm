@@ -1,6 +1,6 @@
-diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
---- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Wed Jan  2 20:02:43 2002
+diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
+--- linux-2.4.17/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
++++ linux/drivers/md/Config.in	Wed Jan  2 20:00:55 2002
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -8,9 +8,9 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 +dep_tristate ' Device mapper support' CONFIG_BLK_DEV_DM $CONFIG_MD
  
  endmenu
-diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
---- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Wed Jan  2 20:02:43 2002
+diff -ruN linux-2.4.17/drivers/md/Makefile linux/drivers/md/Makefile
+--- linux-2.4.17/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
++++ linux/drivers/md/Makefile	Wed Jan  2 20:00:55 2002
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -39,8 +39,8 @@ diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 +dm-mod.o: $(dm-mod-objs)
 +	$(LD) -r -o $@ $(dm-mod-objs)
 +
-diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper.h
---- linux-2.4.16/drivers/md/device-mapper.h	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/device-mapper.h linux/drivers/md/device-mapper.h
+--- linux-2.4.17/drivers/md/device-mapper.h	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/device-mapper.h	Fri Dec 21 18:44:59 2001
 @@ -0,0 +1,58 @@
 +/*
@@ -101,8 +101,8 @@ diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +#endif				/* __KERNEL__ */
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
-diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
---- linux-2.4.16/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
+--- linux-2.4.17/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-linear.c	Fri Dec 21 19:38:40 2001
 @@ -0,0 +1,117 @@
 +/*
@@ -222,8 +222,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +MODULE_AUTHOR("Joe Thornber <thornber@uk.sistina.com>");
 +MODULE_DESCRIPTION("Device Mapper: Linear mapping");
 +MODULE_LICENSE("GPL");
-diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
---- linux-2.4.16/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
+--- linux-2.4.17/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-stripe.c	Fri Dec 21 19:09:00 2001
 @@ -0,0 +1,210 @@
 +/*
@@ -436,8 +436,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 +MODULE_DESCRIPTION("Device Mapper: Striped mapping");
 +MODULE_LICENSE("GPL");
-diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
---- linux-2.4.16/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dm-table.c linux/drivers/md/dm-table.c
+--- linux-2.4.17/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-table.c	Wed Dec 19 19:40:07 2001
 @@ -0,0 +1,400 @@
 +/*
@@ -840,8 +840,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +
 +EXPORT_SYMBOL(dm_table_get_device);
 +EXPORT_SYMBOL(dm_table_put_device);
-diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
---- linux-2.4.16/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
+--- linux-2.4.17/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-target.c	Fri Dec 21 19:29:01 2001
 @@ -0,0 +1,237 @@
 +/*
@@ -1081,9 +1081,9 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
-diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
---- linux-2.4.16/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Wed Jan  2 20:02:13 2002
+diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
+--- linux-2.4.17/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
++++ linux/drivers/md/dm.c	Wed Jan  2 20:00:23 2002
 @@ -0,0 +1,932 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -2017,8 +2017,8 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +MODULE_DESCRIPTION("device-mapper driver");
 +MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 +MODULE_LICENSE("GPL");
-diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
---- linux-2.4.16/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
+--- linux-2.4.17/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm.h	Wed Jan  2 16:07:33 2002
 @@ -0,0 +1,166 @@
 +/*
@@ -2187,8 +2187,8 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +void dm_interface_exit(void);
 +
 +#endif
-diff -ruN linux-2.4.16/drivers/md/dmfs-error.c linux/drivers/md/dmfs-error.c
---- linux-2.4.16/drivers/md/dmfs-error.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dmfs-error.c linux/drivers/md/dmfs-error.c
+--- linux-2.4.17/drivers/md/dmfs-error.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dmfs-error.c	Thu Dec 20 18:33:50 2001
 @@ -0,0 +1,138 @@
 +/*
@@ -2329,8 +2329,8 @@ diff -ruN linux-2.4.16/drivers/md/dmfs-error.c linux/drivers/md/dmfs-error.c
 +	stop:	e_stop,
 +	show:	show_error,
 +};
-diff -ruN linux-2.4.16/drivers/md/dmfs-lv.c linux/drivers/md/dmfs-lv.c
---- linux-2.4.16/drivers/md/dmfs-lv.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dmfs-lv.c linux/drivers/md/dmfs-lv.c
+--- linux-2.4.17/drivers/md/dmfs-lv.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dmfs-lv.c	Thu Dec 20 18:07:13 2001
 @@ -0,0 +1,258 @@
 +/*
@@ -2591,8 +2591,8 @@ diff -ruN linux-2.4.16/drivers/md/dmfs-lv.c linux/drivers/md/dmfs-lv.c
 +
 +	return ERR_PTR(ret);
 +}
-diff -ruN linux-2.4.16/drivers/md/dmfs-root.c linux/drivers/md/dmfs-root.c
---- linux-2.4.16/drivers/md/dmfs-root.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dmfs-root.c linux/drivers/md/dmfs-root.c
+--- linux-2.4.17/drivers/md/dmfs-root.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dmfs-root.c	Mon Dec 10 17:20:17 2001
 @@ -0,0 +1,161 @@
 +/*
@@ -2756,8 +2756,8 @@ diff -ruN linux-2.4.16/drivers/md/dmfs-root.c linux/drivers/md/dmfs-root.c
 +	return inode;
 +}
 +
-diff -ruN linux-2.4.16/drivers/md/dmfs-status.c linux/drivers/md/dmfs-status.c
---- linux-2.4.16/drivers/md/dmfs-status.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dmfs-status.c linux/drivers/md/dmfs-status.c
+--- linux-2.4.17/drivers/md/dmfs-status.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dmfs-status.c	Mon Dec 10 17:12:55 2001
 @@ -0,0 +1,54 @@
 +/*
@@ -2814,8 +2814,8 @@ diff -ruN linux-2.4.16/drivers/md/dmfs-status.c linux/drivers/md/dmfs-status.c
 +	stop:	s_stop,
 +	show:	s_show,
 +};
-diff -ruN linux-2.4.16/drivers/md/dmfs-super.c linux/drivers/md/dmfs-super.c
---- linux-2.4.16/drivers/md/dmfs-super.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dmfs-super.c linux/drivers/md/dmfs-super.c
+--- linux-2.4.17/drivers/md/dmfs-super.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dmfs-super.c	Mon Dec 10 17:14:54 2001
 @@ -0,0 +1,160 @@
 +/*
@@ -2978,8 +2978,8 @@ diff -ruN linux-2.4.16/drivers/md/dmfs-super.c linux/drivers/md/dmfs-super.c
 +
 +	unregister_filesystem(&dmfs_fstype);
 +}
-diff -ruN linux-2.4.16/drivers/md/dmfs-suspend.c linux/drivers/md/dmfs-suspend.c
---- linux-2.4.16/drivers/md/dmfs-suspend.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dmfs-suspend.c linux/drivers/md/dmfs-suspend.c
+--- linux-2.4.17/drivers/md/dmfs-suspend.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dmfs-suspend.c	Thu Dec 20 17:35:51 2001
 @@ -0,0 +1,113 @@
 +/*
@@ -3095,8 +3095,8 @@ diff -ruN linux-2.4.16/drivers/md/dmfs-suspend.c linux/drivers/md/dmfs-suspend.c
 +      out:
 +	return written;
 +}
-diff -ruN linux-2.4.16/drivers/md/dmfs-table.c linux/drivers/md/dmfs-table.c
---- linux-2.4.16/drivers/md/dmfs-table.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dmfs-table.c linux/drivers/md/dmfs-table.c
+--- linux-2.4.17/drivers/md/dmfs-table.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dmfs-table.c	Fri Dec 21 19:27:52 2001
 @@ -0,0 +1,388 @@
 +/*
@@ -3487,8 +3487,8 @@ diff -ruN linux-2.4.16/drivers/md/dmfs-table.c linux/drivers/md/dmfs-table.c
 +
 +	return inode;
 +}
-diff -ruN linux-2.4.16/drivers/md/dmfs.h linux/drivers/md/dmfs.h
---- linux-2.4.16/drivers/md/dmfs.h	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/drivers/md/dmfs.h linux/drivers/md/dmfs.h
+--- linux-2.4.17/drivers/md/dmfs.h	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dmfs.h	Thu Dec 20 14:59:39 2001
 @@ -0,0 +1,21 @@
 +#ifndef LINUX_DMFS_H
@@ -3512,10 +3512,10 @@ diff -ruN linux-2.4.16/drivers/md/dmfs.h linux/drivers/md/dmfs.h
 +extern void dmfs_zap_errors(struct inode *inode);
 +
 +#endif				/* LINUX_DMFS_H */
-diff -ruN linux-2.4.16/fs/namespace.c linux/fs/namespace.c
---- linux-2.4.16/fs/namespace.c	Thu Dec  6 15:57:56 2001
-+++ linux/fs/namespace.c	Wed Jan  2 20:02:43 2002
-@@ -332,7 +332,7 @@
+diff -ruN linux-2.4.17/fs/namespace.c linux/fs/namespace.c
+--- linux-2.4.17/fs/namespace.c	Wed Jan  2 19:10:48 2002
++++ linux/fs/namespace.c	Wed Jan  2 20:00:55 2002
+@@ -289,7 +289,7 @@
  	}
  }
  
@@ -3524,8 +3524,8 @@ diff -ruN linux-2.4.16/fs/namespace.c linux/fs/namespace.c
  {
  	struct super_block * sb = mnt->mnt_sb;
  	int retval = 0;
-diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-mapper.h
---- linux-2.4.16/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.17/include/linux/device-mapper.h linux/include/linux/device-mapper.h
+--- linux-2.4.17/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
 +++ linux/include/linux/device-mapper.h	Fri Dec 21 18:44:59 2001
 @@ -0,0 +1,58 @@
 +/*
@@ -3586,10 +3586,10 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* __KERNEL__ */
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
-diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
---- linux-2.4.16/include/linux/fs.h	Thu Dec  6 15:57:58 2001
-+++ linux/include/linux/fs.h	Wed Jan  2 20:02:43 2002
-@@ -980,6 +980,7 @@
+diff -ruN linux-2.4.17/include/linux/fs.h linux/include/linux/fs.h
+--- linux-2.4.17/include/linux/fs.h	Wed Jan  2 19:10:48 2002
++++ linux/include/linux/fs.h	Wed Jan  2 20:00:55 2002
+@@ -983,6 +983,7 @@
  extern struct vfsmount *kern_mount(struct file_system_type *);
  extern int may_umount(struct vfsmount *);
  extern long do_mount(char *, char *, char *, unsigned long, void *);
@@ -3597,9 +3597,9 @@ diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
  
  #define kern_umount mntput
  
-diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
---- linux-2.4.16/include/linux/seq_file.h	Thu Dec  6 15:57:56 2001
-+++ linux/include/linux/seq_file.h	Wed Jan  2 20:02:43 2002
+diff -ruN linux-2.4.17/include/linux/seq_file.h linux/include/linux/seq_file.h
+--- linux-2.4.17/include/linux/seq_file.h	Thu Dec  6 15:57:56 2001
++++ linux/include/linux/seq_file.h	Wed Jan  2 20:00:55 2002
 @@ -12,6 +12,7 @@
  	loff_t index;
  	struct semaphore sem;
@@ -3608,18 +3608,10 @@ diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
  };
  
  struct seq_operations {
-diff -ruN linux-2.4.16/kernel/ksyms.c linux/kernel/ksyms.c
---- linux-2.4.16/kernel/ksyms.c	Thu Dec  6 15:57:56 2001
-+++ linux/kernel/ksyms.c	Wed Jan  2 20:02:43 2002
-@@ -46,6 +46,7 @@
- #include <linux/tty.h>
- #include <linux/in6.h>
- #include <linux/completion.h>
-+#include <linux/seq_file.h>
- #include <asm/checksum.h>
- 
- #if defined(CONFIG_PROC_FS)
-@@ -323,6 +324,7 @@
+diff -ruN linux-2.4.17/kernel/ksyms.c linux/kernel/ksyms.c
+--- linux-2.4.17/kernel/ksyms.c	Wed Jan  2 19:10:49 2002
++++ linux/kernel/ksyms.c	Wed Jan  2 20:00:55 2002
+@@ -324,6 +324,7 @@
  EXPORT_SYMBOL(register_filesystem);
  EXPORT_SYMBOL(unregister_filesystem);
  EXPORT_SYMBOL(kern_mount);
@@ -3627,20 +3619,7 @@ diff -ruN linux-2.4.16/kernel/ksyms.c linux/kernel/ksyms.c
  EXPORT_SYMBOL(__mntput);
  EXPORT_SYMBOL(may_umount);
  
-@@ -348,6 +350,12 @@
- EXPORT_SYMBOL(proc_doulongvec_ms_jiffies_minmax);
- EXPORT_SYMBOL(proc_doulongvec_minmax);
- 
-+/* seq_file */
-+EXPORT_SYMBOL(seq_read);
-+EXPORT_SYMBOL(seq_lseek);
-+EXPORT_SYMBOL(seq_open);
-+EXPORT_SYMBOL(seq_release);
-+
- /* interrupt handling */
- EXPORT_SYMBOL(add_timer);
- EXPORT_SYMBOL(del_timer);
-@@ -522,6 +530,7 @@
+@@ -529,6 +530,7 @@
  
  /* binfmt_aout */
  EXPORT_SYMBOL(get_write_access);

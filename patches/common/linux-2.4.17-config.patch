@@ -1,0 +1,10 @@
+diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
+--- linux-2.4.17/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
++++ linux/drivers/md/Config.in	Wed Jan  2 19:23:58 2002
+@@ -14,5 +14,6 @@
+ dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
+ 
+ dep_tristate ' Logical volume manager (LVM) support' CONFIG_BLK_DEV_LVM $CONFIG_MD
++dep_tristate ' Device mapper support' CONFIG_BLK_DEV_DM $CONFIG_MD
+ 
+ endmenu

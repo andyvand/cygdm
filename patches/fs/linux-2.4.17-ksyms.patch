@@ -1,0 +1,19 @@
+diff -ruN linux-2.4.17/kernel/ksyms.c linux/kernel/ksyms.c
+--- linux-2.4.17/kernel/ksyms.c	Wed Jan  2 19:10:49 2002
++++ linux/kernel/ksyms.c	Wed Jan  2 19:30:12 2002
+@@ -324,6 +324,7 @@
+ EXPORT_SYMBOL(register_filesystem);
+ EXPORT_SYMBOL(unregister_filesystem);
+ EXPORT_SYMBOL(kern_mount);
++EXPORT_SYMBOL(do_umount);
+ EXPORT_SYMBOL(__mntput);
+ EXPORT_SYMBOL(may_umount);
+ 
+@@ -529,6 +530,7 @@
+ 
+ /* binfmt_aout */
+ EXPORT_SYMBOL(get_write_access);
++EXPORT_SYMBOL(deny_write_access);
+ 
+ /* time */
+ EXPORT_SYMBOL(get_fast_time);
