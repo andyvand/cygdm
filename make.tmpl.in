@@ -104,8 +104,9 @@ $(SUBDIRS.distclean):
 %.o: %.c
 	$(CC) -c $(INCLUDES) $(CFLAGS) $< -o $@
 
-%.so: $(OBJECTS)
-	$(CC) -shared -Wl,-soname,$(notdir $@).$(LIB_VERSION) $(OBJECTS) -o $@
+%.so: $(OBJECTS) .export.sym
+	$(CC) -shared -Wl,-soname,$(notdir $@).$(LIB_VERSION) \
+	-Wl,--version-script,.export.sym $(OBJECTS) -o $@
 
 %.d: %.c
 	set -e; \
