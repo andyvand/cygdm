@@ -32,3 +32,5 @@ include make.tmpl
 apply-patches:
 	patch -d $(kerneldir) -p1 -i \
 		`pwd`/patches/linux-$(kernelvsn)-devmapper-$(interface).patch
+	patch -d $(kerneldir) -p1 -i \
+		`pwd`/patches/linux-$(kernelvsn)-VFS-lock.patch
