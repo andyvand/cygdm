@@ -101,7 +101,7 @@ dnl -- Kernel version string
 AC_ARG_WITH(kernel-version,
   [  --with-kernel-version=VERSION   linux kernel version],
   [ kernelvsn="$withval" ],
-  [ kernelvsn=`awk -F ' = ' '/^VERSION/ {v=$2} /^PATCH/ {p=$2} /^SUBLEVEL/ {s=$2} END {printf "%d.%d.%d",v,p,s}' $kerneldir/Makefile` ])
+  [ kernelvsn=`awk -F ' = ' '/^VERSION/ {v=$2} /^PATCH/ {p=$2} /^SUBLEVEL/ {s=$2} /^EXTRAVERSION/ {e=$2} END {printf "%d.%d.%d%s",v,p,s,e}' $kerneldir/Makefile` ])
 if test "${with_kernelvsn+set}" = set; then
    kernelvsn="$with_kernelvsn"
 fi

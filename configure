@@ -1906,7 +1906,7 @@ if test "${with_kernel_version+set}" = set; then
   withval="$with_kernel_version"
    kernelvsn="$withval" 
 else
-   kernelvsn=`awk -F ' = ' '/^VERSION/ {v=$2} /^PATCH/ {p=$2} /^SUBLEVEL/ {s=$2} END {printf "%d.%d.%d",v,p,s}' $kerneldir/Makefile` 
+   kernelvsn=`awk -F ' = ' '/^VERSION/ {v=$2} /^PATCH/ {p=$2} /^SUBLEVEL/ {s=$2} /^EXTRAVERSION/ {e=$2} END {printf "%d.%d.%d%s",v,p,s,e}' $kerneldir/Makefile` 
 fi
 
 if test "${with_kernelvsn+set}" = set; then
