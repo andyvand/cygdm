@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.17/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Wed Jan 30 17:38:31 2002
++++ linux/drivers/md/Config.in	Mon Feb  4 13:17:12 2002
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.17/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.17/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Wed Jan 30 17:38:31 2002
++++ linux/drivers/md/Makefile	Mon Feb  4 13:17:12 2002
 @@ -4,9 +4,11 @@
  
  O_TARGET	:= mddev.o
@@ -101,8 +101,8 @@ diff -ruN linux-2.4.17/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 --- linux-2.4.17/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Thu Jan 17 12:40:05 2002
-@@ -0,0 +1,433 @@
++++ linux/drivers/md/dm-ioctl.c	Mon Feb  4 13:01:21 2002
+@@ -0,0 +1,443 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -113,6 +113,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +#include <linux/miscdevice.h>
 +#include <linux/dm-ioctl.h>
++#include <linux/init.h>
 +
 +static void free_params(struct dm_ioctl *p)
 +{
@@ -220,10 +221,10 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +	for (i = 0; i < args->target_count; i++) {
 +
-+		r = first ? next_target((struct dm_target_spec *)args, 
++		r = first ? next_target((struct dm_target_spec *)args,
 +					args->data_start,
 +					begin, end, &spec, &params) :
-+			    next_target(spec, spec->next, 
++			    next_target(spec, spec->next,
 +					begin, end, &spec, &params);
 +
 +		if (r)
@@ -268,15 +269,17 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 + */
 +static int info(const char *name, struct dm_ioctl *user)
 +{
++	int minor;
 +	struct dm_ioctl param;
-+	struct mapped_device *md = dm_get(name);
++	struct mapped_device *md;
 +
 +	param.flags = 0;
-+
 +	strncpy(param.version, DM_IOCTL_VERSION, sizeof(param.version));
 +
++	md  = dm_get_name_r(name);
 +	if (!md)
 +		goto out;
++	minor = MINOR(md->dev);
 +
 +	param.flags |= DM_EXISTS_FLAG;
 +	if (md->suspended)
@@ -292,9 +295,9 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	param.dev = kdev_t_to_nr(md->dev);
 +	param.target_count = md->map->num_targets;
 +
-+	dm_put(md);
++	dm_put_r(minor);
 +
-+      out:
++ out:
 +	return copy_to_user(user, &param, sizeof(param));
 +}
 +
@@ -310,106 +313,113 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		return r;
 +
 +	r = populate_table(t, param);
-+	if (r)
-+		goto bad;
-+
-+	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
-+		minor = MINOR(to_kdev_t(param->dev)) : -1;
-+
-+	r = dm_create(param->name, minor, t, &md);
-+	if (r)
-+		goto bad;
-+
-+	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
-+
-+	r = info(param->name, user);
 +	if (r) {
-+		dm_destroy(md);
-+		goto bad;
++		dm_table_destroy(t);
++		return r;
 +	}
 +
-+	dm_put(md);
-+	return 0;
++	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
++		MINOR(to_kdev_t(param->dev)) : -1;
 +
-+      bad:
-+	dm_table_destroy(t);
++	r = dm_create(param->name, minor, t);
++	if (r) {
++		dm_table_destroy(t);
++		return r;
++	}
++
++	md = dm_get_name_w(param->name);
++	if (!md)
++		/* shouldn't get here */
++		return -EINVAL;
++
++	minor = MINOR(md->dev);
++	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
++	dm_put_w(minor);
++
++	r = info(param->name, user);
 +	return r;
 +}
 +
 +static int remove(struct dm_ioctl *param)
 +{
-+	struct mapped_device *md = dm_get(param->name);
++	int r, minor;
++	struct mapped_device *md;
 +
++	md = dm_get_name_w(param->name);
 +	if (!md)
 +		return -ENXIO;
 +
-+	return dm_destroy(md);
++	minor = MINOR(md->dev);
++	r = dm_destroy(md);
++	dm_put_w(minor);
++
++	return r;
 +}
 +
 +static int suspend(struct dm_ioctl *param)
 +{
-+	int r;
-+	struct mapped_device *md = dm_get(param->name);
++	int r, minor;
++	struct mapped_device *md;
 +
++	md = dm_get_name_w(param->name);
 +	if (!md)
 +		return -ENXIO;
 +
-+	r = (param->flags & DM_SUSPEND_FLAG) ? 
++	minor = MINOR(md->dev);
++	r = (param->flags & DM_SUSPEND_FLAG) ?
 +	     dm_suspend(md) : dm_resume(md);
-+	dm_put(md);
++	dm_put_w(minor);
++
 +	return r;
 +}
 +
 +static int reload(struct dm_ioctl *param)
 +{
-+	int r;
-+	struct mapped_device *md = dm_get(param->name);
++	int r, minor;
++	struct mapped_device *md;
 +	struct dm_table *t;
-+
-+	if (!md)
-+		return -ENXIO;
 +
 +	r = dm_table_create(&t);
 +	if (r)
-+		goto bad_no_table;
++		return r;
 +
 +	r = populate_table(t, param);
-+	if (r)
-+		goto bad;
++	if (r) {
++		dm_table_destroy(t);
++		return r;
++	}
++
++	md = dm_get_name_w(param->name);
++	if (!md) {
++		dm_table_destroy(t);
++		return -ENXIO;
++	}
++
++	minor = MINOR(md->dev);
 +
 +	r = dm_swap_table(md, t);
-+	if (r)
-+		goto bad;
++	if (r) {
++		dm_put_w(minor);
++		dm_table_destroy(t);
++		return r;
++	}
 +
 +	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
-+
-+	dm_put(md);
++	dm_put_w(minor);
 +	return 0;
-+
-+      bad:
-+	dm_table_destroy(t);
-+
-+      bad_no_table:
-+	dm_put(md);
-+	return r;
 +}
 +
 +static int rename(struct dm_ioctl *param)
 +{
 +	char *newname = (char *) param + param->data_start;
-+	struct mapped_device *md = dm_get(param->name);
 +
-+	if (!md)
-+		return -ENXIO;
-+
-+	if (valid_str(newname, (void *)param, 
-+		       (void *)param + param->data_size) ||
-+	    dm_set_name(md, newname)) {
++	if (valid_str(newname, (void *) param,
++		      (void *) param + param->data_size) ||
++	    dm_set_name(param->name, newname)) {
 +		dm_error("Invalid new logical volume name supplied.");
 +		return -EINVAL;
 +	}
 +
-+	dm_put(md);
 +	return 0;
 +}
 +
@@ -493,7 +503,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +};
 +
 +/* Create misc character device and link to DM_DIR/control */
-+int dm_interface_init(void)
++int __init dm_interface_init(void)
 +{
 +	int r;
 +	char rname[64];
@@ -515,7 +525,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	}
 +
 +	strncpy(rname + r, "../", 3);
-+	r = devfs_mk_symlink(NULL, DM_DIR "/control", 
++	r = devfs_mk_symlink(NULL, DM_DIR "/control",
 +			     DEVFS_FL_DEFAULT, rname + r,
 +			     &_ctl_handle, NULL);
 +	if (r) {
@@ -531,7 +541,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	return r;
 +}
 +
-+void dm_interface_exit(void)
++void __exit dm_interface_exit(void)
 +{
 +	if (misc_deregister(&_dm_misc) < 0)
 +		DMERR("misc_deregister failed for control device");
@@ -647,8 +657,8 @@ diff -ruN linux-2.4.17/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +
 diff -ruN linux-2.4.17/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 --- linux-2.4.17/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Tue Jan 15 19:54:07 2002
-@@ -0,0 +1,200 @@
++++ linux/drivers/md/dm-stripe.c	Thu Jan 31 17:50:20 2002
+@@ -0,0 +1,202 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -787,6 +797,8 @@ diff -ruN linux-2.4.17/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +		if (r < 0) {
 +			*context = "dm-stripe: Couldn't parse stripe "
 +				   "destination";
++			while (i--)
++				dm_table_put_device(t, sc->stripe[i].dev);
 +			kfree(sc);
 +			return r;
 +		}
@@ -1504,8 +1516,8 @@ diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +EXPORT_SYMBOL(dm_unregister_target);
 diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.17/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Wed Jan 30 17:38:21 2002
-@@ -0,0 +1,1029 @@
++++ linux/drivers/md/dm.c	Mon Feb  4 13:16:57 2002
+@@ -0,0 +1,1063 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -1520,11 +1532,10 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +/* we only need this for the lv_bmap struct definition, not happy */
 +#include <linux/lvm.h>
 +
-+#define MAX_DEVICES 64
 +#define DEFAULT_READ_AHEAD 64
 +
 +static const char *_name = DM_NAME;
-+static const char *_version = "0.94.03-ioctl (2002-01-30)";
++static const char *_version = "0.94.04-ioctl (2002-02-04)";
 +static const char *_email = "lvm-devel@lists.sistina.com";
 +
 +static int major = 0;
@@ -1541,8 +1552,15 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +
 +static kmem_cache_t *_io_hook_cache;
 +
-+static struct rw_semaphore _dev_lock;
 +static struct mapped_device *_devs[MAX_DEVICES];
++static struct rw_semaphore _dev_locks[MAX_DEVICES];
++
++/*
++ * This lock is only held by dm_create and dm_set_name to avoid
++ * race conditions where someone else may create a device with
++ * the same name.
++ */
++static spinlock_t _create_lock = SPIN_LOCK_UNLOCKED;
 +
 +/* block device arrays */
 +static int _block_size[MAX_DEVICES];
@@ -1554,52 +1572,134 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +static int request(request_queue_t *q, int rw, struct buffer_head *bh);
 +static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb);
 +
-+static void __free_dev(struct mapped_device *md);
-+
 +/*
 + * Protect the mapped_devices referenced from _dev[]
 + */
-+static inline void dm_lock_r(void)
++struct mapped_device *dm_get_r(int minor)
 +{
-+	down_read(&_dev_lock);
++	struct mapped_device *md;
++
++	if (minor >= MAX_DEVICES)
++		return NULL;
++
++	down_read(_dev_locks + minor);
++	md = _devs[minor];
++	if (!md)
++		up_read(_dev_locks + minor);
++
++	return md;
 +}
 +
-+static inline void dm_unlock_r(void)
++struct mapped_device *dm_get_w(int minor)
 +{
-+	up_read(&_dev_lock);
-+}
++	struct mapped_device *md;
 +
-+static inline void dm_lock_w(void)
-+{
-+	down_write(&_dev_lock);
-+}
++	if (minor >= MAX_DEVICES)
++		return NULL;
 +
-+static inline void dm_unlock_w(void)
-+{
-+	up_write(&_dev_lock);
++	down_write(_dev_locks + minor);
++	md = _devs[minor];
++	if (!md)
++		up_write(_dev_locks + minor);
++
++	return md;
 +}
 +
 +/*
-+ * Reference count held for struct mapped_device when used outside a lock.
++ * The interface (eg, ioctl) will probably access the devices
++ * through these slow 'by name' locks, this needs improving at
++ * some point if people start playing with *large* numbers of dm
++ * devices.
 + */
-+static void __dm_get(struct mapped_device *md) {
-+	atomic_inc(&md->ref_count);
++struct mapped_device *dm_get_name_r(const char *name)
++{
++	int i;
++	struct mapped_device *md;
++
++	for (i = 0; i < MAX_DEVICES; i++) {
++		md = dm_get_r(i);
++		if (md) {
++			if (!strcmp(md->name, name))
++				return md;
++
++			dm_put_r(i);
++		}
++	}
++
++	return NULL;
 +}
 +
-+static void __dm_put(struct mapped_device *md) {
-+	if (atomic_dec_and_test(&md->ref_count))
-+		__free_dev(md);
++struct mapped_device *dm_get_name_w(const char *name)
++{
++	int i;
++	struct mapped_device *md;
++
++	/*
++	 * To avoid getting write locks on all the devices we try
++	 * and promote a read lock to a write lock, this can
++	 * fail, in which case we just start again.
++	 */
++
++      restart:
++
++	for (i = 0; i < MAX_DEVICES; i++) {
++		md = dm_get_r(i);
++		if (md) {
++			if (strcmp(md->name, name))
++				dm_put_r(i);
++			else {
++				/* found it */
++				dm_put_r(i);
++
++				md = dm_get_w(i);
++				if (!md)
++					goto restart;
++				if (strcmp(md->name, name)) {
++					dm_put_w(i);
++					goto restart;
++				}
++
++				return md;
++
++			}
++		}
++	}
++
++	return NULL;
 +}
 +
++void dm_put_r(int minor)
++{
++	if (minor >= MAX_DEVICES)
++		return;
++
++	up_read(_dev_locks + minor);
++}
++
++void dm_put_w(int minor)
++{
++	if (minor >= MAX_DEVICES)
++		return;
++
++	up_write(_dev_locks + minor);
++}
 +
 +/*
 + * Setup and tear down the driver
 + */
-+static int __init local_init(void)
++static __init void init_locks(void)
++{
++	int i;
++
++	for (i = 0; i < MAX_DEVICES; i++)
++		init_rwsem(_dev_locks + i);
++}
++
++static __init int local_init(void)
 +{
 +	int r;
 +
-+	init_rwsem(&_dev_lock);
++	init_locks();
 +
 +	/* allocate a slab for the io-hooks */
 +	if (!_io_hook_cache &&
@@ -1706,19 +1806,12 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	int minor = MINOR(inode->i_rdev);
 +	struct mapped_device *md;
 +
-+	if (minor >= MAX_DEVICES)
++	md = dm_get_w(minor);
++	if (!md)
 +		return -ENXIO;
-+
-+	dm_lock_w();
-+	md = _devs[minor];
-+
-+	if (!md) {
-+		dm_unlock_w();
-+		return -ENXIO;
-+	}
 +
 +	md->use_count++;
-+	dm_unlock_w();
++	dm_put_w(minor);
 +
 +	return 0;
 +}
@@ -1728,19 +1821,15 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	int minor = MINOR(inode->i_rdev);
 +	struct mapped_device *md;
 +
-+	if (minor >= MAX_DEVICES)
++	md = dm_get_w(minor);
++	if (!md)
 +		return -ENXIO;
 +
-+	dm_lock_w();
-+	md = _devs[minor];
-+	if (!md || md->use_count < 1) {
++	if (md->use_count < 1)
 +		DMWARN("incorrect reference count found in mapped_device");
-+		dm_unlock_w();
-+		return -ENXIO;
-+	}
 +
 +	md->use_count--;
-+	dm_unlock_w();
++	dm_put_w(minor);
 +
 +	return 0;
 +}
@@ -1765,7 +1854,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	case BLKRASET:
 +	case BLKRAGET:
 +	case BLKFLSBUF:
-+#if 0   /* Future stacking block device */
++#if 0				/* Future stacking block device */
 +	case BLKELVSET:
 +	case BLKELVGET:
 +#endif
@@ -1837,7 +1926,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +}
 +
 +/*
-+ * bh->b_end_io routine that decrements the pending count 
++ * bh->b_end_io routine that decrements the pending count
 + * and then calls the original bh->b_end_io fn.
 + */
 +static void dec_pending(struct buffer_head *bh, int uptodate)
@@ -1861,16 +1950,24 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +/*
 + * Add the bh to the list of deferred io.
 + */
-+static int queue_io(struct mapped_device *md, struct buffer_head *bh, int rw)
++static int queue_io(struct buffer_head *bh, int rw)
 +{
 +	struct deferred_io *di = alloc_deferred();
++	struct mapped_device *md;
++	int minor = MINOR(bh->b_rdev);
 +
 +	if (!di)
 +		return -ENOMEM;
 +
-+	dm_lock_w();
++	md = dm_get_w(minor);
++	if (!md) {
++		free_deferred(di);
++		return -ENXIO;
++	}
++
 +	if (!md->suspended) {
-+		dm_unlock_w();
++		dm_put_w(minor);
++		free_deferred(di);
 +		return 1;
 +	}
 +
@@ -1878,9 +1975,10 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	di->rw = rw;
 +	di->next = md->deferred;
 +	md->deferred = di;
-+	dm_unlock_w();
 +
-+	return 0;	/* deferred successfully */
++	dm_put_w(minor);
++
++	return 0;		/* deferred successfully */
 +}
 +
 +/*
@@ -1916,15 +2014,17 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +		atomic_inc(&md->pending);
 +		bh->b_end_io = dec_pending;
 +		bh->b_private = ih;
++
 +	} else if (r == 0)
 +		/* we don't need to hook */
 +		free_io_hook(ih);
++
 +	else if (r < 0) {
 +		free_io_hook(ih);
 +		return -1;
 +	}
 +
-+	return 0;
++	return r;
 +}
 +
 +/*
@@ -1952,30 +2052,23 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	struct mapped_device *md;
 +	int r, minor = MINOR(bh->b_rdev);
 +
-+	if (minor >= MAX_DEVICES) {
++	md = dm_get_r(minor);
++	if (!md) {
 +		buffer_IO_error(bh);
 +		return 0;
 +	}
-+
-+	dm_lock_r();
-+
-+	md = _devs[minor];
-+	if (!md)
-+		goto bad_no_put;
-+
-+	__dm_get(md);
 +
 +	/*
 +	 * If we're suspended we have to queue
 +	 * this io for later.
 +	 */
 +	while (md->suspended) {
-+		dm_unlock_r();
++		dm_put_r(minor);
 +
 +		if (rw == READA)
 +			goto bad_no_lock;
 +
-+		r = queue_io(md, bh, rw);
++		r = queue_io(bh, rw);
 +
 +		if (r < 0)
 +			goto bad_no_lock;
@@ -1984,32 +2077,27 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +			return 0;	/* deferred successfully */
 +
 +		/*
-+		 * We're in a while loop, because someone could suspend 
-+		 * before we get to the following read lock
++		 * We're in a while loop, because someone could suspend
++		 * before we get to the following read lock.
 +		 */
-+		dm_lock_r();
++		md = dm_get_r(minor);
++		if (!md) {
++			buffer_IO_error(bh);
++			return 0;
++		}
 +	}
 +
-+	if (__map_buffer(md, bh, rw, __find_node(md->map, bh)) < 0)
++
++ 	if ((r = __map_buffer(md, bh, rw, __find_node(md->map, bh))) < 0)
 +		goto bad;
 +
-+	__dm_put(md);
-+	dm_unlock_r();
-+	return 1;
++	dm_put_r(minor);
++	return r;
 +
 +      bad:
-+	__dm_put(md);
-+	dm_unlock_r();
-+	buffer_IO_error(bh);
-+	return 0;
-+
-+      bad_no_put:
-+	dm_unlock_r();
-+	buffer_IO_error(bh);
-+	return 0;
++	dm_put_r(minor);
 +
 +      bad_no_lock:
-+	dm_put(md);
 +	buffer_IO_error(bh);
 +	return 0;
 +}
@@ -2034,15 +2122,18 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	int minor = MINOR(dev), r;
 +	struct target *t;
 +
-+	dm_lock_r();
-+	if ((minor >= MAX_DEVICES) || !(md = _devs[minor]) || md->suspended) {
-+		r = -ENXIO;
-+		goto out;
++	md = dm_get_r(minor);
++	if (!md)
++		return -ENXIO;
++
++	if (md->suspended) {
++		dm_put_r(minor);
++		return -EPERM;
 +	}
 +
 +	if (!check_dev_size(minor, block)) {
-+		r = -EINVAL;
-+		goto out;
++		dm_put_r(minor);
++		return -EINVAL;
 +	}
 +
 +	/* setup dummy bh */
@@ -2061,8 +2152,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	*r_dev = bh.b_rdev;
 +	*r_block = bh.b_rsector / (bh.b_size >> 9);
 +
-+      out:
-+	dm_unlock_r();
++	dm_put_r(minor);
 +	return r;
 +}
 +
@@ -2082,84 +2172,84 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +		return r;
 +
 +	if (put_user(kdev_t_to_nr(r_dev), &lvb->lv_dev) ||
-+	    put_user(r_block, &lvb->lv_block)) 
-+		return -EFAULT;
++	    put_user(r_block, &lvb->lv_block)) return -EFAULT;
 +
 +	return 0;
 +}
 +
 +/*
-+ * See if the device with a specific minor # is free.
++ * See if the device with a specific minor # is free.  The write
++ * lock is held when it returns successfully.
 + */
-+static inline int __specific_dev(int minor)
++static inline int specific_dev(int minor, struct mapped_device *md)
 +{
-+	if (minor > MAX_DEVICES) {
-+		DMWARN("request for a mapped_device beyond MAX_DEVICES");
-+		return 0;
++	if (minor >= MAX_DEVICES) {
++		DMWARN("request for a mapped_device beyond MAX_DEVICES (%d)",
++		       MAX_DEVICES);
++		return -1;
 +	}
 +
-+	if (!_devs[minor])
-+		return minor;
++	down_write(_dev_locks + minor);
++	if (_devs[minor]) {
++		/* in use */
++		up_write(_dev_locks + minor);
++		return -1;
++	}
 +
-+	return -1;
++	_devs[minor] = md;
++	return minor;
 +}
 +
 +/*
-+ * find the first free device.
++ * Find the first free device.  Again the write lock is held on
++ * success.
 + */
-+static inline int __any_old_dev(void)
++static int any_old_dev(struct mapped_device *md)
 +{
 +	int i;
 +
 +	for (i = 0; i < MAX_DEVICES; i++)
-+		if (!_devs[i])
++		if (specific_dev(i, md) != -1)
 +			return i;
 +
 +	return -1;
 +}
 +
 +/*
-+ * allocate and initialise a blank device.
++ * Allocate and initialise a blank device.  Device is returned
++ * with a write lock held.
 + */
 +static struct mapped_device *alloc_dev(int minor)
 +{
 +	struct mapped_device *md = kmalloc(sizeof(*md), GFP_KERNEL);
 +
-+	if (!md)
-+		return 0;
++	if (!md) {
++		DMWARN("unable to allocate device, out of memory.");
++		return NULL;
++	}
 +
 +	memset(md, 0, sizeof(*md));
 +
-+	dm_lock_w();
-+	minor = (minor < 0) ? __any_old_dev() : __specific_dev(minor);
-+
++	/*
++	 * This grabs the write lock if it succeeds.
++	 */
++	minor = (minor < 0) ? any_old_dev(md) : specific_dev(minor, md);
 +	if (minor < 0) {
-+		DMWARN("no free devices available");
-+		dm_unlock_w();
 +		kfree(md);
-+		return 0;
++		return NULL;
 +	}
 +
++	_devs[minor] = md;
 +	md->dev = MKDEV(_major, minor);
 +	md->name[0] = '\0';
 +	md->suspended = 0;
 +
-+	atomic_set(&md->ref_count, 1);
-+
 +	init_waitqueue_head(&md->wait);
-+
-+	_devs[minor] = md;
-+	dm_unlock_w();
 +
 +	return md;
 +}
 +
-+static void __free_dev(struct mapped_device *md)
-+{
-+	kfree(md);
-+}
-+
-+static int register_device(struct mapped_device *md)
++static int __register_device(struct mapped_device *md)
 +{
 +	md->devfs_entry =
 +	    devfs_register(_dev_dir, md->name, DEVFS_FL_CURRENT_OWNER,
@@ -2170,14 +2260,14 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	return 0;
 +}
 +
-+static int unregister_device(struct mapped_device *md)
++static int __unregister_device(struct mapped_device *md)
 +{
 +	devfs_unregister(md->devfs_entry);
 +	return 0;
 +}
 +
 +/*
-+ * The hardsect size for a mapped device is the smallest hardsect size 
++ * The hardsect size for a mapped device is the smallest hardsect size
 + * from the devices it maps onto.
 + */
 +static int __find_hardsect_size(struct list_head *devices)
@@ -2232,25 +2322,19 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	_hardsect_size[minor] = 0;
 +}
 +
-+static struct mapped_device *__get_by_name(const char *name)
++static int check_name(const char *name)
 +{
-+	int i;
++	struct mapped_device *md;
 +
-+	for (i = 0; i < MAX_DEVICES; i++)
-+		if (_devs[i] && !strcmp(_devs[i]->name, name))
-+			return _devs[i];
-+
-+	return NULL;
-+}
-+
-+static int __check_name(const char *name)
-+{
 +	if (strchr(name, '/') || strlen(name) > DM_NAME_LEN) {
 +		DMWARN("invalid device name");
 +		return -1;
 +	}
 +
-+	if (__get_by_name(name)) {
++	md = dm_get_name_r(name);
++
++	if (md) {
++		dm_put_r(MINOR(md->dev));
 +		DMWARN("device name already in use");
 +		return -1;
 +	}
@@ -2261,30 +2345,28 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +/*
 + * Constructor for a new device
 + */
-+int dm_create(const char *name, int minor, struct dm_table *table,
-+	      struct mapped_device **result)
++int dm_create(const char *name, int minor, struct dm_table *table)
 +{
 +	int r;
 +	struct mapped_device *md;
 +
-+	if (minor >= MAX_DEVICES)
-+		return -ENXIO;
-+
-+	md = alloc_dev(minor);
-+	if (!md)
-+		return -ENXIO;
-+
-+	dm_lock_w();
-+
-+	if (__check_name(name) < 0) {
-+		r = -EINVAL;
-+		goto err;
++	spin_lock(&_create_lock);
++	if (check_name(name) < 0) {
++		spin_unlock(&_create_lock);
++		return -EINVAL;
 +	}
 +
-+	strcpy(md->name, name);
-+	_devs[minor] = md;
++	md = alloc_dev(minor);
++	if (!md) {
++		spin_unlock(&_create_lock);
++		return -ENXIO;
++	}
++	minor = MINOR(md->dev);
 +
-+	r = register_device(md);
++	/* FIXME: move name allocation into alloc_dev */
++	strcpy(md->name, name);
++
++	r = __register_device(md);
 +	if (r)
 +		goto err;
 +
@@ -2292,100 +2374,91 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	if (r)
 +		goto err;
 +
-+	__dm_get(md);
-+	dm_unlock_w();
-+
-+	*result = md;
++	dm_put_w(minor);
++	spin_unlock(&_create_lock);
 +	return 0;
 +
 +      err:
-+	__dm_put(md);
-+	dm_unlock_w();
++	_devs[minor] = NULL;
++	kfree(md);
++	dm_put_w(minor);
++	spin_unlock(&_create_lock);
 +	return r;
 +}
 +
 +/*
-+ * Destructor for the device.  You cannot destroy
-+ * a suspended device.
++ * Renames the device.  No lock held.
++ */
++int dm_set_name(const char *oldname, const char *newname)
++{
++	int r, minor;
++	struct mapped_device *md;
++
++	spin_lock(&_create_lock);
++	if (check_name(newname) < 0) {
++		spin_unlock(&_create_lock);
++		return -EINVAL;
++	}
++
++	md = dm_get_name_w(oldname);
++	if (!md) {
++		spin_unlock(&_create_lock);
++		return -ENXIO;
++	}
++	minor = MINOR(md->dev);
++
++	r = __unregister_device(md);
++	if (r)
++		goto out;
++
++	strcpy(md->name, newname);
++	r = __register_device(md);
++
++      out:
++	dm_put_w(minor);
++	spin_unlock(&_create_lock);
++	return r;
++}
++
++/*
++ * Destructor for the device.  You cannot destroy a suspended
++ * device.  Write lock must be held before calling.
 + */
 +int dm_destroy(struct mapped_device *md)
 +{
 +	int minor, r;
 +
-+	dm_lock_r();
-+	if (md->suspended || md->use_count) {
-+		dm_unlock_r();
++	if (md->suspended || md->use_count)
 +		return -EPERM;
-+	}
-+	dm_unlock_r();
 +
-+	fsync_dev(md->dev);
-+
-+	dm_lock_w();
-+	if (md->suspended || md->use_count) {
-+		dm_unlock_w();
-+		return -EPERM;
-+	}
-+
-+	r = unregister_device(md);
-+	if (r) {
-+		dm_unlock_w();
++	r = __unregister_device(md);
++	if (r)
 +		return r;
-+	}
 +
 +	minor = MINOR(md->dev);
-+	_devs[minor] = 0;
++	_devs[minor] = NULL;
 +	__unbind(md);
-+
-+	__dm_put(md);
-+	__dm_put(md);
-+	dm_unlock_w();
++	kfree(md);
 +
 +	return 0;
 +}
 +
 +/*
-+ * Sets or clears the read-only flag for the device.
++ * Sets or clears the read-only flag for the device.  Write lock
++ * must be held.
 + */
 +void dm_set_ro(struct mapped_device *md, int ro)
 +{
-+	dm_lock_w();
-+
 +	md->read_only = ro;
 +	set_device_ro(md->dev, ro);
-+
-+	dm_unlock_w();
 +}
 +
 +/*
-+ * Renames the device
++ * A target is notifying us of some event
 + */
-+int dm_set_name(struct mapped_device *md, const char *newname)
++void dm_notify(void *target)
 +{
-+	int r;
-+
-+	dm_lock_w();
-+
-+	if (__check_name(newname) < 0) {
-+		r = -EINVAL;
-+		goto err;
-+	}
-+
-+	r = unregister_device(md);
-+	if (r)
-+		goto err;
-+
-+	strcpy(md->name, newname);
-+
-+	r = register_device(md);
-+	if (r)
-+		goto err;
-+
-+      err:
-+	dm_unlock_w();
-+	return r;
 +}
-+
 +
 +/*
 + * Requeue the deferred buffer_heads by calling generic_make_request.
@@ -2403,118 +2476,91 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +}
 +
 +/*
-+ * Swap in a new table (destroying old one).
++ * Swap in a new table (destroying old one).  Write lock must be
++ * held.
 + */
 +int dm_swap_table(struct mapped_device *md, struct dm_table *table)
 +{
 +	int r;
 +
-+	dm_lock_w();
-+
 +	/* device must be suspended */
-+	if (!md->suspended) {
-+		dm_unlock_w();
++	if (!md->suspended)
 +		return -EPERM;
-+	}
 +
 +	__unbind(md);
 +
 +	r = __bind(md, table);
-+	if (r) {
-+		dm_unlock_w();
++	if (r)
 +		return r;
-+	}
-+
-+	dm_unlock_w();
 +
 +	return 0;
 +}
 +
 +/*
-+ * We need to be able to change a mapping table
-+ * under a mounted filesystem.  for example we
-+ * might want to move some data in the background.
-+ * Before the table can be swapped with
-+ * dm_bind_table, dm_suspend must be called to
-+ * flush any in flight buffer_heads and ensure
-+ * that any further io gets deferred.
++ * We need to be able to change a mapping table under a mounted
++ * filesystem.  for example we might want to move some data in
++ * the background.  Before the table can be swapped with
++ * dm_bind_table, dm_suspend must be called to flush any in
++ * flight buffer_heads and ensure that any further io gets
++ * deferred.  Write lock must be held.
 + */
 +int dm_suspend(struct mapped_device *md)
 +{
++	int minor = MINOR(md->dev);
 +	DECLARE_WAITQUEUE(wait, current);
 +
-+	dm_lock_w();
-+	if (md->suspended) {
-+		dm_unlock_w();
++	if (md->suspended)
 +		return -EINVAL;
-+	}
 +
 +	md->suspended = 1;
-+	dm_unlock_w();
++	dm_put_w(minor);
 +
 +	/* wait for all the pending io to flush */
 +	add_wait_queue(&md->wait, &wait);
 +	current->state = TASK_UNINTERRUPTIBLE;
 +	do {
-+		dm_lock_w();
++		md = dm_get_w(minor);
++		if (!md) {
++			/* Caller expects to free this lock. Yuck. */
++			down_write(_dev_locks + minor);
++			return -ENXIO;
++		}
++
 +		if (!atomic_read(&md->pending))
 +			break;
 +
-+		dm_unlock_w();
 +		schedule();
 +
 +	} while (1);
 +
 +	current->state = TASK_RUNNING;
 +	remove_wait_queue(&md->wait, &wait);
-+	dm_unlock_w();
 +
 +	return 0;
 +}
 +
 +int dm_resume(struct mapped_device *md)
 +{
++	int minor = MINOR(md->dev);
 +	struct deferred_io *def;
 +
-+	dm_lock_w();
-+	if (!md->suspended || !md->map->num_targets) {
-+		dm_unlock_w();
++	if (!md->suspended || !md->map->num_targets)
 +		return -EINVAL;
-+	}
 +
 +	md->suspended = 0;
 +	def = md->deferred;
 +	md->deferred = NULL;
-+	dm_unlock_w();
 +
++	dm_put_w(minor);
 +	flush_deferred_io(def);
-+
 +	fsync_dev(md->dev);
++	if (!dm_get_w(minor)) {
++		/* FIXME: yuck */
++		down_write(_dev_locks + minor);
++		return -ENXIO;
++	}
 +
 +	return 0;
-+}
-+
-+/*
-+ * Search for a device with a particular name.
-+ */
-+struct mapped_device *dm_get(const char *name)
-+{
-+	struct mapped_device *md;
-+
-+	dm_lock_r();
-+	md = __get_by_name(name);
-+	if (md)
-+		__dm_get(md);
-+	dm_unlock_r();
-+
-+	return md;
-+}
-+
-+void dm_put(struct mapped_device *md)
-+{
-+	dm_lock_r();
-+	__dm_put(md);
-+	dm_unlock_r();
 +}
 +
 +struct block_device_operations dm_blk_dops = {
@@ -2537,8 +2583,8 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +MODULE_LICENSE("GPL");
 diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 --- linux-2.4.17/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Fri Jan 11 14:19:04 2002
-@@ -0,0 +1,188 @@
++++ linux/drivers/md/dm.h	Mon Feb  4 13:01:21 2002
+@@ -0,0 +1,214 @@
 +/*
 + * Internal header file for device mapper
 + *
@@ -2565,6 +2611,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 +#include <linux/ctype.h>
 +#include <linux/device-mapper.h>
 +#include <linux/list.h>
++#include <linux/init.h>
 +
 +#define DM_NAME "device-mapper"	/* Name for messaging */
 +#define MAX_DEPTH 16
@@ -2572,6 +2619,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 +#define KEYS_PER_NODE (NODE_SIZE / sizeof(offset_t))
 +#define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
 +#define MAX_ARGS 32
++#define MAX_DEVICES 256
 +
 +/*
 + * List of devices that a metadevice uses and should open/close.
@@ -2626,8 +2674,6 @@ diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 +	kdev_t dev;
 +	char name[DM_NAME_LEN];
 +
-+	atomic_t ref_count;
-+
 +	int use_count;
 +	int suspended;
 +	int read_only;
@@ -2658,13 +2704,26 @@ diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 +
 +
 +/* dm.c */
-+struct mapped_device *dm_get(const char *name);
-+void dm_put(struct mapped_device *md);
-+int dm_create(const char *name, int minor, struct dm_table *table,
-+	      struct mapped_device **result);
++struct mapped_device *dm_get_r(int minor);
++struct mapped_device *dm_get_w(int minor);
++struct mapped_device *dm_get_name_r(const char *name);
++struct mapped_device *dm_get_name_w(const char *name);
++
++void dm_put_r(int minor);
++void dm_put_w(int minor);
++
++/*
++ * Call with no lock.
++ */
++int dm_create(const char *name, int minor, struct dm_table *table);
++int dm_set_name(const char *oldname, const char *newname);
++
++/*
++ * You must have the write lock before calling the remaining md
++ * methods.
++ */
 +int dm_destroy(struct mapped_device *md);
 +void dm_set_ro(struct mapped_device *md, int ro);
-+int dm_set_name(struct mapped_device *md, const char *newname);
 +
 +/*
 + * The device must be suspended before calling this method.
@@ -2677,6 +2736,12 @@ diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 +int dm_suspend(struct mapped_device *md);
 +int dm_resume(struct mapped_device *md);
 +
++/*
++ * Event notification
++ */
++void dm_notify(void *target);
++
++
 +/* dm-table.c */
 +int dm_table_create(struct dm_table **result);
 +void dm_table_destroy(struct dm_table *t);
@@ -2684,6 +2749,13 @@ diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 +int dm_table_add_target(struct dm_table *t, offset_t highs,
 +			struct target_type *type, void *private);
 +int dm_table_complete(struct dm_table *t);
++
++/* kcopyd.c */
++int dm_blockcopy(unsigned long fromsec, unsigned long tosec, 
++		 unsigned long nr_sectors,
++		 kdev_t fromdev, kdev_t todev,
++		 int throttle, void (*callback)(int, void *), void *context);
++
 +
 +#define DMWARN(f, x...) printk(KERN_WARNING DM_NAME ": " f "\n" , ## x)
 +#define DMERR(f, x...) printk(KERN_ERR DM_NAME ": " f "\n" , ## x)
@@ -2710,8 +2782,8 @@ diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 + * ioctl or filesystem, depending which patch you have applied.
 + */
 +
-+int dm_interface_init(void);
-+void dm_interface_exit(void);
++int __init dm_interface_init(void);
++void __exit dm_interface_exit(void);
 +
 +/* Code in dm-snapshot called by dm-origin to do snapshot COW */
 +int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh);
@@ -2791,7 +2863,7 @@ diff -ruN linux-2.4.17/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.17/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 --- linux-2.4.17/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Wed Jan 30 17:38:21 2002
++++ linux/include/linux/dm-ioctl.h	Mon Feb  4 13:16:57 2002
 @@ -0,0 +1,69 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -2853,7 +2925,7 @@ diff -ruN linux-2.4.17/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +#define DM_VERSION _IOR(DM_IOCTL, 0x06, struct dm_ioctl)
 +
 +#define DM_IOCTL_VERSION "0.94"
-+#define DM_DRIVER_VERSION "0.94.03-ioctl (2002-01-30)"
++#define DM_DRIVER_VERSION "0.94.04-ioctl (2002-02-04)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	0x00000001
