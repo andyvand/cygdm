@@ -663,6 +663,11 @@ void dm_table_add_wait_queue(struct dm_table *t, wait_queue_t *wq)
 	add_wait_queue(&t->eventq, wq);
 }
 
+void dm_table_remove_wait_queue(struct dm_table *t, wait_queue_t *wq)
+{
+	remove_wait_queue(&t->eventq, wq);
+}
+
 EXPORT_SYMBOL(dm_get_device);
 EXPORT_SYMBOL(dm_put_device);
 EXPORT_SYMBOL(dm_table_event);
