@@ -40,11 +40,10 @@ static void mirror_end_io(struct buffer_head *bh, int uptodate)
 	if (!uptodate) {
 		DMERR("Mirror copy to %s failed", kdevname(lc->todev->dev));
 		lc->error = 1;
-		dm_notify(lc); /* TODO: interface ?? */
+		dm_notify(lc);	/* TODO: interface ?? */
 	}
 	kfree(bh);
 }
-
 
 /* Called when the copy I/O has finished */
 static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
@@ -56,16 +55,18 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 		return;
 	}
 
-	if (reason == COPY_CB_FAILED_READ ||
-	    reason == COPY_CB_FAILED_WRITE) {
-		DMERR("Mirror block %s on %s failed, sector %ld", reason==COPY_CB_FAILED_READ?"read":"write",
-		      reason==COPY_CB_FAILED_READ?kdevname(lc->fromdev->dev):kdevname(lc->todev->dev), arg);
+	if (reason == COPY_CB_FAILED_READ || reason == COPY_CB_FAILED_WRITE) {
+		DMERR("Mirror block %s on %s failed, sector %ld",
+		      reason == COPY_CB_FAILED_READ ? "read" : "write",
+		      reason == COPY_CB_FAILED_READ ?
+		      kdevname(lc->fromdev->dev) :
+		      kdevname(lc->todev->dev), arg);
 		lc->error = 1;
 	}
 
 	if (reason == COPY_CB_COMPLETE) {
 		/* Say we've finished */
-		dm_notify(lc); /* TODO: interface ?? */
+		dm_notify(lc);	/* TODO: interface ?? */
 	}
 }
 
@@ -134,7 +135,7 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	lc->to_delta = (int) offset2 - (int) b;
 	lc->frompos = offset1;
 	lc->topos = offset2;
-	lc->error  = 0;
+	lc->error = 0;
 	init_rwsem(&lc->lock);
 	*context = lc;
 
@@ -150,10 +151,10 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	}
 	return 0;
 
- bad_put:
+      bad_put:
 	dm_table_put_device(t, lc->fromdev);
 	dm_table_put_device(t, lc->todev);
- bad:
+      bad:
 	kfree(lc);
 	return -EINVAL;
 }
@@ -176,22 +177,26 @@ static int mirror_map(struct buffer_head *bh, int rw, void *context)
 	bh->b_rdev = lc->fromdev->dev;
 	bh->b_rsector = bh->b_rsector + lc->from_delta;
 
-	/* If we've already copied this block then duplicated it to the mirror device */
+	/* 
+	 * If we've already copied this block then duplicated 
+	 * it to the mirror device 
+	 */
 	if (rw == WRITE && bh->b_rsector < lc->got_to) {
 
 		/* Schedule copy of I/O to other target */
 		/* TODO: kmalloc is naff here */
-		struct buffer_head *dbh = kmalloc(sizeof(struct buffer_head), GFP_NOIO);
+		struct buffer_head *dbh = kmalloc(sizeof(struct buffer_head),
+						  GFP_NOIO);
 		if (dbh) {
 			*dbh = *bh;
-			dbh->b_rdev    = lc->todev->dev;
-			dbh->b_rsector = bh->b_rsector - lc->from_delta + lc->to_delta;
-			dbh->b_end_io  = mirror_end_io;
+			dbh->b_rdev = lc->todev->dev;
+			dbh->b_rsector = bh->b_rsector - lc->from_delta
+			    + lc->to_delta;
+			dbh->b_end_io = mirror_end_io;
 			dbh->b_private = lc;
 
 			generic_make_request(WRITE, dbh);
-		}
-		else {
+		} else {
 			DMERR("kmalloc failed for mirror bh");
 			lc->error = 1;
 		}

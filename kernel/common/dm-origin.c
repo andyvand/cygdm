@@ -86,7 +86,7 @@ static int origin_map(struct buffer_head *bh, int rw, void *context)
 
 	/* Only tell snapshots if this is a write */
 	if (rw != READ && rw != READA) {
-	        return dm_do_snapshot(lc->target_dev, bh);
+		return dm_do_snapshot(lc->target_dev, bh);
 	}
 
 	return 1;
