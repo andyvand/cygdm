@@ -71,10 +71,6 @@ endif
 
 LD_FLAGS += -L$(interfacedir)
 
-ifeq ("@STATIC_LINK@", "yes")
-  LD_FLAGS += -static
-endif
-
 ifeq ("@COMPAT@", "yes")
   CFLAGS += -DDM_COMPAT
 endif
