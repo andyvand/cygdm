@@ -10,30 +10,32 @@ DM_NAME="device-mapper"
 
 set -e
 
-make_dir()
-{
-    [ -d $dir ] || mkdir --mode=755 $dir
-}
-
-make_node()
-{
-    rm -f $control || true
-    echo Creating $control character device with major:$major minor:$minor
-    mknod --mode=600 $control c $major $minor
-}
-
 dir="/dev/$DM_DIR"
 control="$dir/control"
-devfs=$(grep -c '\<devfs' /proc/filesystems || true)
 
-if [ $devfs -eq 1 ]; then
-    exit;
+# Check for devfs, procfs
+if test -e /dev/.devfsd ; then
+	echo "devfs is in use, no need to create devices."
+	exit
 fi
 
-make_dir
+if test ! -e /proc/devices ; then
+	echo "procfs is not being used; you'll have to make $control manually."
+	exit
+fi
 
+# Get major, minor, and mknod
 major=$(awk '$2 ~ /^misc$/ {print $1}' /proc/devices)
 minor=$(awk "\$2 ~ /^$DM_NAME\$/ {print \$1}" /proc/misc)
 
-make_node
+if test -z "$major" -o -z "$minor" ; then
+	echo "$DM_NAME kernel module isn't loaded; refusing to create $control."
+	exit
+fi
+
+mkdir -p --mode=755 $dir
+test -e $control && rm -f $control
+
+echo "Creating $control character device with major:$major minor:$minor."
+mknod --mode=600 $control c $major $minor
 
