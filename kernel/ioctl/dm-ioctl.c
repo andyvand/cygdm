@@ -21,6 +21,11 @@ static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
 	if (copy_from_user(&tmp, user, sizeof(tmp)))
 		return -EFAULT;
 
+	if (strcmp(DM_IOCTL_VERSION, tmp.version)) {
+		DMWARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
+		return -EINVAL;
+	}
+
 	if (tmp.data_size < sizeof(tmp))
 		return -EINVAL;
 
@@ -28,8 +33,10 @@ static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
 	if (!dmi)
 		return -ENOMEM;
 
-	if (copy_from_user(dmi, user, tmp.data_size))
+	if (copy_from_user(dmi, user, tmp.data_size)) {
+		vfree(dmi);
 		return -EFAULT;
+	}
 
 	*result = dmi;
 	return 0;
@@ -159,19 +166,23 @@ static int info(const char *name, struct dm_ioctl *user)
 	struct dm_ioctl param;
 	struct mapped_device *md = dm_get(name);
 
-	if (!md) {
-		param.exists = 0;
+	param.status = 0;
+
+	if (!md)
 		goto out;
-	}
+
+	param.status |= DM_EXISTS_FLAG;
+	if (md->suspended)
+		param.status |= DM_SUSPEND_FLAG;
+	if (md->read_only)
+		param.status |= DM_READONLY_FLAG;
 
 	param.data_size = 0;
 	strncpy(param.name, md->name, sizeof(param.name));
 	param.name[sizeof(param.name) - 1] = '\0';
-	param.exists = 1;
-	param.suspend = md->suspended;
+
 	param.open_count = md->use_count;
-	param.major = MAJOR(md->dev);
-	param.minor = MINOR(md->dev);
+	param.dev = kdev_t_to_nr(md->dev);
 	param.target_count = md->map->num_targets;
 
 	dm_put(md);
@@ -185,6 +196,7 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 	int r;
 	struct mapped_device *md;
 	struct dm_table *t;
+	int minor;
 
 	r = dm_table_create(&t);
 	if (r)
@@ -194,11 +206,14 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 	if (r)
 		goto bad;
 
-	r = dm_create(param->name, param->minor, t, &md);
+	minor = (param->status & DM_PERSISTENT_DEV_FLAG) ?
+		minor = MINOR(to_kdev_t(param->dev)) : -1;
+
+	r = dm_create(param->name, minor, t, &md);
 	if (r)
 		goto bad;
 
-	dm_set_ro(md, param->read_only);
+	dm_set_ro(md, (param->status & DM_READONLY_FLAG) ? 1 : 0);
 
 	r = info(param->name, user);
 	if (r) {
@@ -232,7 +247,8 @@ static int suspend(struct dm_ioctl *param)
 	if (!md)
 		return -ENXIO;
 
-	r = param->suspend ? dm_suspend(md) : dm_resume(md);
+	r = (param->status & DM_SUSPEND_FLAG) ? 
+	     dm_suspend(md) : dm_resume(md);
 	dm_put(md);
 	return r;
 }
@@ -258,7 +274,7 @@ static int reload(struct dm_ioctl *param)
 	if (r)
 		goto bad;
 
-	dm_set_ro(md, param->read_only);
+	dm_set_ro(md, (param->status & DM_READONLY_FLAG) ? 1 : 0);
 
 	dm_put(md);
 	return 0;
@@ -317,12 +333,6 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 	if (r)
 		return r;
 
-	if (strcmp(DM_IOCTL_VERSION, p->version)) {
-		DMWARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
-		r = -EINVAL;
-		goto out;
-	}
-
 	switch (command) {
 	case DM_CREATE:
 		r = create(p, (struct dm_ioctl *) a);
@@ -353,7 +363,6 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 		r = -EINVAL;
 	}
 
-      out:
 	free_params(p);
 	return r;
 }
