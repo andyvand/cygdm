@@ -60,6 +60,11 @@ AC_ARG_WITH(group,
 
 AC_ARG_ENABLE(jobs, [  --enable-jobs=NUM       Number of jobs to run simultaneously], JOBS=-j$enableval, JOBS=)
 
+dnl Clear default exec_prefix - install into /sbin rather than /usr/sbin
+if [[ "x$exec_prefix" = xNONE -a "x$prefix" = xNONE ]];
+ then  exec_prefix="";
+fi;
+
 dnl Checks for library functions.
 AC_PROG_GCC_TRADITIONAL
 AC_TYPE_SIGNAL
