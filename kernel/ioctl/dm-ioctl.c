@@ -21,7 +21,7 @@ static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
 	if (copy_from_user(&tmp, user, sizeof(tmp)))
 		return -EFAULT;
 
-	if (!(dmi = vmalloc(tmp.data_size)))
+	if (!(dmi = (struct dm_ioctl *) vmalloc(tmp.data_size)))
 		return -ENOMEM;
 
 	if (copy_from_user(dmi, user, tmp.data_size))
@@ -89,7 +89,7 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 	char *params, *argv[MAX_ARGS];
 	struct target_type *ttype;
 	void *context, *begin, *end;
-	offset_t high = 0;
+	offset_t highs = 0;
 
 	if (!args->target_count) {
 		DMWARN("populate_table: no targets specified");
@@ -129,8 +129,8 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 		}
 
 		/* Add the target to the table */
-		high = spec->sector_start + (spec->length - 1);
-		if (dm_table_add_target(table, high, ttype, context))
+		highs = spec->sector_start + (spec->length - 1);
+		if (dm_table_add_target(table, highs, ttype, context))
 			PARSE_ERROR("internal error adding target to table");
 
 		first = 0;
@@ -210,12 +210,14 @@ static int remove(struct dm_ioctl *param)
 
 static int suspend(struct dm_ioctl *param)
 {
+	int r;
 	struct mapped_device *md = dm_get(param->name);
 
 	if (!md)
 		return -ENXIO;
 
-	return param->suspend ? dm_suspend(md) : dm_resume(md);
+	r = param->suspend ? dm_suspend(md) : dm_resume(md);
+	return r;
 }
 
 static int reload(struct dm_ioctl *param)

@@ -336,7 +336,7 @@ void dm_table_put_device(struct dm_table *t, struct dm_dev *dd)
 /*
  * Adds a target to the map
  */
-int dm_table_add_target(struct dm_table *t, offset_t high,
+int dm_table_add_target(struct dm_table *t, offset_t highs,
 			struct target_type *type, void *private)
 {
 	int r, n;
@@ -345,7 +345,7 @@ int dm_table_add_target(struct dm_table *t, offset_t high,
 		return r;
 
 	n = t->num_targets++;
-	t->highs[n] = high;
+	t->highs[n] = highs;
 	t->targets[n].type = type;
 	t->targets[n].private = private;
 

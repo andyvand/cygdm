@@ -135,7 +135,7 @@ int dm_resume(struct mapped_device *md);
 int dm_table_create(struct dm_table **result);
 void dm_table_destroy(struct dm_table *t);
 
-int dm_table_add_target(struct dm_table *t, offset_t high,
+int dm_table_add_target(struct dm_table *t, offset_t highs,
 			struct target_type *type, void *private);
 int dm_table_complete(struct dm_table *t);
 

@@ -19,6 +19,7 @@ static const char *_name = DM_NAME;
 static const char *_version = @DM_VERSION@;
 static const char *_email = "lvm-devel@lists.sistina.com";
 
+static int major = 0;
 static int _major = 0;
 
 struct io_hook {
@@ -44,6 +45,8 @@ static devfs_handle_t _dev_dir;
 
 static int request(request_queue_t *q, int rw, struct buffer_head *bh);
 static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb);
+
+static void __free_dev(struct mapped_device *md);
 
 /*
  * Shortcuts to lock/unlock the global _dev_lock
@@ -81,6 +84,7 @@ static int __init local_init(void)
 						 0, 0, NULL, NULL)))
 		return -ENOMEM;
 
+	_major = major;
 	r = devfs_register_blkdev(_major, _name, &dm_blk_dops);
 	if (r < 0) {
 		DMERR("register_blkdev failed");
@@ -118,6 +122,7 @@ static void local_exit(void)
 	blk_size[_major] = NULL;
 	blksize_size[_major] = NULL;
 	hardsect_size[_major] = NULL;
+	_major = 0;
 
 	DMINFO("%s cleaned up", _version);
 }
@@ -593,7 +598,7 @@ static struct mapped_device *alloc_dev(int minor)
 	return md;
 }
 
-static void free_dev(struct mapped_device *md)
+static void __free_dev(struct mapped_device *md)
 {
 	kfree(md);
 }
@@ -682,7 +687,7 @@ static struct mapped_device *__get_by_name(const char *name)
 	return NULL;
 }
 
-static int check_name(const char *name)
+static int __check_name(const char *name)
 {
 	if (strchr(name, '/')) {
 		DMWARN("invalid device name");
@@ -709,12 +714,13 @@ int dm_create(const char *name, int minor, struct dm_table *table,
 	if (minor >= MAX_DEVICES)
 		return -ENXIO;
 
-	if (!(md = alloc_dev(minor)))
+	md = alloc_dev(minor);
+	if (!md)
 		return -ENXIO;
 
 	dm_lock_w();
 
-	if (check_name(name) < 0) {
+	if (__check_name(name) < 0) {
 		r = -EINVAL;
 		goto err;
 	}
@@ -736,8 +742,8 @@ int dm_create(const char *name, int minor, struct dm_table *table,
 	return 0;
 
       err:
+	__free_dev(md);
 	dm_unlock_w();
-	free_dev(md);
 	return r;
 }
 
@@ -754,17 +760,18 @@ int dm_destroy(struct mapped_device *md)
 		dm_unlock_r();
 		return -EPERM;
 	}
-
-	fsync_dev(md->dev);
 	dm_unlock_r();
 
+	fsync_dev(md->dev);
+
 	dm_lock_w();
-	if (md->use_count) {
+	if (md->suspended || md->use_count) {
 		dm_unlock_w();
 		return -EPERM;
 	}
 
-	if ((r = unregister_device(md))) {
+	r = unregister_device(md);
+	if (r) {
 		dm_unlock_w();
 		return r;
 	}
@@ -772,10 +779,9 @@ int dm_destroy(struct mapped_device *md)
 	minor = MINOR(md->dev);
 	_devs[minor] = 0;
 	__unbind(md);
+	__free_dev(md);
 
 	dm_unlock_w();
-
-	free_dev(md);
 
 	return 0;
 }
@@ -827,7 +833,8 @@ int dm_swap_table(struct mapped_device *md, struct dm_table *table)
 
 	__unbind(md);
 
-	if ((r = __bind(md, table))) {
+	r = __bind(md, table);
+	if (r) {
 		dm_unlock_w();
 		return r;
 	}
@@ -928,8 +935,8 @@ struct block_device_operations dm_blk_dops = {
 module_init(dm_init);
 module_exit(dm_exit);
 
-MODULE_PARM(_major, "i");
-MODULE_PARM_DESC(_major, "The major number of the device mapper");
+MODULE_PARM(major, "i");
+MODULE_PARM_DESC(major, "The major number of the device mapper");
 MODULE_DESCRIPTION(DM_NAME " driver");
 MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 MODULE_LICENSE("GPL");
