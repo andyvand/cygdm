@@ -158,7 +158,7 @@ void dm_table_destroy(struct dm_table *t)
 	/* free the device list */
 	if (t->devices.next != &t->devices) {
 		DMWARN("devices still present during destroy: "
-			"dm_table_remove_device calls missing");
+		       "dm_table_remove_device calls missing");
 
 		free_devices(&t->devices);
 	}

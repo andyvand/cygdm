@@ -9,7 +9,6 @@
 #ifndef DM_INTERNAL_H
 #define DM_INTERNAL_H
 
-
 #include <linux/config.h>
 #include <linux/version.h>
 #include <linux/major.h>
@@ -115,7 +114,6 @@ void dm_target_exit(void);
  */
 int split_args(int max, int *argc, char **argv, char *input);
 
-
 /* dm.c */
 struct mapped_device *dm_get_r(int minor);
 struct mapped_device *dm_get_w(int minor);
@@ -154,7 +152,6 @@ int dm_resume(struct mapped_device *md);
  */
 void dm_notify(void *target);
 
-
 /* dm-table.c */
 int dm_table_create(struct dm_table **result);
 void dm_table_destroy(struct dm_table *t);
@@ -164,11 +161,18 @@ int dm_table_add_target(struct dm_table *t, offset_t highs,
 int dm_table_complete(struct dm_table *t);
 
 /* kcopyd.c */
-typedef enum {COPY_CB_COMPLETE, COPY_CB_FAILED_READ, COPY_CB_FAILED_WRITE, COPY_CB_PROGRESS} copy_cb_reason_t;
-int dm_blockcopy(unsigned long fromsec, unsigned long tosec, 
-		 unsigned long nr_sectors,
-		 kdev_t fromdev, kdev_t todev,
-		 int priority, int throttle, void (*callback)(copy_cb_reason_t, void *, long), void *context);
+typedef enum {
+	COPY_CB_COMPLETE,
+	COPY_CB_FAILED_READ,
+	COPY_CB_FAILED_WRITE,
+	COPY_CB_PROGRESS
+} copy_cb_reason_t;
+
+int dm_blockcopy(unsigned long fromsec, unsigned long tosec,
+		 unsigned long nr_sectors, kdev_t fromdev, kdev_t todev,
+		 int priority, int throttle,
+		 void (*callback) (copy_cb_reason_t, void *, long),
+		 void *context);
 int kcopyd_init(void);
 void kcopyd_exit(void);
 

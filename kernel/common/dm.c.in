@@ -597,7 +597,7 @@ static int request(request_queue_t *q, int rw, struct buffer_head *bh)
 	}
 
 
- 	if ((r = __map_buffer(md, bh, rw, __find_node(md->map, bh))) < 0)
+	if ((r = __map_buffer(md, bh, rw, __find_node(md->map, bh))) < 0)
 		goto bad;
 
 	dm_put_r(minor);
@@ -681,7 +681,8 @@ static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb)
 		return r;
 
 	if (put_user(kdev_t_to_nr(r_dev), &lvb->lv_dev) ||
-	    put_user(r_block, &lvb->lv_block)) return -EFAULT;
+	    put_user(r_block, &lvb->lv_block)) 
+		return -EFAULT;
 
 	return 0;
 }
