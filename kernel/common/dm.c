@@ -946,6 +946,7 @@ int dm_suspend(struct mapped_device *md)
 	down_write(&md->lock);
 	remove_wait_queue(&md->wait, &wait);
 	set_bit(DMF_SUSPENDED, &md->flags);
+	dm_table_suspend_targets(md->map);
 	up_write(&md->lock);
 
 	return 0;
@@ -961,6 +962,7 @@ int dm_resume(struct mapped_device *md)
 		return -EINVAL;
 	}
 
+	dm_table_resume_targets(md->map);
 	clear_bit(DMF_SUSPENDED, &md->flags);
 	clear_bit(DMF_BLOCK_IO, &md->flags);
 	def = md->deferred;

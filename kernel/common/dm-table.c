@@ -41,21 +41,10 @@ struct dm_table {
 	/* a list of devices used by this table */
 	struct list_head devices;
 
-	/*
-	 * A waitqueue for processes waiting for something
-	 * interesting to happen to this table.
-	 */
-	struct semaphore event_lock;
-	wait_queue_head_t eventq;
+	/* events get handed up using this callback */
+	void (*event_fn)(void *);
+	void *event_context;
 };
-
-/*
- * Ceiling(n / size)
- */
-static inline unsigned long div_up(unsigned long n, unsigned long size)
-{
-	return dm_round_up(n, size) / size;
-}
 
 /*
  * Similar to ceiling(log_size(n))
@@ -65,7 +54,7 @@ static unsigned int int_log(unsigned long n, unsigned long base)
 	int result = 0;
 
 	while (n > 1) {
-		n = div_up(n, base);
+		n = dm_div_up(n, base);
 		result++;
 	}
 
@@ -176,8 +165,6 @@ int dm_table_create(struct dm_table **result, int mode)
 		return -ENOMEM;
 	}
 
-	init_MUTEX(&t->event_lock);
-	init_waitqueue_head(&t->eventq);
 	t->mode = mode;
 	*result = t;
 	return 0;
@@ -197,12 +184,6 @@ static void free_devices(struct list_head *devices)
 void table_destroy(struct dm_table *t)
 {
 	unsigned int i;
-
-	/* destroying the table counts as an event */
-	dm_table_event(t);
-
-	/* wait for eventq to empty */
-	down(&t->event_lock);
 
 	/* free the indexes (see dm_table_complete) */
 	if (t->depth >= 2)
@@ -293,7 +274,7 @@ static struct dm_dev *find_device(struct list_head *l, kdev_t dev)
 {
 	struct list_head *tmp;
 
-	list_for_each (tmp, l) {
+	list_for_each(tmp, l) {
 		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
 		if (kdev_same(dd->dev, dev))
 			return dd;
@@ -570,7 +551,7 @@ static int setup_indexes(struct dm_table *t)
 
 	/* allocate the space for *all* the indexes */
 	for (i = t->depth - 2; i >= 0; i--) {
-		t->counts[i] = div_up(t->counts[i + 1], CHILDREN_PER_NODE);
+		t->counts[i] = dm_div_up(t->counts[i + 1], CHILDREN_PER_NODE);
 		total += t->counts[i];
 	}
 
@@ -597,7 +578,7 @@ int dm_table_complete(struct dm_table *t)
 	unsigned int leaf_nodes;
 
 	/* how many indexes will the btree have ? */
-	leaf_nodes = div_up(t->num_targets, KEYS_PER_NODE);
+	leaf_nodes = dm_div_up(t->num_targets, KEYS_PER_NODE);
 	t->depth = 1 + int_log(leaf_nodes, CHILDREN_PER_NODE);
 
 	/* leaf layer has already been set up */
@@ -610,9 +591,22 @@ int dm_table_complete(struct dm_table *t)
 	return r;
 }
 
+static spinlock_t _event_lock = SPIN_LOCK_UNLOCKED;
+void dm_table_event_callback(struct dm_table *t,
+			     void (*fn)(void *), void *context)
+{
+	spin_lock_irq(&_event_lock);
+	t->event_fn = fn;
+	t->event_context = context;
+	spin_unlock_irq(&_event_lock);
+}
+
 void dm_table_event(struct dm_table *t)
 {
-	wake_up_interruptible(&t->eventq);
+	spin_lock(&_event_lock);
+	if (t->event_fn)
+		t->event_fn(t->event_context);
+	spin_unlock(&_event_lock);
 }
 
 sector_t dm_table_get_size(struct dm_table *t)
@@ -663,28 +657,32 @@ int dm_table_get_mode(struct dm_table *t)
 	return t->mode;
 }
 
-static spinlock_t _wq_lock = SPIN_LOCK_UNLOCKED;
-void dm_table_add_wait_queue(struct dm_table *t, wait_queue_t *wq)
+void dm_table_suspend_targets(struct dm_table *t)
 {
-	spin_lock(&_wq_lock);
-	if (!waitqueue_active(&t->eventq))
-		down(&t->event_lock);
-	spin_unlock(&_wq_lock);
+	int i;
 
-	add_wait_queue(&t->eventq, wq);
+	for (i = 0; i < t->num_targets; i++) {
+		struct dm_target *ti = t->targets + i;
+
+		if (ti->type->suspend)
+			ti->type->suspend(ti);
+	}
 }
 
-void dm_table_remove_wait_queue(struct dm_table *t, wait_queue_t *wq)
+void dm_table_resume_targets(struct dm_table *t)
 {
-	remove_wait_queue(&t->eventq, wq);
+	int i;
 
-	spin_lock(&_wq_lock);
-	if (!waitqueue_active(&t->eventq))
-		up(&t->event_lock);
-	spin_unlock(&_wq_lock);
+	for (i = 0; i < t->num_targets; i++) {
+		struct dm_target *ti = t->targets + i;
+
+		if (ti->type->resume)
+			ti->type->resume(ti);
+	}
 }
 
 EXPORT_SYMBOL(dm_get_device);
 EXPORT_SYMBOL(dm_put_device);
 EXPORT_SYMBOL(dm_table_event);
+EXPORT_SYMBOL(dm_table_event_callback);
 EXPORT_SYMBOL(dm_table_get_mode);

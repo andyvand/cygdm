@@ -418,6 +418,8 @@ static int __info(struct mapped_device *md, struct dm_ioctl *param)
 	if (is_read_only(dev))
 		param->flags |= DM_READONLY_FLAG;
 
+	param->event_nr = dm_get_event_nr(md);
+
 	table = dm_get_table(md);
 	param->target_count = dm_table_get_num_targets(table);
 	dm_table_put(table);
@@ -568,17 +570,21 @@ static void *get_result_buffer(struct dm_ioctl *param, size_t *len)
 /*
  * Build up the status struct for each target
  */
-static void __status(struct mapped_device *md, struct dm_ioctl *param,
-		     size_t *used)
+static int __status(struct mapped_device *md, struct dm_ioctl *param)
 {
+	int r;
 	unsigned int i, num_targets;
 	struct dm_target_spec *spec;
 	char *outbuf, *outptr;
 	status_type_t type;
 	struct dm_table *table = dm_get_table(md);
-	size_t remaining, len;
+	size_t remaining, len, used = 0;
 
 	outptr = outbuf = get_result_buffer(param, &len);
+
+	r = __info(md, param);
+	if (r)
+		return r;
 
 	if (param->flags & DM_STATUS_TABLE_FLAG)
 		type = STATUSTYPE_TABLE;
@@ -617,14 +623,19 @@ static void __status(struct mapped_device *md, struct dm_ioctl *param,
 			outptr[0] = '\0';
 
 		outptr += strlen(outptr) + 1;
-		*used = param->data_start + (outptr - outbuf);
+		used = param->data_start + (outptr - outbuf);
 
 		align_ptr(outptr);
 		spec->next = outptr - outbuf;
 	}
 
+	if (used)
+		param->data_size = used;
+
 	param->target_count = num_targets;
 	dm_table_put(table);
+
+	return 0;
 }
 
 /*
@@ -634,7 +645,6 @@ static void __status(struct mapped_device *md, struct dm_ioctl *param,
 static int get_status(struct dm_ioctl *param)
 {
 	int r;
-	size_t used = 0;
 	struct mapped_device *md;
 
 	md = find_device(param);
@@ -644,14 +654,8 @@ static int get_status(struct dm_ioctl *param)
 	/*
 	 * Get the status of all targets
 	 */
-	__status(md, param, &used);
+	r = __status(md, param);
 
-	/*
-	 * Setup the basic dm_ioctl structure.
-	 */
-	r = __info(md, param);
-	if (used)
-		param->data_size = used;
 	dm_put(md);
 	return r;
 }
@@ -661,8 +665,8 @@ static int get_status(struct dm_ioctl *param)
  */
 static int wait_device_event(struct dm_ioctl *param)
 {
+	int r;
 	struct mapped_device *md;
-	struct dm_table *table;
 	DECLARE_WAITQUEUE(wq, current);
 
 	md = find_device(param);
@@ -673,22 +677,21 @@ static int wait_device_event(struct dm_ioctl *param)
 	 * Wait for a notification event
 	 */
 	set_current_state(TASK_INTERRUPTIBLE);
-	table = dm_get_table(md);
-	dm_table_add_wait_queue(table, &wq);
-	dm_table_put(table);
-	dm_put(md);
-
-	schedule();
+	if (!dm_add_wait_queue(md, &wq, param->event_nr)) {
+		schedule();
+		dm_remove_wait_queue(md, &wq);
+	}
 	set_current_state(TASK_RUNNING);
-	dm_table_remove_wait_queue(table, &wq);
 
 	/*
 	 * The userland program is going to want to know what
 	 * changed to trigger the event, so we may as well tell
 	 * him and save an ioctl.
 	 */
-	get_status(param);
-	return 0;
+	r = __status(md, param);
+
+	dm_put(md);
+	return r;
 }
 
 /*
@@ -700,7 +703,7 @@ static int deps(struct dm_ioctl *param)
 	unsigned int count;
 	struct mapped_device *md;
 	struct list_head *tmp;
-	size_t len, used;
+	size_t len, needed, used = 0;
 	struct dm_target_deps *tdeps = NULL;
 	struct dm_table *table;
 
@@ -722,12 +725,12 @@ static int deps(struct dm_ioctl *param)
 	/*
 	 * Check we have enough space.
 	 */
-	used = sizeof(*tdeps) + (sizeof(*tdeps->dev) * count);
-	if (len < used) {
+	needed = sizeof(*tdeps) + (sizeof(*tdeps->dev) * count);
+	if (len < needed) {
 		param->flags |= DM_BUFFER_FULL_FLAG;
-		used = 0;
 		goto out;
 	}
+	used = param->data_start + needed;
 
 	/*
 	 * Fill in the devices.
@@ -743,7 +746,7 @@ static int deps(struct dm_ioctl *param)
 	r = __info(md, param);
 
 	if (used)
-		param->data_size = param->data_start + used;
+		param->data_size = used;
 
 	dm_table_put(table);
 	dm_put(md);
