@@ -13,6 +13,8 @@
 /* kcopyd priority of mirror operations */
 #define MIRROR_COPY_PRIORITY 5
 
+static kmem_cache_t *bh_cachep;
+
 /*
  * Mirror: maps a mirror range of a device.
  */
@@ -28,8 +30,10 @@ struct mirror_c {
 
 	unsigned long got_to;
 	struct rw_semaphore lock;
+	struct buffer_head *bhstring;
 	int error;
 };
+
 
 /* Called when a duplicating I/O has finished */
 static void mirror_end_io(struct buffer_head *bh, int uptodate)
@@ -42,18 +46,32 @@ static void mirror_end_io(struct buffer_head *bh, int uptodate)
 		lc->error = 1;
 		dm_notify(lc);	/* TODO: interface ?? */
 	}
-	kfree(bh);
+	kmem_cache_free(bh_cachep, bh);
+}
+
+static void mirror_bh(struct mirror_c *mc, struct buffer_head *bh)
+{
+	struct buffer_head *dbh = kmem_cache_alloc(bh_cachep, GFP_NOIO);
+	if (dbh) {
+		*dbh = *bh;
+		dbh->b_rdev = mc->todev->dev;
+		dbh->b_rsector = bh->b_rsector - mc->from_delta
+			+ mc->to_delta;
+		dbh->b_end_io = mirror_end_io;
+		dbh->b_private = mc;
+
+		generic_make_request(WRITE, dbh);
+	} else {
+		DMERR("kmem_cache_alloc failed for mirror bh");
+		mc->error = 1;
+	}
 }
 
 /* Called when the copy I/O has finished */
 static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 {
 	struct mirror_c *lc = (struct mirror_c *) context;
-
-	if (reason == COPY_CB_PROGRESS) {
-		lc->got_to = arg;
-		return;
-	}
+	struct buffer_head *bh;
 
 	if (reason == COPY_CB_FAILED_READ || reason == COPY_CB_FAILED_WRITE) {
 		DMERR("Mirror block %s on %s failed, sector %ld",
@@ -62,11 +80,32 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 		      kdevname(lc->fromdev->dev) :
 		      kdevname(lc->todev->dev), arg);
 		lc->error = 1;
+		return;
 	}
 
 	if (reason == COPY_CB_COMPLETE) {
 		/* Say we've finished */
 		dm_notify(lc);	/* TODO: interface ?? */
+	}
+
+	if (reason == COPY_CB_PROGRESS) {
+		dm_notify(lc);	/* TODO: interface ?? */
+	}
+
+	/* Submit, and mirror any pending BHs */
+	down_write(&lc->lock);
+	lc->got_to = arg;
+
+	bh = lc->bhstring;
+	lc->bhstring = NULL;
+	up_write(&lc->lock);
+
+	while (bh) {
+		struct buffer_head *nextbh = bh->b_reqnext;
+		bh->b_reqnext = NULL;
+		generic_make_request(WRITE, bh);
+		mirror_bh(lc, bh);
+		bh = nextbh;
 	}
 }
 
@@ -136,6 +175,7 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	lc->frompos = offset1;
 	lc->topos = offset2;
 	lc->error = 0;
+	lc->bhstring = NULL;
 	init_rwsem(&lc->lock);
 	*context = lc;
 
@@ -172,36 +212,35 @@ static int mirror_map(struct buffer_head *bh, int rw, void *context)
 {
 	struct mirror_c *lc = (struct mirror_c *) context;
 
-	down_read(&lc->lock);
-
 	bh->b_rdev = lc->fromdev->dev;
 	bh->b_rsector = bh->b_rsector + lc->from_delta;
 
-	/* 
-	 * If we've already copied this block then duplicated 
-	 * it to the mirror device 
-	 */
-	if (rw == WRITE && bh->b_rsector < lc->got_to) {
+	if (rw == WRITE) {
+		down_write(&lc->lock);
 
-		/* Schedule copy of I/O to other target */
-		/* TODO: kmalloc is naff here */
-		struct buffer_head *dbh = kmalloc(sizeof(struct buffer_head),
-						  GFP_NOIO);
-		if (dbh) {
-			*dbh = *bh;
-			dbh->b_rdev = lc->todev->dev;
-			dbh->b_rsector = bh->b_rsector - lc->from_delta
-			    + lc->to_delta;
-			dbh->b_end_io = mirror_end_io;
-			dbh->b_private = lc;
-
-			generic_make_request(WRITE, dbh);
-		} else {
-			DMERR("kmalloc failed for mirror bh");
-			lc->error = 1;
+		/*
+		 * If this area is in flight then save it until it's
+		 * commited to the mirror disk and then submit it and
+		 * its mirror.
+		 */
+		if (bh->b_rsector > lc->got_to &&
+		    bh->b_rsector <= lc->got_to + KIO_MAX_SECTORS) {
+			bh->b_reqnext = lc->bhstring;
+			lc->bhstring = bh;
+			up_write(&lc->lock);
+			return 0;
 		}
+
+		/*
+		 * If we've already copied this block then duplicate
+		 * it to the mirror device
+		 */
+		if (bh->b_rsector < lc->got_to) {
+			/* Schedule copy of I/O to other target */
+			mirror_bh(lc, bh);
+		}
+		up_write(&lc->lock);
 	}
-	up_read(&lc->lock);
 	return 1;
 }
 
@@ -215,10 +254,22 @@ static struct target_type mirror_target = {
 
 int __init dm_mirror_init(void)
 {
-	int r = dm_register_target(&mirror_target);
-	if (r < 0)
-		DMERR("mirror: register failed %d", r);
+	int r;
 
+	bh_cachep = kmem_cache_create("dm-mirror",
+				      sizeof(struct buffer_head),
+				      __alignof__(struct buffer_head),
+				      0, NULL, NULL);
+	if (!bh_cachep) {
+		return -1;
+	}
+
+
+	r = dm_register_target(&mirror_target);
+	if (r < 0) {
+		DMERR("mirror: register failed %d", r);
+		kmem_cache_destroy(bh_cachep);
+	}
 	return r;
 }
 
@@ -228,6 +279,8 @@ void dm_mirror_exit(void)
 
 	if (r < 0)
 		DMERR("mirror: unregister failed %d", r);
+
+	kmem_cache_destroy(bh_cachep);
 }
 
 /*
