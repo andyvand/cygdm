@@ -74,6 +74,7 @@ void dm_put_device(struct dm_target *ti, struct dm_dev *d);
 struct target_type {
 	const char *name;
 	struct module *module;
+	unsigned version[3];
 	dm_ctr_fn ctr;
 	dm_dtr_fn dtr;
 	dm_map_fn map;

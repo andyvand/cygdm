@@ -1133,6 +1133,7 @@ static int origin_status(struct dm_target *ti, status_type_t type, char *result,
 
 static struct target_type origin_target = {
 	name:	"snapshot-origin",
+	version: {1, 0, 1},
 	module:	THIS_MODULE,
 	ctr:	origin_ctr,
 	dtr:	origin_dtr,
@@ -1142,6 +1143,7 @@ static struct target_type origin_target = {
 
 static struct target_type snapshot_target = {
 	name:	"snapshot",
+	version: {1, 0, 1},
 	module:	THIS_MODULE,
 	ctr:	snapshot_ctr,
 	dtr:	snapshot_dtr,

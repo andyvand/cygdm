@@ -116,7 +116,7 @@ static int setup_btree_index(unsigned int l, struct dm_table *t)
 
 int dm_table_create(struct dm_table **result, int mode, unsigned num_targets)
 {
-	struct dm_table *t = kmalloc(sizeof(*t), GFP_NOIO);
+	struct dm_table *t = kmalloc(sizeof(*t), GFP_KERNEL);
 
 	if (!t)
 		return -ENOMEM;
@@ -412,7 +412,7 @@ static char **realloc_argv(unsigned *array_size, char **old_argv)
 	unsigned new_size;
 
 	new_size = *array_size ? *array_size * 2 : 64;
-	argv = kmalloc(new_size * sizeof(*argv), GFP_NOIO);
+	argv = kmalloc(new_size * sizeof(*argv), GFP_KERNEL);
 	if (argv) {
 		memcpy(argv, old_argv, *array_size * sizeof(*argv));
 		*array_size = new_size;

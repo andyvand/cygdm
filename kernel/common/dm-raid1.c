@@ -1045,7 +1045,7 @@ static struct dirty_log *create_dirty_log(struct dm_target *ti,
  * For now, #log_params = 1, log_type = "core"
  *
  */
-#define DM_IO_PAGES 256
+#define DM_IO_PAGES 64
 static int mirror_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 {
 	int r;
@@ -1237,6 +1237,7 @@ static int mirror_status(struct dm_target *ti, status_type_t type,
 
 static struct target_type mirror_target = {
 	.name	 = "mirror",
+	.version = {1, 0, 1},
 	.module	 = THIS_MODULE,
 	.ctr	 = mirror_ctr,
 	.dtr	 = mirror_dtr,

@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001 Sistina Software (UK) Limited.
+ * Copyright (C) 2001-2003 Sistina Software (UK) Limited.
  *
  * This file is released under the GPL.
  */
@@ -231,6 +231,7 @@ static int stripe_status(struct dm_target *ti, status_type_t type,
 
 static struct target_type stripe_target = {
 	.name   = "striped",
+	.version= {1, 0, 1},
 	.module = THIS_MODULE,
 	.ctr    = stripe_ctr,
 	.dtr    = stripe_dtr,
