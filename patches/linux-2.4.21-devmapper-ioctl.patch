@@ -1,5 +1,316 @@
---- linux-2.4.20/drivers/md/dm-daemon.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/Documentation/Configure.help linux-2.4.21/Documentation/Configure.help
+--- linux-2.4.21-dm-real/Documentation/Configure.help	Fri Jun 13 16:32:30 2003
++++ linux-2.4.21/Documentation/Configure.help	Sat Jul 12 18:14:01 2003
+@@ -1839,6 +1839,20 @@
+   want), say M here and read <file:Documentation/modules.txt>.  The
+   module will be called lvm-mod.o.
+ 
++Device-mapper support
++CONFIG_BLK_DEV_DM
++  Device-mapper is a low level volume manager.  It works by allowing
++  people to specify mappings for ranges of logical sectors.  Various
++  mapping types are available, in addition people may write their own
++  modules containing custom mappings if they wish.
++
++  Higher level volume managers such as LVM2 use this driver.
++
++  If you want to compile this as a module, say M here and read 
++  <file:Documentation/modules.txt>.  The module will be called dm-mod.o.
++
++  If unsure, say N.
++
+ Multiple devices driver support (RAID and LVM)
+ CONFIG_MD
+   Support multiple physical spindles through a single logical device.
+diff -ruN linux-2.4.21-dm-real/MAINTAINERS linux-2.4.21/MAINTAINERS
+--- linux-2.4.21-dm-real/MAINTAINERS	Fri Jun 13 16:32:30 2003
++++ linux-2.4.21/MAINTAINERS	Sat Jul 12 18:14:01 2003
+@@ -476,6 +476,13 @@
+ W:	http://www.debian.org/~dz/i8k/
+ S:	Maintained
+ 
++DEVICE MAPPER
++P:	Joe Thornber
++M:	dm@uk.sistina.com
++L:	linux-LVM@sistina.com
++W:	http://www.sistina.com/lvm
++S:	Maintained
++
+ DEVICE NUMBER REGISTRY
+ P:	H. Peter Anvin
+ M:	hpa@zytor.com
+diff -ruN linux-2.4.21-dm-real/arch/mips64/kernel/ioctl32.c linux-2.4.21/arch/mips64/kernel/ioctl32.c
+--- linux-2.4.21-dm-real/arch/mips64/kernel/ioctl32.c	Fri Jan 10 16:34:18 2003
++++ linux-2.4.21/arch/mips64/kernel/ioctl32.c	Sat Jul 12 18:13:51 2003
+@@ -33,6 +33,7 @@
+ #include <linux/auto_fs.h>
+ #include <linux/ext2_fs.h>
+ #include <linux/raid/md_u.h>
++#include <linux/dm-ioctl.h>
+ 
+ #include <scsi/scsi.h>
+ #undef __KERNEL__		/* This file was born to be ugly ...  */
+@@ -914,6 +915,22 @@
+ 	IOCTL32_DEFAULT(STOP_ARRAY_RO),
+ 	IOCTL32_DEFAULT(RESTART_ARRAY_RW),
+ #endif /* CONFIG_MD */
++
++#if defined(CONFIG_BLK_DEV_DM) || defined(CONFIG_BLK_DEV_DM_MODULE)
++	IOCTL32_DEFAULT(DM_VERSION),
++	IOCTL32_DEFAULT(DM_REMOVE_ALL),
++	IOCTL32_DEFAULT(DM_DEV_CREATE),
++	IOCTL32_DEFAULT(DM_DEV_REMOVE),
++	IOCTL32_DEFAULT(DM_TABLE_LOAD),
++	IOCTL32_DEFAULT(DM_DEV_SUSPEND),
++	IOCTL32_DEFAULT(DM_DEV_RENAME),
++	IOCTL32_DEFAULT(DM_TABLE_DEPS),
++	IOCTL32_DEFAULT(DM_DEV_STATUS),
++	IOCTL32_DEFAULT(DM_TABLE_STATUS),
++	IOCTL32_DEFAULT(DM_DEV_WAIT),
++	IOCTL32_DEFAULT(DM_LIST_DEVICES),
++	IOCTL32_DEFAULT(DM_TABLE_CLEAR),
++#endif /* CONFIG_BLK_DEV_DM */
+ 
+ 	IOCTL32_DEFAULT(MTIOCTOP),			/* mtio.h ioctls  */
+ 	IOCTL32_HANDLER(MTIOCGET32, mt_ioctl_trans),
+diff -ruN linux-2.4.21-dm-real/arch/parisc/kernel/ioctl32.c linux-2.4.21/arch/parisc/kernel/ioctl32.c
+--- linux-2.4.21-dm-real/arch/parisc/kernel/ioctl32.c	Fri Jun 13 16:32:32 2003
++++ linux-2.4.21/arch/parisc/kernel/ioctl32.c	Sat Jul 12 18:13:51 2003
+@@ -55,6 +55,7 @@
+ #define max max */
+ #include <linux/lvm.h>
+ #endif /* LVM */
++#include <linux/dm-ioctl.h>
+ 
+ #include <scsi/scsi.h>
+ /* Ugly hack. */
+@@ -3418,6 +3419,22 @@
+ COMPATIBLE_IOCTL(LV_BMAP)
+ COMPATIBLE_IOCTL(LV_SNAPSHOT_USE_RATE)
+ #endif /* LVM */
++/* Device-Mapper */
++#if defined(CONFIG_BLK_DEV_DM) || defined(CONFIG_BLK_DEV_DM_MODULE)
++COMPATIBLE_IOCTL(DM_VERSION)
++COMPATIBLE_IOCTL(DM_REMOVE_ALL)
++COMPATIBLE_IOCTL(DM_DEV_CREATE)
++COMPATIBLE_IOCTL(DM_DEV_REMOVE)
++COMPATIBLE_IOCTL(DM_TABLE_LOAD)
++COMPATIBLE_IOCTL(DM_DEV_SUSPEND)
++COMPATIBLE_IOCTL(DM_DEV_RENAME)
++COMPATIBLE_IOCTL(DM_TABLE_DEPS)
++COMPATIBLE_IOCTL(DM_DEV_STATUS)
++COMPATIBLE_IOCTL(DM_TABLE_STATUS)
++COMPATIBLE_IOCTL(DM_DEV_WAIT)
++COMPATIBLE_IOCTL(DM_LIST_DEVICES)
++COMPATIBLE_IOCTL(DM_TABLE_CLEAR)
++#endif /* CONFIG_BLK_DEV_DM */
+ #if defined(CONFIG_DRM) || defined(CONFIG_DRM_MODULE)
+ COMPATIBLE_IOCTL(DRM_IOCTL_GET_MAGIC)
+ COMPATIBLE_IOCTL(DRM_IOCTL_IRQ_BUSID)
+diff -ruN linux-2.4.21-dm-real/arch/ppc64/kernel/ioctl32.c linux-2.4.21/arch/ppc64/kernel/ioctl32.c
+--- linux-2.4.21-dm-real/arch/ppc64/kernel/ioctl32.c	Fri Jun 13 16:32:33 2003
++++ linux-2.4.21/arch/ppc64/kernel/ioctl32.c	Sat Jul 12 18:13:51 2003
+@@ -66,6 +66,7 @@
+ #if defined(CONFIG_BLK_DEV_LVM) || defined(CONFIG_BLK_DEV_LVM_MODULE)
+ #include <linux/lvm.h>
+ #endif /* LVM */
++#include <linux/dm-ioctl.h>
+ 
+ #include <scsi/scsi.h>
+ /* Ugly hack. */
+@@ -4423,6 +4424,22 @@
+ COMPATIBLE_IOCTL(NBD_PRINT_DEBUG),
+ COMPATIBLE_IOCTL(NBD_SET_SIZE_BLOCKS),
+ COMPATIBLE_IOCTL(NBD_DISCONNECT),
++/* device-mapper */
++#if defined(CONFIG_BLK_DEV_DM) || defined(CONFIG_BLK_DEV_DM_MODULE)
++COMPATIBLE_IOCTL(DM_VERSION),
++COMPATIBLE_IOCTL(DM_REMOVE_ALL),
++COMPATIBLE_IOCTL(DM_DEV_CREATE),
++COMPATIBLE_IOCTL(DM_DEV_REMOVE),
++COMPATIBLE_IOCTL(DM_TABLE_LOAD),
++COMPATIBLE_IOCTL(DM_DEV_SUSPEND),
++COMPATIBLE_IOCTL(DM_DEV_RENAME),
++COMPATIBLE_IOCTL(DM_TABLE_DEPS),
++COMPATIBLE_IOCTL(DM_DEV_STATUS),
++COMPATIBLE_IOCTL(DM_TABLE_STATUS),
++COMPATIBLE_IOCTL(DM_DEV_WAIT),
++COMPATIBLE_IOCTL(DM_LIST_DEVICES),
++COMPATIBLE_IOCTL(DM_TABLE_CLEAR),
++#endif /* CONFIG_BLK_DEV_DM */
+ /* Remove *PRIVATE in 2.5 */
+ COMPATIBLE_IOCTL(SIOCDEVPRIVATE),
+ COMPATIBLE_IOCTL(SIOCDEVPRIVATE+1),
+diff -ruN linux-2.4.21-dm-real/arch/s390x/kernel/ioctl32.c linux-2.4.21/arch/s390x/kernel/ioctl32.c
+--- linux-2.4.21-dm-real/arch/s390x/kernel/ioctl32.c	Fri Jan 10 16:34:26 2003
++++ linux-2.4.21/arch/s390x/kernel/ioctl32.c	Sat Jul 12 18:13:51 2003
+@@ -25,6 +25,7 @@
+ #include <linux/ext2_fs.h>
+ #include <linux/hdreg.h>
+ #include <linux/if_bonding.h>
++#include <linux/dm-ioctl.h>
+ #include <asm/types.h>
+ #include <asm/uaccess.h>
+ #include <asm/dasd.h>
+@@ -507,6 +508,20 @@
+ 	IOCTL32_DEFAULT(VT_UNLOCKSWITCH),
+ 
+ 	IOCTL32_DEFAULT(SIOCGSTAMP),
++
++	IOCTL32_DEFAULT(DM_VERSION),
++	IOCTL32_DEFAULT(DM_REMOVE_ALL),
++	IOCTL32_DEFAULT(DM_DEV_CREATE),
++	IOCTL32_DEFAULT(DM_DEV_REMOVE),
++	IOCTL32_DEFAULT(DM_TABLE_LOAD),
++	IOCTL32_DEFAULT(DM_DEV_SUSPEND),
++	IOCTL32_DEFAULT(DM_DEV_RENAME),
++	IOCTL32_DEFAULT(DM_TABLE_DEPS),
++	IOCTL32_DEFAULT(DM_DEV_STATUS),
++	IOCTL32_DEFAULT(DM_TABLE_STATUS),
++	IOCTL32_DEFAULT(DM_DEV_WAIT),
++	IOCTL32_DEFAULT(DM_LIST_DEVICES),
++	IOCTL32_DEFAULT(DM_TABLE_CLEAR),
+ 
+ 	IOCTL32_HANDLER(SIOCGIFNAME, dev_ifname32),
+ 	IOCTL32_HANDLER(SIOCGIFCONF, dev_ifconf),
+diff -ruN linux-2.4.21-dm-real/arch/sparc64/kernel/ioctl32.c linux-2.4.21/arch/sparc64/kernel/ioctl32.c
+--- linux-2.4.21-dm-real/arch/sparc64/kernel/ioctl32.c	Fri Jun 13 16:32:34 2003
++++ linux-2.4.21/arch/sparc64/kernel/ioctl32.c	Sat Jul 12 18:13:51 2003
+@@ -56,6 +56,7 @@
+ #if defined(CONFIG_BLK_DEV_LVM) || defined(CONFIG_BLK_DEV_LVM_MODULE)
+ #include <linux/lvm.h>
+ #endif /* LVM */
++#include <linux/dm-ioctl.h>
+ 
+ #include <scsi/scsi.h>
+ /* Ugly hack. */
+@@ -5076,6 +5077,22 @@
+ COMPATIBLE_IOCTL(NBD_PRINT_DEBUG)
+ COMPATIBLE_IOCTL(NBD_SET_SIZE_BLOCKS)
+ COMPATIBLE_IOCTL(NBD_DISCONNECT)
++/* device-mapper */
++#if defined(CONFIG_BLK_DEV_DM) || defined(CONFIG_BLK_DEV_DM_MODULE)
++COMPATIBLE_IOCTL(DM_VERSION)
++COMPATIBLE_IOCTL(DM_REMOVE_ALL)
++COMPATIBLE_IOCTL(DM_DEV_CREATE)
++COMPATIBLE_IOCTL(DM_DEV_REMOVE)
++COMPATIBLE_IOCTL(DM_TABLE_LOAD)
++COMPATIBLE_IOCTL(DM_DEV_SUSPEND)
++COMPATIBLE_IOCTL(DM_DEV_RENAME)
++COMPATIBLE_IOCTL(DM_TABLE_DEPS)
++COMPATIBLE_IOCTL(DM_DEV_STATUS)
++COMPATIBLE_IOCTL(DM_TABLE_STATUS)
++COMPATIBLE_IOCTL(DM_DEV_WAIT)
++COMPATIBLE_IOCTL(DM_LIST_DEVICES)
++COMPATIBLE_IOCTL(DM_TABLE_CLEAR)
++#endif /* CONFIG_BLK_DEV_DM */
+ /* Linux-1394 */
+ #if defined(CONFIG_IEEE1394) || defined(CONFIG_IEEE1394_MODULE)
+ COMPATIBLE_IOCTL(AMDTP_IOC_CHANNEL)
+diff -ruN linux-2.4.21-dm-real/arch/x86_64/ia32/ia32_ioctl.c linux-2.4.21/arch/x86_64/ia32/ia32_ioctl.c
+--- linux-2.4.21-dm-real/arch/x86_64/ia32/ia32_ioctl.c	Fri Jun 13 16:32:35 2003
++++ linux-2.4.21/arch/x86_64/ia32/ia32_ioctl.c	Sat Jul 12 18:13:51 2003
+@@ -67,6 +67,7 @@
+ #define max max
+ #include <linux/lvm.h>
+ #endif /* LVM */
++#include <linux/dm-ioctl.h>
+ 
+ #include <scsi/scsi.h>
+ /* Ugly hack. */
+@@ -4047,6 +4048,22 @@
+ COMPATIBLE_IOCTL(LV_BMAP)
+ COMPATIBLE_IOCTL(LV_SNAPSHOT_USE_RATE)
+ #endif /* LVM */
++/* Device-Mapper */
++#if defined(CONFIG_BLK_DEV_DM) || defined(CONFIG_BLK_DEV_DM_MODULE)
++COMPATIBLE_IOCTL(DM_VERSION)
++COMPATIBLE_IOCTL(DM_REMOVE_ALL)
++COMPATIBLE_IOCTL(DM_DEV_CREATE)
++COMPATIBLE_IOCTL(DM_DEV_REMOVE)
++COMPATIBLE_IOCTL(DM_TABLE_LOAD)
++COMPATIBLE_IOCTL(DM_DEV_SUSPEND)
++COMPATIBLE_IOCTL(DM_DEV_RENAME)
++COMPATIBLE_IOCTL(DM_TABLE_DEPS)
++COMPATIBLE_IOCTL(DM_DEV_STATUS)
++COMPATIBLE_IOCTL(DM_TABLE_STATUS)
++COMPATIBLE_IOCTL(DM_DEV_WAIT)
++COMPATIBLE_IOCTL(DM_LIST_DEVICES)
++COMPATIBLE_IOCTL(DM_TABLE_CLEAR)
++#endif /* CONFIG_BLK_DEV_DM */
+ #ifdef CONFIG_AUTOFS_FS
+ COMPATIBLE_IOCTL(AUTOFS_IOC_READY)
+ COMPATIBLE_IOCTL(AUTOFS_IOC_FAIL)
+diff -ruN linux-2.4.21-dm-real/drivers/md/Config.in linux-2.4.21/drivers/md/Config.in
+--- linux-2.4.21-dm-real/drivers/md/Config.in	Fri Jan 10 16:34:50 2003
++++ linux-2.4.21/drivers/md/Config.in	Sat Jul 12 18:14:01 2003
+@@ -14,5 +14,9 @@
+ dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
+ 
+ dep_tristate ' Logical volume manager (LVM) support' CONFIG_BLK_DEV_LVM $CONFIG_MD
++if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
++   dep_tristate ' Device-mapper support (EXPERIMENTAL)' CONFIG_BLK_DEV_DM $CONFIG_MD
++   dep_tristate '  Mirror (RAID-1) support (EXPERIMENTAL)' CONFIG_BLK_DEV_DM_MIRROR $CONFIG_BLK_DEV_DM
++fi
+ 
+ endmenu
+diff -ruN linux-2.4.21-dm-real/drivers/md/Makefile linux-2.4.21/drivers/md/Makefile
+--- linux-2.4.21-dm-real/drivers/md/Makefile	Fri Jan 10 16:34:50 2003
++++ linux-2.4.21/drivers/md/Makefile	Sat Jul 12 18:14:11 2003
+@@ -4,24 +4,41 @@
+ 
+ O_TARGET	:= mddev.o
+ 
+-export-objs	:= md.o xor.o
+-list-multi	:= lvm-mod.o
++export-objs	:= md.o xor.o dm-table.o dm-target.o kcopyd.o dm-daemon.o \
++		   dm-log.o dm-io.o dm.o
++
++list-multi	:= lvm-mod.o dm-mod.o dm-mirror-mod.o
+ lvm-mod-objs	:= lvm.o lvm-snap.o lvm-fs.o
++dm-mod-objs	:= dm.o dm-table.o dm-target.o dm-ioctl.o \
++		   dm-linear.o dm-stripe.o dm-snapshot.o dm-exception-store.o \
++		   kcopyd.o dm-daemon.o dm-io.o
++dm-mirror-mod-objs := dm-raid1.o dm-log.o
+ 
+ # Note: link order is important.  All raid personalities
+ # and xor.o must come before md.o, as they each initialise 
+ # themselves, and md.o may use the personalities when it 
+ # auto-initialised.
+ 
+-obj-$(CONFIG_MD_LINEAR)		+= linear.o
+-obj-$(CONFIG_MD_RAID0)		+= raid0.o
+-obj-$(CONFIG_MD_RAID1)		+= raid1.o
+-obj-$(CONFIG_MD_RAID5)		+= raid5.o xor.o
+-obj-$(CONFIG_MD_MULTIPATH)	+= multipath.o
+-obj-$(CONFIG_BLK_DEV_MD)	+= md.o
+-obj-$(CONFIG_BLK_DEV_LVM)	+= lvm-mod.o
++obj-$(CONFIG_MD_LINEAR)			+= linear.o
++obj-$(CONFIG_MD_RAID0)			+= raid0.o
++obj-$(CONFIG_MD_RAID1)			+= raid1.o
++obj-$(CONFIG_MD_RAID5)			+= raid5.o xor.o
++obj-$(CONFIG_MD_MULTIPATH)		+= multipath.o
++obj-$(CONFIG_BLK_DEV_MD)		+= md.o
++
++obj-$(CONFIG_BLK_DEV_LVM)		+= lvm-mod.o
++
++obj-$(CONFIG_BLK_DEV_DM)		+= dm-mod.o
++obj-$(CONFIG_BLK_DEV_DM_MIRROR)		+= dm-mirror.o
+ 
+ include $(TOPDIR)/Rules.make
+ 
+ lvm-mod.o: $(lvm-mod-objs)
+ 	$(LD) -r -o $@ $(lvm-mod-objs)
++
++dm-mod.o: $(dm-mod-objs)
++	$(LD) -r -o $@ $(dm-mod-objs)
++
++dm-mirror.o: $(dm-mirror-mod-objs)
++	$(LD) -r -o $@ $(dm-mirror-mod-objs)
++
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-daemon.c linux-2.4.21/drivers/md/dm-daemon.c
+--- linux-2.4.21-dm-real/drivers/md/dm-daemon.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-daemon.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,113 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -114,8 +425,9 @@
 +EXPORT_SYMBOL(dm_daemon_start);
 +EXPORT_SYMBOL(dm_daemon_stop);
 +EXPORT_SYMBOL(dm_daemon_wake);
---- linux-2.4.20/drivers/md/dm-daemon.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.h	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-daemon.h linux-2.4.21/drivers/md/dm-daemon.h
+--- linux-2.4.21-dm-real/drivers/md/dm-daemon.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-daemon.h	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,29 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -146,8 +458,9 @@
 +int dm_daemon_running(struct dm_daemon *dd);
 +
 +#endif
---- linux-2.4.20/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-exception-store.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-exception-store.c linux-2.4.21/drivers/md/dm-exception-store.c
+--- linux-2.4.21-dm-real/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-exception-store.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,675 @@
 +/*
 + * dm-snapshot.c
@@ -824,8 +1137,9 @@
 +
 +	return 0;
 +}
---- linux-2.4.20/drivers/md/dm-io.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-io.c linux-2.4.21/drivers/md/dm-io.c
+--- linux-2.4.21-dm-real/drivers/md/dm-io.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-io.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,344 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -1171,8 +1485,9 @@
 +EXPORT_SYMBOL(dm_io_put);
 +EXPORT_SYMBOL(dm_io_sync);
 +EXPORT_SYMBOL(dm_io_async);
---- linux-2.4.20/drivers/md/dm-io.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.h	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-io.h linux-2.4.21/drivers/md/dm-io.h
+--- linux-2.4.21-dm-real/drivers/md/dm-io.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-io.h	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,86 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -1260,8 +1575,9 @@
 +		io_notify_fn fn, void *context);
 +
 +#endif
---- linux-2.4.20/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-ioctl.c linux-2.4.21/drivers/md/dm-ioctl.c
+--- linux-2.4.21-dm-real/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-ioctl.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,1272 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -2535,8 +2851,9 @@
 +
 +	dm_hash_exit();
 +}
---- linux-2.4.20/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-linear.c linux-2.4.21/drivers/md/dm-linear.c
+--- linux-2.4.21-dm-real/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-linear.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,123 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -2661,8 +2978,9 @@
 +	if (r < 0)
 +		DMERR("linear: unregister failed %d", r);
 +}
---- linux-2.4.20/drivers/md/dm-log.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-log.c linux-2.4.21/drivers/md/dm-log.c
+--- linux-2.4.21-dm-real/drivers/md/dm-log.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-log.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,302 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -2966,8 +3284,9 @@
 +EXPORT_SYMBOL(dm_dirty_log_exit);
 +EXPORT_SYMBOL(dm_create_dirty_log);
 +EXPORT_SYMBOL(dm_destroy_dirty_log);
---- linux-2.4.20/drivers/md/dm-log.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.h	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-log.h linux-2.4.21/drivers/md/dm-log.h
+--- linux-2.4.21-dm-real/drivers/md/dm-log.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-log.h	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,112 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -3081,8 +3400,9 @@
 +void dm_dirty_log_exit(void);
 +
 +#endif
---- linux-2.4.20/drivers/md/dm-raid1.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-raid1.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-raid1.c linux-2.4.21/drivers/md/dm-raid1.c
+--- linux-2.4.21-dm-real/drivers/md/dm-raid1.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-raid1.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,1297 @@
 +/*
 + * Copyright (C) 2003 Sistina Software Limited.
@@ -4381,8 +4701,9 @@
 +MODULE_DESCRIPTION(DM_NAME " mirror target");
 +MODULE_AUTHOR("Heinz Mauelshagen <mge@sistina.com>");
 +MODULE_LICENSE("GPL");
---- linux-2.4.20/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.c	Sat Jul 12 17:45:13 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-snapshot.c linux-2.4.21/drivers/md/dm-snapshot.c
+--- linux-2.4.21-dm-real/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-snapshot.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,1235 @@
 +/*
 + * dm-snapshot.c
@@ -5619,8 +5940,9 @@
 +	kmem_cache_destroy(pending_cache);
 +	kmem_cache_destroy(exception_cache);
 +}
---- linux-2.4.20/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.h	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-snapshot.h linux-2.4.21/drivers/md/dm-snapshot.h
+--- linux-2.4.21-dm-real/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-snapshot.h	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,158 @@
 +/*
 + * dm-snapshot.c
@@ -5780,8 +6102,9 @@
 +}
 +
 +#endif
---- linux-2.4.20/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-stripe.c linux-2.4.21/drivers/md/dm-stripe.c
+--- linux-2.4.21-dm-real/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-stripe.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,258 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6041,8 +6364,9 @@
 +
 +	return;
 +}
---- linux-2.4.20/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-table.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-table.c linux-2.4.21/drivers/md/dm-table.c
+--- linux-2.4.21-dm-real/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-table.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,687 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6731,8 +7055,9 @@
 +EXPORT_SYMBOL(dm_put_device);
 +EXPORT_SYMBOL(dm_table_event);
 +EXPORT_SYMBOL(dm_table_get_mode);
---- linux-2.4.20/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-target.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm-target.c linux-2.4.21/drivers/md/dm-target.c
+--- linux-2.4.21-dm-real/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm-target.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,188 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
@@ -6922,8 +7247,9 @@
 +
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
---- linux-2.4.20/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm.c linux-2.4.21/drivers/md/dm.c
+--- linux-2.4.21-dm-real/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,1115 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -8040,8 +8366,9 @@
 +MODULE_LICENSE("GPL");
 +
 +EXPORT_SYMBOL(dm_kdevname);
---- linux-2.4.20/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/dm.h linux-2.4.21/drivers/md/dm.h
+--- linux-2.4.21-dm-real/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/dm.h	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,175 @@
 +/*
 + * Internal header file for device mapper
@@ -8218,8 +8545,9 @@
 +void dm_snapshot_exit(void);
 +
 +#endif
---- linux-2.4.20/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.c	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/kcopyd.c linux-2.4.21/drivers/md/kcopyd.c
+--- linux-2.4.21-dm-real/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/kcopyd.c	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,650 @@
 +/*
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
@@ -8871,8 +9199,9 @@
 +EXPORT_SYMBOL(kcopyd_client_destroy);
 +EXPORT_SYMBOL(kcopyd_copy);
 +EXPORT_SYMBOL(kcopyd_cancel);
---- linux-2.4.20/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.h	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/drivers/md/kcopyd.h linux-2.4.21/drivers/md/kcopyd.h
+--- linux-2.4.21-dm-real/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/drivers/md/kcopyd.h	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,47 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
@@ -8921,8 +9250,62 @@
 +		unsigned int flags, kcopyd_notify_fn fn, void *context);
 +
 +#endif
---- linux-2.4.20/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/fs/buffer.c linux-2.4.21/fs/buffer.c
+--- linux-2.4.21-dm-real/fs/buffer.c	Fri Jun 13 16:32:48 2003
++++ linux-2.4.21/fs/buffer.c	Sat Jul 12 18:13:56 2003
+@@ -735,6 +735,7 @@
+ 	bh->b_list = BUF_CLEAN;
+ 	bh->b_end_io = handler;
+ 	bh->b_private = private;
++	bh->b_journal_head = NULL;
+ }
+ 
+ static void end_buffer_io_async(struct buffer_head * bh, int uptodate)
+diff -ruN linux-2.4.21-dm-real/fs/jbd/journal.c linux-2.4.21/fs/jbd/journal.c
+--- linux-2.4.21-dm-real/fs/jbd/journal.c	Fri Jun 13 16:32:48 2003
++++ linux-2.4.21/fs/jbd/journal.c	Sat Jul 12 18:13:56 2003
+@@ -1802,9 +1802,9 @@
+ 
+ 		if (buffer_jbd(bh)) {
+ 			/* Someone did it for us! */
+-			J_ASSERT_BH(bh, bh->b_private != NULL);
++ 			J_ASSERT_BH(bh, bh->b_journal_head != NULL);
+ 			journal_free_journal_head(jh);
+-			jh = bh->b_private;
++ 			jh = bh->b_journal_head;
+ 		} else {
+ 			/*
+ 			 * We actually don't need jh_splice_lock when
+@@ -1812,7 +1812,7 @@
+ 			 */
+ 			spin_lock(&jh_splice_lock);
+ 			set_bit(BH_JBD, &bh->b_state);
+-			bh->b_private = jh;
++			bh->b_journal_head = jh;
+ 			jh->b_bh = bh;
+ 			atomic_inc(&bh->b_count);
+ 			spin_unlock(&jh_splice_lock);
+@@ -1821,7 +1821,7 @@
+ 	}
+ 	jh->b_jcount++;
+ 	spin_unlock(&journal_datalist_lock);
+-	return bh->b_private;
++	return bh->b_journal_head;
+ }
+ 
+ /*
+@@ -1854,7 +1854,7 @@
+ 			J_ASSERT_BH(bh, jh2bh(jh) == bh);
+ 			BUFFER_TRACE(bh, "remove journal_head");
+ 			spin_lock(&jh_splice_lock);
+-			bh->b_private = NULL;
++			bh->b_journal_head = NULL;
+ 			jh->b_bh = NULL;	/* debug, really */
+ 			clear_bit(BH_JBD, &bh->b_state);
+ 			__brelse(bh);
+diff -ruN linux-2.4.21-dm-real/include/linux/device-mapper.h linux-2.4.21/include/linux/device-mapper.h
+--- linux-2.4.21-dm-real/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/include/linux/device-mapper.h	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,104 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -9028,8 +9411,9 @@
 +int dm_unregister_target(struct target_type *t);
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
---- linux-2.4.20/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Sat Jul 12 17:42:25 2003
+diff -ruN linux-2.4.21-dm-real/include/linux/dm-ioctl.h linux-2.4.21/include/linux/dm-ioctl.h
+--- linux-2.4.21-dm-real/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/include/linux/dm-ioctl.h	Sat Jul 12 18:14:05 2003
 @@ -0,0 +1,237 @@
 +/*
 + * Copyright (C) 2001 - 2003 Sistina Software (UK) Limited.
@@ -9268,3 +9652,461 @@
 +#define DM_BUFFER_FULL_FLAG	(1 << 8) /* Out */
 +
 +#endif				/* _LINUX_DM_IOCTL_H */
+diff -ruN linux-2.4.21-dm-real/include/linux/fs.h linux-2.4.21/include/linux/fs.h
+--- linux-2.4.21-dm-real/include/linux/fs.h	Fri Jun 13 16:32:51 2003
++++ linux-2.4.21/include/linux/fs.h	Sat Jul 12 18:13:56 2003
+@@ -263,7 +263,7 @@
+ 	struct page *b_page;		/* the page this bh is mapped to */
+ 	void (*b_end_io)(struct buffer_head *bh, int uptodate); /* I/O completion */
+  	void *b_private;		/* reserved for b_end_io */
+-
++ 	void *b_journal_head;		/* ext3 journal_heads */
+ 	unsigned long b_rsector;	/* Real buffer location on disk */
+ 	wait_queue_head_t b_wait;
+ 
+diff -ruN linux-2.4.21-dm-real/include/linux/jbd.h linux-2.4.21/include/linux/jbd.h
+--- linux-2.4.21-dm-real/include/linux/jbd.h	Fri Jun 13 16:32:51 2003
++++ linux-2.4.21/include/linux/jbd.h	Sat Jul 12 18:13:56 2003
+@@ -311,7 +311,7 @@
+ 
+ static inline struct journal_head *bh2jh(struct buffer_head *bh)
+ {
+-	return bh->b_private;
++	return bh->b_journal_head;
+ }
+ 
+ #define HAVE_JOURNAL_CALLBACK_STATUS
+diff -ruN linux-2.4.21-dm-real/include/linux/mempool.h linux-2.4.21/include/linux/mempool.h
+--- linux-2.4.21-dm-real/include/linux/mempool.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/include/linux/mempool.h	Sat Jul 12 18:14:17 2003
+@@ -0,0 +1,31 @@
++/*
++ * memory buffer pool support
++ */
++#ifndef _LINUX_MEMPOOL_H
++#define _LINUX_MEMPOOL_H
++
++#include <linux/list.h>
++#include <linux/wait.h>
++
++struct mempool_s;
++typedef struct mempool_s mempool_t;
++
++typedef void * (mempool_alloc_t)(int gfp_mask, void *pool_data);
++typedef void (mempool_free_t)(void *element, void *pool_data);
++
++extern mempool_t * mempool_create(int min_nr, mempool_alloc_t *alloc_fn,
++				 mempool_free_t *free_fn, void *pool_data);
++extern int mempool_resize(mempool_t *pool, int new_min_nr, int gfp_mask);
++extern void mempool_destroy(mempool_t *pool);
++extern void * mempool_alloc(mempool_t *pool, int gfp_mask);
++extern void mempool_free(void *element, mempool_t *pool);
++
++/*
++ * A mempool_alloc_t and mempool_free_t that get the memory from
++ * a slab that is passed in through pool_data.
++ */
++void *mempool_alloc_slab(int gfp_mask, void *pool_data);
++void mempool_free_slab(void *element, void *pool_data);
++
++
++#endif /* _LINUX_MEMPOOL_H */
+diff -ruN linux-2.4.21-dm-real/include/linux/vmalloc.h linux-2.4.21/include/linux/vmalloc.h
+--- linux-2.4.21-dm-real/include/linux/vmalloc.h	Fri Jan 10 16:35:58 2003
++++ linux-2.4.21/include/linux/vmalloc.h	Sat Jul 12 18:14:25 2003
+@@ -26,6 +26,7 @@
+ extern void vmfree_area_pages(unsigned long address, unsigned long size);
+ extern int vmalloc_area_pages(unsigned long address, unsigned long size,
+                               int gfp_mask, pgprot_t prot);
++extern void *vcalloc(unsigned long nmemb, unsigned long elem_size);
+ 
+ /*
+  *	Allocate any pages
+diff -ruN linux-2.4.21-dm-real/kernel/ksyms.c linux-2.4.21/kernel/ksyms.c
+--- linux-2.4.21-dm-real/kernel/ksyms.c	Fri Jun 13 16:32:52 2003
++++ linux-2.4.21/kernel/ksyms.c	Sat Jul 12 18:14:25 2003
+@@ -112,6 +112,7 @@
+ EXPORT_SYMBOL(vfree);
+ EXPORT_SYMBOL(__vmalloc);
+ EXPORT_SYMBOL(vmalloc_to_page);
++EXPORT_SYMBOL(vcalloc);
+ EXPORT_SYMBOL(mem_map);
+ EXPORT_SYMBOL(remap_page_range);
+ EXPORT_SYMBOL(max_mapnr);
+diff -ruN linux-2.4.21-dm-real/mm/Makefile linux-2.4.21/mm/Makefile
+--- linux-2.4.21-dm-real/mm/Makefile	Fri Jan 10 16:36:02 2003
++++ linux-2.4.21/mm/Makefile	Sat Jul 12 18:14:17 2003
+@@ -9,12 +9,12 @@
+ 
+ O_TARGET := mm.o
+ 
+-export-objs := shmem.o filemap.o memory.o page_alloc.o
++export-objs := shmem.o filemap.o memory.o page_alloc.o mempool.o
+ 
+ obj-y	 := memory.o mmap.o filemap.o mprotect.o mlock.o mremap.o \
+ 	    vmalloc.o slab.o bootmem.o swap.o vmscan.o page_io.o \
+ 	    page_alloc.o swap_state.o swapfile.o numa.o oom_kill.o \
+-	    shmem.o
++	    shmem.o mempool.o
+ 
+ obj-$(CONFIG_HIGHMEM) += highmem.o
+ 
+diff -ruN linux-2.4.21-dm-real/mm/filemap.c linux-2.4.21/mm/filemap.c
+--- linux-2.4.21-dm-real/mm/filemap.c	Fri Jun 13 16:33:25 2003
++++ linux-2.4.21/mm/filemap.c	Sat Jul 12 18:14:21 2003
+@@ -1704,8 +1704,10 @@
+ 			retval = generic_file_direct_IO(READ, filp, buf, count, pos);
+ 			if (retval > 0)
+ 				*ppos = pos + retval;
++
+ 		}
+-		UPDATE_ATIME(filp->f_dentry->d_inode);
++		if (!S_ISBLK(inode->i_mode))
++			UPDATE_ATIME(filp->f_dentry->d_inode);
+ 		goto out;
+ 	}
+ }
+@@ -3072,8 +3074,12 @@
+ 		goto out;
+ 
+ 	remove_suid(inode);
+-	inode->i_ctime = inode->i_mtime = CURRENT_TIME;
+-	mark_inode_dirty_sync(inode);
++
++	/* Don't update times for block devices using O_DIRECT */
++	if (!(file->f_flags & O_DIRECT) || !S_ISBLK(inode->i_mode)) {
++		inode->i_ctime = inode->i_mtime = CURRENT_TIME;
++		mark_inode_dirty_sync(inode);
++	}
+ 
+ 	if (file->f_flags & O_DIRECT)
+ 		goto o_direct;
+diff -ruN linux-2.4.21-dm-real/mm/mempool.c linux-2.4.21/mm/mempool.c
+--- linux-2.4.21-dm-real/mm/mempool.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.21/mm/mempool.c	Sat Jul 12 18:14:17 2003
+@@ -0,0 +1,299 @@
++/*
++ *  linux/mm/mempool.c
++ *
++ *  memory buffer pool support. Such pools are mostly used
++ *  for guaranteed, deadlock-free memory allocations during
++ *  extreme VM load.
++ *
++ *  started by Ingo Molnar, Copyright (C) 2001
++ */
++
++#include <linux/mm.h>
++#include <linux/slab.h>
++#include <linux/module.h>
++#include <linux/mempool.h>
++
++struct mempool_s {
++	spinlock_t lock;
++	int min_nr;		/* nr of elements at *elements */
++	int curr_nr;		/* Current nr of elements at *elements */
++	void **elements;
++
++	void *pool_data;
++	mempool_alloc_t *alloc;
++	mempool_free_t *free;
++	wait_queue_head_t wait;
++};
++
++static void add_element(mempool_t *pool, void *element)
++{
++	BUG_ON(pool->curr_nr >= pool->min_nr);
++	pool->elements[pool->curr_nr++] = element;
++}
++
++static void *remove_element(mempool_t *pool)
++{
++	BUG_ON(pool->curr_nr <= 0);
++	return pool->elements[--pool->curr_nr];
++}
++
++static void free_pool(mempool_t *pool)
++{
++	while (pool->curr_nr) {
++		void *element = remove_element(pool);
++		pool->free(element, pool->pool_data);
++	}
++	kfree(pool->elements);
++	kfree(pool);
++}
++
++/**
++ * mempool_create - create a memory pool
++ * @min_nr:    the minimum number of elements guaranteed to be
++ *             allocated for this pool.
++ * @alloc_fn:  user-defined element-allocation function.
++ * @free_fn:   user-defined element-freeing function.
++ * @pool_data: optional private data available to the user-defined functions.
++ *
++ * this function creates and allocates a guaranteed size, preallocated
++ * memory pool. The pool can be used from the mempool_alloc and mempool_free
++ * functions. This function might sleep. Both the alloc_fn() and the free_fn()
++ * functions might sleep - as long as the mempool_alloc function is not called
++ * from IRQ contexts.
++ */
++mempool_t * mempool_create(int min_nr, mempool_alloc_t *alloc_fn,
++				mempool_free_t *free_fn, void *pool_data)
++{
++	mempool_t *pool;
++
++	pool = kmalloc(sizeof(*pool), GFP_KERNEL);
++	if (!pool)
++		return NULL;
++	memset(pool, 0, sizeof(*pool));
++	pool->elements = kmalloc(min_nr * sizeof(void *), GFP_KERNEL);
++	if (!pool->elements) {
++		kfree(pool);
++		return NULL;
++	}
++	spin_lock_init(&pool->lock);
++	pool->min_nr = min_nr;
++	pool->pool_data = pool_data;
++	init_waitqueue_head(&pool->wait);
++	pool->alloc = alloc_fn;
++	pool->free = free_fn;
++
++	/*
++	 * First pre-allocate the guaranteed number of buffers.
++	 */
++	while (pool->curr_nr < pool->min_nr) {
++		void *element;
++
++		element = pool->alloc(GFP_KERNEL, pool->pool_data);
++		if (unlikely(!element)) {
++			free_pool(pool);
++			return NULL;
++		}
++		add_element(pool, element);
++	}
++	return pool;
++}
++
++/**
++ * mempool_resize - resize an existing memory pool
++ * @pool:       pointer to the memory pool which was allocated via
++ *              mempool_create().
++ * @new_min_nr: the new minimum number of elements guaranteed to be
++ *              allocated for this pool.
++ * @gfp_mask:   the usual allocation bitmask.
++ *
++ * This function shrinks/grows the pool. In the case of growing,
++ * it cannot be guaranteed that the pool will be grown to the new
++ * size immediately, but new mempool_free() calls will refill it.
++ *
++ * Note, the caller must guarantee that no mempool_destroy is called
++ * while this function is running. mempool_alloc() & mempool_free()
++ * might be called (eg. from IRQ contexts) while this function executes.
++ */
++int mempool_resize(mempool_t *pool, int new_min_nr, int gfp_mask)
++{
++	void *element;
++	void **new_elements;
++	unsigned long flags;
++
++	BUG_ON(new_min_nr <= 0);
++
++	spin_lock_irqsave(&pool->lock, flags);
++	if (new_min_nr < pool->min_nr) {
++		while (pool->curr_nr > new_min_nr) {
++			element = remove_element(pool);
++			spin_unlock_irqrestore(&pool->lock, flags);
++			pool->free(element, pool->pool_data);
++			spin_lock_irqsave(&pool->lock, flags);
++		}
++		pool->min_nr = new_min_nr;
++		goto out_unlock;
++	}
++	spin_unlock_irqrestore(&pool->lock, flags);
++
++	/* Grow the pool */
++	new_elements = kmalloc(new_min_nr * sizeof(*new_elements), gfp_mask);
++	if (!new_elements)
++		return -ENOMEM;
++
++	spin_lock_irqsave(&pool->lock, flags);
++	memcpy(new_elements, pool->elements,
++			pool->curr_nr * sizeof(*new_elements));
++	kfree(pool->elements);
++	pool->elements = new_elements;
++	pool->min_nr = new_min_nr;
++
++	while (pool->curr_nr < pool->min_nr) {
++		spin_unlock_irqrestore(&pool->lock, flags);
++		element = pool->alloc(gfp_mask, pool->pool_data);
++		if (!element)
++			goto out;
++		spin_lock_irqsave(&pool->lock, flags);
++		if (pool->curr_nr < pool->min_nr)
++			add_element(pool, element);
++		else
++			kfree(element);		/* Raced */
++	}
++out_unlock:
++	spin_unlock_irqrestore(&pool->lock, flags);
++out:
++	return 0;
++}
++
++/**
++ * mempool_destroy - deallocate a memory pool
++ * @pool:      pointer to the memory pool which was allocated via
++ *             mempool_create().
++ *
++ * this function only sleeps if the free_fn() function sleeps. The caller
++ * has to guarantee that all elements have been returned to the pool (ie:
++ * freed) prior to calling mempool_destroy().
++ */
++void mempool_destroy(mempool_t *pool)
++{
++	if (pool->curr_nr != pool->min_nr)
++		BUG();		/* There were outstanding elements */
++	free_pool(pool);
++}
++
++/**
++ * mempool_alloc - allocate an element from a specific memory pool
++ * @pool:      pointer to the memory pool which was allocated via
++ *             mempool_create().
++ * @gfp_mask:  the usual allocation bitmask.
++ *
++ * this function only sleeps if the alloc_fn function sleeps or
++ * returns NULL. Note that due to preallocation, this function
++ * *never* fails when called from process contexts. (it might
++ * fail if called from an IRQ context.)
++ */
++void * mempool_alloc(mempool_t *pool, int gfp_mask)
++{
++	void *element;
++	unsigned long flags;
++	int curr_nr;
++	DECLARE_WAITQUEUE(wait, current);
++	int gfp_nowait = gfp_mask & ~(__GFP_WAIT | __GFP_IO);
++
++repeat_alloc:
++	element = pool->alloc(gfp_nowait, pool->pool_data);
++	if (likely(element != NULL))
++		return element;
++
++	/*
++	 * If the pool is less than 50% full then try harder
++	 * to allocate an element:
++	 */
++	if ((gfp_mask != gfp_nowait) && (pool->curr_nr <= pool->min_nr/2)) {
++		element = pool->alloc(gfp_mask, pool->pool_data);
++		if (likely(element != NULL))
++			return element;
++	}
++
++	/*
++	 * Kick the VM at this point.
++	 */
++	wakeup_bdflush();
++
++	spin_lock_irqsave(&pool->lock, flags);
++	if (likely(pool->curr_nr)) {
++		element = remove_element(pool);
++		spin_unlock_irqrestore(&pool->lock, flags);
++		return element;
++	}
++	spin_unlock_irqrestore(&pool->lock, flags);
++
++	/* We must not sleep in the GFP_ATOMIC case */
++	if (gfp_mask == gfp_nowait)
++		return NULL;
++
++	run_task_queue(&tq_disk);
++
++	add_wait_queue_exclusive(&pool->wait, &wait);
++	set_task_state(current, TASK_UNINTERRUPTIBLE);
++
++	spin_lock_irqsave(&pool->lock, flags);
++	curr_nr = pool->curr_nr;
++	spin_unlock_irqrestore(&pool->lock, flags);
++
++	if (!curr_nr)
++		schedule();
++
++	current->state = TASK_RUNNING;
++	remove_wait_queue(&pool->wait, &wait);
++
++	goto repeat_alloc;
++}
++
++/**
++ * mempool_free - return an element to the pool.
++ * @element:   pool element pointer.
++ * @pool:      pointer to the memory pool which was allocated via
++ *             mempool_create().
++ *
++ * this function only sleeps if the free_fn() function sleeps.
++ */
++void mempool_free(void *element, mempool_t *pool)
++{
++	unsigned long flags;
++
++	if (pool->curr_nr < pool->min_nr) {
++		spin_lock_irqsave(&pool->lock, flags);
++		if (pool->curr_nr < pool->min_nr) {
++			add_element(pool, element);
++			spin_unlock_irqrestore(&pool->lock, flags);
++			wake_up(&pool->wait);
++			return;
++		}
++		spin_unlock_irqrestore(&pool->lock, flags);
++	}
++	pool->free(element, pool->pool_data);
++}
++
++/*
++ * A commonly used alloc and free fn.
++ */
++void *mempool_alloc_slab(int gfp_mask, void *pool_data)
++{
++	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
++	return kmem_cache_alloc(mem, gfp_mask);
++}
++
++void mempool_free_slab(void *element, void *pool_data)
++{
++	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
++	kmem_cache_free(mem, element);
++}
++
++
++EXPORT_SYMBOL(mempool_create);
++EXPORT_SYMBOL(mempool_resize);
++EXPORT_SYMBOL(mempool_destroy);
++EXPORT_SYMBOL(mempool_alloc);
++EXPORT_SYMBOL(mempool_free);
++EXPORT_SYMBOL(mempool_alloc_slab);
++EXPORT_SYMBOL(mempool_free_slab);
+diff -ruN linux-2.4.21-dm-real/mm/vmalloc.c linux-2.4.21/mm/vmalloc.c
+--- linux-2.4.21-dm-real/mm/vmalloc.c	Fri Jun 13 16:33:25 2003
++++ linux-2.4.21/mm/vmalloc.c	Sat Jul 12 18:14:25 2003
+@@ -327,3 +327,22 @@
+ 	read_unlock(&vmlist_lock);
+ 	return buf - buf_start;
+ }
++
++void *vcalloc(unsigned long nmemb, unsigned long elem_size)
++{
++	unsigned long size;
++	void *addr;
++
++	/*
++	 * Check that we're not going to overflow.
++	 */
++	if (nmemb > (ULONG_MAX / elem_size))
++		return NULL;
++
++	size = nmemb * elem_size;
++	addr = vmalloc(size);
++	if (addr)
++		memset(addr, 0, size);
++
++	return addr;
++}

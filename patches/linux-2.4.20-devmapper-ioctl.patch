@@ -1,5 +1,5 @@
 --- linux-2.4.20/Documentation/Configure.help	Fri Jan 10 16:33:55 2003
-+++ linux/Documentation/Configure.help	Fri Jul  4 20:13:22 2003
++++ linux/Documentation/Configure.help	Sat Jul 12 18:13:15 2003
 @@ -1822,6 +1822,20 @@
    want), say M here and read <file:Documentation/modules.txt>.  The
    module will be called lvm-mod.o.
@@ -22,7 +22,7 @@
  CONFIG_MD
    Support multiple physical spindles through a single logical device.
 --- linux-2.4.20/MAINTAINERS	Fri Jan 10 16:33:49 2003
-+++ linux/MAINTAINERS	Fri Jul  4 20:13:22 2003
++++ linux/MAINTAINERS	Sat Jul 12 18:13:15 2003
 @@ -439,6 +439,13 @@
  W:	http://www.debian.org/~dz/i8k/
  S:	Maintained
@@ -38,7 +38,7 @@
  P:	H. Peter Anvin
  M:	hpa@zytor.com
 --- linux-2.4.20/arch/mips64/kernel/ioctl32.c	Fri Jan 10 16:34:18 2003
-+++ linux/arch/mips64/kernel/ioctl32.c	Fri Jul  4 20:13:14 2003
++++ linux/arch/mips64/kernel/ioctl32.c	Sat Jul 12 18:13:05 2003
 @@ -33,6 +33,7 @@
  #include <linux/auto_fs.h>
  #include <linux/ext2_fs.h>
@@ -47,7 +47,7 @@
  
  #include <scsi/scsi.h>
  #undef __KERNEL__		/* This file was born to be ugly ...  */
-@@ -914,6 +915,20 @@
+@@ -914,6 +915,21 @@
  	IOCTL32_DEFAULT(STOP_ARRAY_RO),
  	IOCTL32_DEFAULT(RESTART_ARRAY_RW),
  #endif /* CONFIG_MD */
@@ -57,19 +57,20 @@
 +	IOCTL32_DEFAULT(DM_REMOVE_ALL),
 +	IOCTL32_DEFAULT(DM_DEV_CREATE),
 +	IOCTL32_DEFAULT(DM_DEV_REMOVE),
-+	IOCTL32_DEFAULT(DM_DEV_RELOAD),
++	IOCTL32_DEFAULT(DM_TABLE_LOAD),
 +	IOCTL32_DEFAULT(DM_DEV_SUSPEND),
 +	IOCTL32_DEFAULT(DM_DEV_RENAME),
-+	IOCTL32_DEFAULT(DM_DEV_DEPS),
++	IOCTL32_DEFAULT(DM_TABLE_DEPS),
 +	IOCTL32_DEFAULT(DM_DEV_STATUS),
-+	IOCTL32_DEFAULT(DM_TARGET_STATUS),
-+	IOCTL32_DEFAULT(DM_TARGET_WAIT),
++	IOCTL32_DEFAULT(DM_TABLE_STATUS),
++	IOCTL32_DEFAULT(DM_DEV_WAIT),
++	IOCTL32_DEFAULT(DM_TABLE_CLEAR),
 +#endif /* CONFIG_BLK_DEV_DM */
  
  	IOCTL32_DEFAULT(MTIOCTOP),			/* mtio.h ioctls  */
  	IOCTL32_HANDLER(MTIOCGET32, mt_ioctl_trans),
 --- linux-2.4.20/arch/parisc/kernel/ioctl32.c	Fri Jan 10 16:34:19 2003
-+++ linux/arch/parisc/kernel/ioctl32.c	Fri Jul  4 20:13:14 2003
++++ linux/arch/parisc/kernel/ioctl32.c	Sat Jul 12 18:13:05 2003
 @@ -55,6 +55,7 @@
  #define max max */
  #include <linux/lvm.h>
@@ -78,7 +79,7 @@
  
  #include <scsi/scsi.h>
  /* Ugly hack. */
-@@ -3415,6 +3416,20 @@
+@@ -3415,6 +3416,21 @@
  COMPATIBLE_IOCTL(LV_BMAP)
  COMPATIBLE_IOCTL(LV_SNAPSHOT_USE_RATE)
  #endif /* LVM */
@@ -88,19 +89,20 @@
 +COMPATIBLE_IOCTL(DM_REMOVE_ALL)
 +COMPATIBLE_IOCTL(DM_DEV_CREATE)
 +COMPATIBLE_IOCTL(DM_DEV_REMOVE)
-+COMPATIBLE_IOCTL(DM_DEV_RELOAD)
++COMPATIBLE_IOCTL(DM_TABLE_LOAD)
 +COMPATIBLE_IOCTL(DM_DEV_SUSPEND)
 +COMPATIBLE_IOCTL(DM_DEV_RENAME)
-+COMPATIBLE_IOCTL(DM_DEV_DEPS)
++COMPATIBLE_IOCTL(DM_TABLE_DEPS)
 +COMPATIBLE_IOCTL(DM_DEV_STATUS)
-+COMPATIBLE_IOCTL(DM_TARGET_STATUS)
-+COMPATIBLE_IOCTL(DM_TARGET_WAIT)
++COMPATIBLE_IOCTL(DM_TABLE_STATUS)
++COMPATIBLE_IOCTL(DM_DEV_WAIT)
++COMPATIBLE_IOCTL(DM_TABLE_CLEAR)
 +#endif /* CONFIG_BLK_DEV_DM */
  #if defined(CONFIG_DRM) || defined(CONFIG_DRM_MODULE)
  COMPATIBLE_IOCTL(DRM_IOCTL_GET_MAGIC)
  COMPATIBLE_IOCTL(DRM_IOCTL_IRQ_BUSID)
 --- linux-2.4.20/arch/ppc64/kernel/ioctl32.c	Fri Jan 10 16:34:24 2003
-+++ linux/arch/ppc64/kernel/ioctl32.c	Fri Jul  4 20:13:15 2003
++++ linux/arch/ppc64/kernel/ioctl32.c	Sat Jul 12 18:13:05 2003
 @@ -66,6 +66,7 @@
  #if defined(CONFIG_BLK_DEV_LVM) || defined(CONFIG_BLK_DEV_LVM_MODULE)
  #include <linux/lvm.h>
@@ -109,7 +111,7 @@
  
  #include <scsi/scsi.h>
  /* Ugly hack. */
-@@ -4362,6 +4363,20 @@
+@@ -4362,6 +4363,21 @@
  COMPATIBLE_IOCTL(NBD_PRINT_DEBUG),
  COMPATIBLE_IOCTL(NBD_SET_SIZE_BLOCKS),
  COMPATIBLE_IOCTL(NBD_DISCONNECT),
@@ -119,19 +121,20 @@
 +COMPATIBLE_IOCTL(DM_REMOVE_ALL),
 +COMPATIBLE_IOCTL(DM_DEV_CREATE),
 +COMPATIBLE_IOCTL(DM_DEV_REMOVE),
-+COMPATIBLE_IOCTL(DM_DEV_RELOAD),
++COMPATIBLE_IOCTL(DM_TABLE_LOAD),
 +COMPATIBLE_IOCTL(DM_DEV_SUSPEND),
 +COMPATIBLE_IOCTL(DM_DEV_RENAME),
-+COMPATIBLE_IOCTL(DM_DEV_DEPS),
++COMPATIBLE_IOCTL(DM_TABLE_DEPS),
 +COMPATIBLE_IOCTL(DM_DEV_STATUS),
-+COMPATIBLE_IOCTL(DM_TARGET_STATUS),
-+COMPATIBLE_IOCTL(DM_TARGET_WAIT),
++COMPATIBLE_IOCTL(DM_TABLE_STATUS),
++COMPATIBLE_IOCTL(DM_DEV_WAIT),
++COMPATIBLE_IOCTL(DM_TABLE_CLEAR),
 +#endif /* CONFIG_BLK_DEV_DM */
  /* Remove *PRIVATE in 2.5 */
  COMPATIBLE_IOCTL(SIOCDEVPRIVATE),
  COMPATIBLE_IOCTL(SIOCDEVPRIVATE+1),
 --- linux-2.4.20/arch/s390x/kernel/ioctl32.c	Fri Jan 10 16:34:26 2003
-+++ linux/arch/s390x/kernel/ioctl32.c	Fri Jul  4 20:13:15 2003
++++ linux/arch/s390x/kernel/ioctl32.c	Sat Jul 12 18:13:05 2003
 @@ -25,6 +25,7 @@
  #include <linux/ext2_fs.h>
  #include <linux/hdreg.h>
@@ -140,7 +143,7 @@
  #include <asm/types.h>
  #include <asm/uaccess.h>
  #include <asm/dasd.h>
-@@ -507,6 +508,18 @@
+@@ -507,6 +508,19 @@
  	IOCTL32_DEFAULT(VT_UNLOCKSWITCH),
  
  	IOCTL32_DEFAULT(SIOCGSTAMP),
@@ -149,18 +152,19 @@
 +	IOCTL32_DEFAULT(DM_REMOVE_ALL),
 +	IOCTL32_DEFAULT(DM_DEV_CREATE),
 +	IOCTL32_DEFAULT(DM_DEV_REMOVE),
-+	IOCTL32_DEFAULT(DM_DEV_RELOAD),
++	IOCTL32_DEFAULT(DM_TABLE_LOAD),
 +	IOCTL32_DEFAULT(DM_DEV_SUSPEND),
 +	IOCTL32_DEFAULT(DM_DEV_RENAME),
-+	IOCTL32_DEFAULT(DM_DEV_DEPS),
++	IOCTL32_DEFAULT(DM_TABLE_DEPS),
 +	IOCTL32_DEFAULT(DM_DEV_STATUS),
-+	IOCTL32_DEFAULT(DM_TARGET_STATUS),
-+	IOCTL32_DEFAULT(DM_TARGET_WAIT),
++	IOCTL32_DEFAULT(DM_TABLE_STATUS),
++	IOCTL32_DEFAULT(DM_DEV_WAIT),
++	IOCTL32_DEFAULT(DM_TABLE_CLEAR),
  
  	IOCTL32_HANDLER(SIOCGIFNAME, dev_ifname32),
  	IOCTL32_HANDLER(SIOCGIFCONF, dev_ifconf),
 --- linux-2.4.20/arch/sparc64/kernel/ioctl32.c	Fri Jan 10 16:34:30 2003
-+++ linux/arch/sparc64/kernel/ioctl32.c	Fri Jul  4 20:13:15 2003
++++ linux/arch/sparc64/kernel/ioctl32.c	Sat Jul 12 18:13:05 2003
 @@ -55,6 +55,7 @@
  #if defined(CONFIG_BLK_DEV_LVM) || defined(CONFIG_BLK_DEV_LVM_MODULE)
  #include <linux/lvm.h>
@@ -169,7 +173,7 @@
  
  #include <scsi/scsi.h>
  /* Ugly hack. */
-@@ -5023,6 +5024,21 @@
+@@ -5023,6 +5024,22 @@
  COMPATIBLE_IOCTL(NBD_PRINT_DEBUG)
  COMPATIBLE_IOCTL(NBD_SET_SIZE_BLOCKS)
  COMPATIBLE_IOCTL(NBD_DISCONNECT)
@@ -179,20 +183,21 @@
 +COMPATIBLE_IOCTL(DM_REMOVE_ALL)
 +COMPATIBLE_IOCTL(DM_DEV_CREATE)
 +COMPATIBLE_IOCTL(DM_DEV_REMOVE)
-+COMPATIBLE_IOCTL(DM_DEV_RELOAD)
++COMPATIBLE_IOCTL(DM_TABLE_LOAD)
 +COMPATIBLE_IOCTL(DM_DEV_SUSPEND)
 +COMPATIBLE_IOCTL(DM_DEV_RENAME)
-+COMPATIBLE_IOCTL(DM_DEV_DEPS)
++COMPATIBLE_IOCTL(DM_TABLE_DEPS)
 +COMPATIBLE_IOCTL(DM_DEV_STATUS)
-+COMPATIBLE_IOCTL(DM_TARGET_STATUS)
-+COMPATIBLE_IOCTL(DM_TARGET_WAIT)
++COMPATIBLE_IOCTL(DM_TABLE_STATUS)
++COMPATIBLE_IOCTL(DM_DEV_WAIT)
++COMPATIBLE_IOCTL(DM_TABLE_CLEAR)
 +#endif /* CONFIG_BLK_DEV_DM */
 +
  /* And these ioctls need translation */
  HANDLE_IOCTL(MEMREADOOB32, mtd_rw_oob)
  HANDLE_IOCTL(MEMWRITEOOB32, mtd_rw_oob)
 --- linux-2.4.20/arch/x86_64/ia32/ia32_ioctl.c	Fri Jan 10 16:34:32 2003
-+++ linux/arch/x86_64/ia32/ia32_ioctl.c	Fri Jul  4 20:13:15 2003
++++ linux/arch/x86_64/ia32/ia32_ioctl.c	Sat Jul 12 18:13:05 2003
 @@ -62,6 +62,7 @@
  #define max max
  #include <linux/lvm.h>
@@ -201,7 +206,7 @@
  
  #include <scsi/scsi.h>
  /* Ugly hack. */
-@@ -3776,6 +3777,20 @@
+@@ -3776,6 +3777,21 @@
  COMPATIBLE_IOCTL(LV_BMAP)
  COMPATIBLE_IOCTL(LV_SNAPSHOT_USE_RATE)
  #endif /* LVM */
@@ -211,19 +216,20 @@
 +COMPATIBLE_IOCTL(DM_REMOVE_ALL)
 +COMPATIBLE_IOCTL(DM_DEV_CREATE)
 +COMPATIBLE_IOCTL(DM_DEV_REMOVE)
-+COMPATIBLE_IOCTL(DM_DEV_RELOAD)
++COMPATIBLE_IOCTL(DM_TABLE_LOAD)
 +COMPATIBLE_IOCTL(DM_DEV_SUSPEND)
 +COMPATIBLE_IOCTL(DM_DEV_RENAME)
-+COMPATIBLE_IOCTL(DM_DEV_DEPS)
++COMPATIBLE_IOCTL(DM_TABLE_DEPS)
 +COMPATIBLE_IOCTL(DM_DEV_STATUS)
-+COMPATIBLE_IOCTL(DM_TARGET_STATUS)
-+COMPATIBLE_IOCTL(DM_TARGET_WAIT)
++COMPATIBLE_IOCTL(DM_TABLE_STATUS)
++COMPATIBLE_IOCTL(DM_DEV_WAIT)
++COMPATIBLE_IOCTL(DM_TABLE_CLEAR)
 +#endif /* CONFIG_BLK_DEV_DM */
  #if defined(CONFIG_DRM) || defined(CONFIG_DRM_MODULE)
  COMPATIBLE_IOCTL(DRM_IOCTL_GET_MAGIC)
  COMPATIBLE_IOCTL(DRM_IOCTL_IRQ_BUSID)
 --- linux-2.4.20/drivers/md/Config.in	Fri Jan 10 16:34:50 2003
-+++ linux/drivers/md/Config.in	Fri Jul  4 20:13:22 2003
++++ linux/drivers/md/Config.in	Sat Jul 12 18:13:15 2003
 @@ -14,5 +14,9 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -235,7 +241,7 @@
  
  endmenu
 --- linux-2.4.20/drivers/md/Makefile	Fri Jan 10 16:34:50 2003
-+++ linux/drivers/md/Makefile	Fri Jul  4 20:12:36 2003
++++ linux/drivers/md/Makefile	Sat Jul 12 18:13:25 2003
 @@ -4,24 +4,41 @@
  
  O_TARGET	:= mddev.o
@@ -288,7 +294,7 @@
 +	$(LD) -r -o $@ $(dm-mirror-mod-objs)
 +
 --- linux-2.4.20/drivers/md/dm-daemon.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-daemon.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,113 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -404,7 +410,7 @@
 +EXPORT_SYMBOL(dm_daemon_stop);
 +EXPORT_SYMBOL(dm_daemon_wake);
 --- linux-2.4.20/drivers/md/dm-daemon.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.h	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-daemon.h	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,29 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -436,7 +442,7 @@
 +
 +#endif
 --- linux-2.4.20/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-exception-store.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-exception-store.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,675 @@
 +/*
 + * dm-snapshot.c
@@ -1114,7 +1120,7 @@
 +	return 0;
 +}
 --- linux-2.4.20/drivers/md/dm-io.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-io.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,344 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -1461,7 +1467,7 @@
 +EXPORT_SYMBOL(dm_io_sync);
 +EXPORT_SYMBOL(dm_io_async);
 --- linux-2.4.20/drivers/md/dm-io.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.h	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-io.h	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,86 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -1550,7 +1556,7 @@
 +
 +#endif
 --- linux-2.4.20/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-ioctl.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,1272 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -2825,7 +2831,7 @@
 +	dm_hash_exit();
 +}
 --- linux-2.4.20/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-linear.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,123 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -2951,7 +2957,7 @@
 +		DMERR("linear: unregister failed %d", r);
 +}
 --- linux-2.4.20/drivers/md/dm-log.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-log.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,302 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -3256,7 +3262,7 @@
 +EXPORT_SYMBOL(dm_create_dirty_log);
 +EXPORT_SYMBOL(dm_destroy_dirty_log);
 --- linux-2.4.20/drivers/md/dm-log.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.h	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-log.h	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,112 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -3371,7 +3377,7 @@
 +
 +#endif
 --- linux-2.4.20/drivers/md/dm-raid1.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-raid1.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-raid1.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,1297 @@
 +/*
 + * Copyright (C) 2003 Sistina Software Limited.
@@ -4671,8 +4677,8 @@
 +MODULE_AUTHOR("Heinz Mauelshagen <mge@sistina.com>");
 +MODULE_LICENSE("GPL");
 --- linux-2.4.20/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.c	Fri Jul  4 20:13:25 2003
-@@ -0,0 +1,1192 @@
++++ linux/drivers/md/dm-snapshot.c	Sat Jul 12 18:13:20 2003
+@@ -0,0 +1,1235 @@
 +/*
 + * dm-snapshot.c
 + *
@@ -5263,6 +5269,17 @@
 +}
 +
 +/*
++ * FIXME: inefficient.
++ */
++static void queue_buffers(struct buffer_head **queue, struct buffer_head *bhs)
++{
++	while (*queue)
++		queue = &((*queue)->b_reqnext);
++
++	*queue = bhs;
++}
++
++/*
 + * Flush a list of buffers.
 + */
 +static void flush_buffers(struct buffer_head *bh)
@@ -5296,31 +5313,54 @@
 +	}
 +}
 +
++static struct buffer_head *__flush_bhs(struct pending_exception *pe)
++{
++	struct pending_exception *sibling;
++
++	if (list_empty(&pe->siblings))
++		return pe->origin_bhs;
++
++	sibling = list_entry(pe->siblings.next,
++			     struct pending_exception, siblings);
++
++	list_del(&pe->siblings);
++
++	/* FIXME: I think there's a race on SMP machines here, add spin lock */
++	queue_buffers(&sibling->origin_bhs, pe->origin_bhs);
++
++	return NULL;
++}
++
 +static void pending_complete(struct pending_exception *pe, int success)
 +{
 +	struct exception *e;
 +	struct dm_snapshot *s = pe->snap;
++	struct buffer_head *flush = NULL;
 +
 +	if (success) {
 +		e = alloc_exception();
 +		if (!e) {
-+			printk("Unable to allocate exception.");
++			DMWARN("Unable to allocate exception.");
 +			down_write(&s->lock);
 +			s->store.drop_snapshot(&s->store);
 +			s->valid = 0;
++			flush = __flush_bhs(pe);
 +			up_write(&s->lock);
-+			return;
++
++			error_buffers(pe->snapshot_bhs);
++			goto out;
 +		}
 +
 +		/*
 +		 * Add a proper exception, and remove the
-+		 * inflight exception from the list.
++		 * in-flight exception from the list.
 +		 */
 +		down_write(&s->lock);
 +
 +		memcpy(e, &pe->e, sizeof(*e));
 +		insert_exception(&s->complete, e);
 +		remove_exception(&pe->e);
++		flush = __flush_bhs(pe);
 +
 +		/* Submit any pending write BHs */
 +		up_write(&s->lock);
@@ -5351,6 +5391,7 @@
 +		s->store.drop_snapshot(&s->store);
 +		s->valid = 0;
 +		remove_exception(&pe->e);
++		flush = __flush_bhs(pe);
 +		up_write(&s->lock);
 +
 +		error_buffers(pe->snapshot_bhs);
@@ -5359,10 +5400,9 @@
 +		DMDEBUG("Exception failed.");
 +	}
 +
-+	if (list_empty(&pe->siblings))
-+		flush_buffers(pe->origin_bhs);
-+	else
-+		list_del(&pe->siblings);
++ out:
++	if (flush)
++		flush_buffers(flush);
 +
 +	free_pending_exception(pe);
 +}
@@ -5402,6 +5442,12 @@
 +	int *sizes = blk_size[major(dev)];
 +	sector_t dev_size = (sector_t) -1;
 +
++	if (pe->started)
++		return;
++
++	/* this is protected by snap->lock */
++	pe->started = 1;
++
 +	if (sizes && sizes[minor(dev)])
 +		dev_size = sizes[minor(dev)] << 1;
 +
@@ -5413,12 +5459,9 @@
 +	dest.sector = chunk_to_sector(s, pe->e.new_chunk);
 +	dest.count = src.count;
 +
-+	if (!pe->started) {
-+		/* Hand over to kcopyd */
-+		kcopyd_copy(s->kcopyd_client,
-+			    &src, 1, &dest, 0, copy_callback, pe);
-+		pe->started = 1;
-+	}
++	/* Hand over to kcopyd */
++	kcopyd_copy(s->kcopyd_client,
++		    &src, 1, &dest, 0, copy_callback, pe);
 +}
 +
 +/*
@@ -5507,6 +5550,7 @@
 +				s->valid = 0;
 +				r = -EIO;
 +			} else {
++				remap_exception(s, &pe->e, bh);
 +				queue_buffer(&pe->snapshot_bhs, bh);
 +				start_copy(pe);
 +				r = 0;
@@ -5555,6 +5599,51 @@
 +	s->have_metadata = 1;
 +}
 +
++static int snapshot_status(struct dm_target *ti, status_type_t type,
++			   char *result, unsigned int maxlen)
++{
++	struct dm_snapshot *snap = (struct dm_snapshot *) ti->private;
++	char cow[16];
++	char org[16];
++
++	switch (type) {
++	case STATUSTYPE_INFO:
++		if (!snap->valid)
++			snprintf(result, maxlen, "Invalid");
++		else {
++			if (snap->store.fraction_full) {
++				sector_t numerator, denominator;
++				snap->store.fraction_full(&snap->store,
++							  &numerator,
++							  &denominator);
++				snprintf(result, maxlen,
++					 SECTOR_FORMAT "/" SECTOR_FORMAT,
++					 numerator, denominator);
++			}
++			else
++				snprintf(result, maxlen, "Unknown");
++		}
++		break;
++
++	case STATUSTYPE_TABLE:
++		/*
++		 * kdevname returns a static pointer so we need
++		 * to make private copies if the output is to
++		 * make sense.
++		 */
++		strncpy(cow, dm_kdevname(snap->cow->dev), sizeof(cow));
++		strncpy(org, dm_kdevname(snap->origin->dev), sizeof(org));
++		snprintf(result, maxlen, "%s %s %c %ld", org, cow,
++			 snap->type, snap->chunk_size);
++		break;
++	}
++
++	return 0;
++}
++
++/*-----------------------------------------------------------------
++ * Origin methods
++ *---------------------------------------------------------------*/
 +static void list_merge(struct list_head *l1, struct list_head *l2)
 +{
 +	struct list_head *l1_n, *l2_p;
@@ -5571,7 +5660,7 @@
 +
 +static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 +{
-+	int r = 1;
++	int r = 1, first = 1;
 +	struct list_head *sl;
 +	struct dm_snapshot *snap;
 +	struct exception *e;
@@ -5626,9 +5715,11 @@
 +		pe = last;
 +		do {
 +			down_write(&pe->snap->lock);
-+			queue_buffer(&pe->origin_bhs, bh);
++			if (first)
++				queue_buffer(&pe->origin_bhs, bh);
 +			start_copy(pe);
 +			up_write(&pe->snap->lock);
++			first = 0;
 +			pe = list_entry(pe->siblings.next,
 +					struct pending_exception, siblings);
 +
@@ -5636,48 +5727,6 @@
 +	}
 +
 +	return r;
-+}
-+
-+static int snapshot_status(struct dm_target *ti, status_type_t type,
-+			   char *result, unsigned int maxlen)
-+{
-+	struct dm_snapshot *snap = (struct dm_snapshot *) ti->private;
-+	char cow[16];
-+	char org[16];
-+
-+	switch (type) {
-+	case STATUSTYPE_INFO:
-+		if (!snap->valid)
-+			snprintf(result, maxlen, "Invalid");
-+		else {
-+			if (snap->store.fraction_full) {
-+				sector_t numerator, denominator;
-+				snap->store.fraction_full(&snap->store,
-+							  &numerator,
-+							  &denominator);
-+				snprintf(result, maxlen,
-+					 SECTOR_FORMAT "/" SECTOR_FORMAT,
-+					 numerator, denominator);
-+			}
-+			else
-+				snprintf(result, maxlen, "Unknown");
-+		}
-+		break;
-+
-+	case STATUSTYPE_TABLE:
-+		/*
-+		 * kdevname returns a static pointer so we need
-+		 * to make private copies if the output is to
-+		 * make sense.
-+		 */
-+		strncpy(cow, dm_kdevname(snap->cow->dev), sizeof(cow));
-+		strncpy(org, dm_kdevname(snap->origin->dev), sizeof(org));
-+		snprintf(result, maxlen, "%s %s %c %ld", org, cow,
-+			 snap->type, snap->chunk_size);
-+		break;
-+	}
-+
-+	return 0;
 +}
 +
 +/*
@@ -5866,7 +5915,7 @@
 +	kmem_cache_destroy(exception_cache);
 +}
 --- linux-2.4.20/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.h	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-snapshot.h	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,158 @@
 +/*
 + * dm-snapshot.c
@@ -6027,7 +6076,7 @@
 +
 +#endif
 --- linux-2.4.20/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-stripe.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,258 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6288,7 +6337,7 @@
 +	return;
 +}
 --- linux-2.4.20/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-table.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-table.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,687 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6978,7 +7027,7 @@
 +EXPORT_SYMBOL(dm_table_event);
 +EXPORT_SYMBOL(dm_table_get_mode);
 --- linux-2.4.20/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-target.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm-target.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,188 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
@@ -7169,7 +7218,7 @@
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
 --- linux-2.4.20/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,1115 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -8287,7 +8336,7 @@
 +
 +EXPORT_SYMBOL(dm_kdevname);
 --- linux-2.4.20/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/dm.h	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,175 @@
 +/*
 + * Internal header file for device mapper
@@ -8465,7 +8514,7 @@
 +
 +#endif
 --- linux-2.4.20/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.c	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/kcopyd.c	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,650 @@
 +/*
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
@@ -9118,7 +9167,7 @@
 +EXPORT_SYMBOL(kcopyd_copy);
 +EXPORT_SYMBOL(kcopyd_cancel);
 --- linux-2.4.20/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.h	Fri Jul  4 20:13:25 2003
++++ linux/drivers/md/kcopyd.h	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,47 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
@@ -9168,7 +9217,7 @@
 +
 +#endif
 --- linux-2.4.20/fs/buffer.c	Fri Jan 10 16:35:24 2003
-+++ linux/fs/buffer.c	Fri Jul  4 20:13:18 2003
++++ linux/fs/buffer.c	Sat Jul 12 18:13:10 2003
 @@ -586,9 +586,10 @@
  void buffer_insert_inode_queue(struct buffer_head *bh, struct inode *inode)
  {
@@ -9241,7 +9290,7 @@
  	if (nr_unused_buffer_heads >= MAX_UNUSED_BUFFERS) {
  		kmem_cache_free(bh_cachep, bh);
 --- linux-2.4.20/fs/jbd/journal.c	Fri Jan 10 16:35:27 2003
-+++ linux/fs/jbd/journal.c	Fri Jul  4 20:13:18 2003
++++ linux/fs/jbd/journal.c	Sat Jul 12 18:13:10 2003
 @@ -1664,8 +1664,8 @@
   *
   * Whenever a buffer has an attached journal_head, its ->b_state:BH_JBD bit
@@ -9293,7 +9342,7 @@
  			clear_bit(BH_JBD, &bh->b_state);
  			__brelse(bh);
 --- linux-2.4.20/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Fri Jul  4 20:13:25 2003
++++ linux/include/linux/device-mapper.h	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,104 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -9400,7 +9449,7 @@
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 --- linux-2.4.20/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Fri Jul  4 20:13:25 2003
++++ linux/include/linux/dm-ioctl.h	Sat Jul 12 18:13:20 2003
 @@ -0,0 +1,237 @@
 +/*
 + * Copyright (C) 2001 - 2003 Sistina Software (UK) Limited.
@@ -9611,8 +9660,8 @@
 +
 +#define DM_VERSION_MAJOR	4
 +#define DM_VERSION_MINOR	0
-+#define DM_VERSION_PATCHLEVEL	0
-+#define DM_VERSION_EXTRA	"-ioctl (2003-07-04)"
++#define DM_VERSION_PATCHLEVEL	1
++#define DM_VERSION_EXTRA	"-ioctl (2003-07-12)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	(1 << 0) /* In/Out */
@@ -9640,7 +9689,7 @@
 +
 +#endif				/* _LINUX_DM_IOCTL_H */
 --- linux-2.4.20/include/linux/fs.h	Fri Jan 10 16:35:55 2003
-+++ linux/include/linux/fs.h	Fri Jul  4 20:13:18 2003
++++ linux/include/linux/fs.h	Sat Jul 12 18:13:10 2003
 @@ -220,6 +220,7 @@
  	BH_Wait_IO,	/* 1 if we should write out this buffer */
  	BH_Launder,	/* 1 if we can throttle on this buffer */
@@ -9685,7 +9734,7 @@
  
  /*
 --- linux-2.4.20/include/linux/jbd.h	Fri Jan 10 16:35:55 2003
-+++ linux/include/linux/jbd.h	Fri Jul  4 20:13:18 2003
++++ linux/include/linux/jbd.h	Sat Jul 12 18:13:10 2003
 @@ -254,7 +254,7 @@
  
  static inline struct journal_head *bh2jh(struct buffer_head *bh)
@@ -9696,7 +9745,7 @@
  
  #define HAVE_JOURNAL_CALLBACK_STATUS
 --- linux-2.4.20/include/linux/mempool.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/mempool.h	Fri Jul  4 20:13:38 2003
++++ linux/include/linux/mempool.h	Sat Jul 12 18:13:29 2003
 @@ -0,0 +1,31 @@
 +/*
 + * memory buffer pool support
@@ -9730,7 +9779,7 @@
 +
 +#endif /* _LINUX_MEMPOOL_H */
 --- linux-2.4.20/include/linux/vmalloc.h	Fri Jan 10 16:35:58 2003
-+++ linux/include/linux/vmalloc.h	Fri Jul  4 20:13:42 2003
++++ linux/include/linux/vmalloc.h	Sat Jul 12 18:13:38 2003
 @@ -26,6 +26,7 @@
  extern void vmfree_area_pages(unsigned long address, unsigned long size);
  extern int vmalloc_area_pages(unsigned long address, unsigned long size,
@@ -9740,7 +9789,7 @@
  /*
   *	Allocate any pages
 --- linux-2.4.20/kernel/ksyms.c	Fri Jan 10 16:36:02 2003
-+++ linux/kernel/ksyms.c	Fri Jul  4 20:13:42 2003
++++ linux/kernel/ksyms.c	Sat Jul 12 18:13:38 2003
 @@ -111,6 +111,7 @@
  EXPORT_SYMBOL(vfree);
  EXPORT_SYMBOL(__vmalloc);
@@ -9750,7 +9799,7 @@
  EXPORT_SYMBOL(remap_page_range);
  EXPORT_SYMBOL(max_mapnr);
 --- linux-2.4.20/mm/Makefile	Fri Jan 10 16:36:02 2003
-+++ linux/mm/Makefile	Fri Jul  4 20:13:38 2003
++++ linux/mm/Makefile	Sat Jul 12 18:13:29 2003
 @@ -9,12 +9,12 @@
  
  O_TARGET := mm.o
@@ -9767,7 +9816,7 @@
  obj-$(CONFIG_HIGHMEM) += highmem.o
  
 --- linux-2.4.20/mm/filemap.c	Fri Jan 10 16:36:03 2003
-+++ linux/mm/filemap.c	Fri Jul  4 20:13:51 2003
++++ linux/mm/filemap.c	Sat Jul 12 18:13:33 2003
 @@ -1700,8 +1700,10 @@
  			retval = generic_file_direct_IO(READ, filp, buf, count, pos);
  			if (retval > 0)
@@ -9796,7 +9845,7 @@
  	if (file->f_flags & O_DIRECT)
  		goto o_direct;
 --- linux-2.4.20/mm/mempool.c	Thu Jan  1 01:00:00 1970
-+++ linux/mm/mempool.c	Fri Jul  4 20:13:38 2003
++++ linux/mm/mempool.c	Sat Jul 12 18:13:29 2003
 @@ -0,0 +1,299 @@
 +/*
 + *  linux/mm/mempool.c
@@ -10098,7 +10147,7 @@
 +EXPORT_SYMBOL(mempool_alloc_slab);
 +EXPORT_SYMBOL(mempool_free_slab);
 --- linux-2.4.20/mm/vmalloc.c	Fri Jan 10 16:36:03 2003
-+++ linux/mm/vmalloc.c	Fri Jul  4 20:13:42 2003
++++ linux/mm/vmalloc.c	Sat Jul 12 18:13:38 2003
 @@ -327,3 +327,22 @@
  	read_unlock(&vmlist_lock);
  	return buf - buf_start;

@@ -1,5 +1,5 @@
 --- linux-2.4.21/drivers/md/dm-daemon.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.c	Tue Jul  1 16:49:48 2003
++++ linux/drivers/md/dm-daemon.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,113 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -115,7 +115,7 @@
 +EXPORT_SYMBOL(dm_daemon_stop);
 +EXPORT_SYMBOL(dm_daemon_wake);
 --- linux-2.4.21/drivers/md/dm-daemon.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.h	Tue Jul  1 18:07:08 2003
++++ linux/drivers/md/dm-daemon.h	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,29 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -147,7 +147,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-exception-store.c	Fri Jul  4 16:11:44 2003
++++ linux/drivers/md/dm-exception-store.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,675 @@
 +/*
 + * dm-snapshot.c
@@ -825,7 +825,7 @@
 +	return 0;
 +}
 --- linux-2.4.21/drivers/md/dm-io.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.c	Fri Jul  4 15:19:02 2003
++++ linux/drivers/md/dm-io.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,344 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -1172,7 +1172,7 @@
 +EXPORT_SYMBOL(dm_io_sync);
 +EXPORT_SYMBOL(dm_io_async);
 --- linux-2.4.21/drivers/md/dm-io.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.h	Fri Jul  4 16:49:03 2003
++++ linux/drivers/md/dm-io.h	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,86 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -1261,7 +1261,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Fri Jul  4 15:38:25 2003
++++ linux/drivers/md/dm-ioctl.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,1272 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -2536,7 +2536,7 @@
 +	dm_hash_exit();
 +}
 --- linux-2.4.21/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Fri Jul  4 18:56:24 2003
++++ linux/drivers/md/dm-linear.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,123 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -2662,7 +2662,7 @@
 +		DMERR("linear: unregister failed %d", r);
 +}
 --- linux-2.4.21/drivers/md/dm-log.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.c	Tue Jun 17 17:24:26 2003
++++ linux/drivers/md/dm-log.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,302 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -2967,7 +2967,7 @@
 +EXPORT_SYMBOL(dm_create_dirty_log);
 +EXPORT_SYMBOL(dm_destroy_dirty_log);
 --- linux-2.4.21/drivers/md/dm-log.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.h	Fri Jul  4 16:49:06 2003
++++ linux/drivers/md/dm-log.h	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,112 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -3082,7 +3082,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-raid1.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-raid1.c	Fri Jul  4 15:40:14 2003
++++ linux/drivers/md/dm-raid1.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,1297 @@
 +/*
 + * Copyright (C) 2003 Sistina Software Limited.
@@ -4382,8 +4382,8 @@
 +MODULE_AUTHOR("Heinz Mauelshagen <mge@sistina.com>");
 +MODULE_LICENSE("GPL");
 --- linux-2.4.21/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.c	Fri Jul  4 18:08:17 2003
-@@ -0,0 +1,1192 @@
++++ linux/drivers/md/dm-snapshot.c	Sat Jul 12 17:45:13 2003
+@@ -0,0 +1,1235 @@
 +/*
 + * dm-snapshot.c
 + *
@@ -4974,6 +4974,17 @@
 +}
 +
 +/*
++ * FIXME: inefficient.
++ */
++static void queue_buffers(struct buffer_head **queue, struct buffer_head *bhs)
++{
++	while (*queue)
++		queue = &((*queue)->b_reqnext);
++
++	*queue = bhs;
++}
++
++/*
 + * Flush a list of buffers.
 + */
 +static void flush_buffers(struct buffer_head *bh)
@@ -5007,31 +5018,54 @@
 +	}
 +}
 +
++static struct buffer_head *__flush_bhs(struct pending_exception *pe)
++{
++	struct pending_exception *sibling;
++
++	if (list_empty(&pe->siblings))
++		return pe->origin_bhs;
++
++	sibling = list_entry(pe->siblings.next,
++			     struct pending_exception, siblings);
++
++	list_del(&pe->siblings);
++
++	/* FIXME: I think there's a race on SMP machines here, add spin lock */
++	queue_buffers(&sibling->origin_bhs, pe->origin_bhs);
++
++	return NULL;
++}
++
 +static void pending_complete(struct pending_exception *pe, int success)
 +{
 +	struct exception *e;
 +	struct dm_snapshot *s = pe->snap;
++	struct buffer_head *flush = NULL;
 +
 +	if (success) {
 +		e = alloc_exception();
 +		if (!e) {
-+			printk("Unable to allocate exception.");
++			DMWARN("Unable to allocate exception.");
 +			down_write(&s->lock);
 +			s->store.drop_snapshot(&s->store);
 +			s->valid = 0;
++			flush = __flush_bhs(pe);
 +			up_write(&s->lock);
-+			return;
++
++			error_buffers(pe->snapshot_bhs);
++			goto out;
 +		}
 +
 +		/*
 +		 * Add a proper exception, and remove the
-+		 * inflight exception from the list.
++		 * in-flight exception from the list.
 +		 */
 +		down_write(&s->lock);
 +
 +		memcpy(e, &pe->e, sizeof(*e));
 +		insert_exception(&s->complete, e);
 +		remove_exception(&pe->e);
++		flush = __flush_bhs(pe);
 +
 +		/* Submit any pending write BHs */
 +		up_write(&s->lock);
@@ -5062,6 +5096,7 @@
 +		s->store.drop_snapshot(&s->store);
 +		s->valid = 0;
 +		remove_exception(&pe->e);
++		flush = __flush_bhs(pe);
 +		up_write(&s->lock);
 +
 +		error_buffers(pe->snapshot_bhs);
@@ -5070,10 +5105,9 @@
 +		DMDEBUG("Exception failed.");
 +	}
 +
-+	if (list_empty(&pe->siblings))
-+		flush_buffers(pe->origin_bhs);
-+	else
-+		list_del(&pe->siblings);
++ out:
++	if (flush)
++		flush_buffers(flush);
 +
 +	free_pending_exception(pe);
 +}
@@ -5113,6 +5147,12 @@
 +	int *sizes = blk_size[major(dev)];
 +	sector_t dev_size = (sector_t) -1;
 +
++	if (pe->started)
++		return;
++
++	/* this is protected by snap->lock */
++	pe->started = 1;
++
 +	if (sizes && sizes[minor(dev)])
 +		dev_size = sizes[minor(dev)] << 1;
 +
@@ -5124,12 +5164,9 @@
 +	dest.sector = chunk_to_sector(s, pe->e.new_chunk);
 +	dest.count = src.count;
 +
-+	if (!pe->started) {
-+		/* Hand over to kcopyd */
-+		kcopyd_copy(s->kcopyd_client,
-+			    &src, 1, &dest, 0, copy_callback, pe);
-+		pe->started = 1;
-+	}
++	/* Hand over to kcopyd */
++	kcopyd_copy(s->kcopyd_client,
++		    &src, 1, &dest, 0, copy_callback, pe);
 +}
 +
 +/*
@@ -5218,6 +5255,7 @@
 +				s->valid = 0;
 +				r = -EIO;
 +			} else {
++				remap_exception(s, &pe->e, bh);
 +				queue_buffer(&pe->snapshot_bhs, bh);
 +				start_copy(pe);
 +				r = 0;
@@ -5266,6 +5304,51 @@
 +	s->have_metadata = 1;
 +}
 +
++static int snapshot_status(struct dm_target *ti, status_type_t type,
++			   char *result, unsigned int maxlen)
++{
++	struct dm_snapshot *snap = (struct dm_snapshot *) ti->private;
++	char cow[16];
++	char org[16];
++
++	switch (type) {
++	case STATUSTYPE_INFO:
++		if (!snap->valid)
++			snprintf(result, maxlen, "Invalid");
++		else {
++			if (snap->store.fraction_full) {
++				sector_t numerator, denominator;
++				snap->store.fraction_full(&snap->store,
++							  &numerator,
++							  &denominator);
++				snprintf(result, maxlen,
++					 SECTOR_FORMAT "/" SECTOR_FORMAT,
++					 numerator, denominator);
++			}
++			else
++				snprintf(result, maxlen, "Unknown");
++		}
++		break;
++
++	case STATUSTYPE_TABLE:
++		/*
++		 * kdevname returns a static pointer so we need
++		 * to make private copies if the output is to
++		 * make sense.
++		 */
++		strncpy(cow, dm_kdevname(snap->cow->dev), sizeof(cow));
++		strncpy(org, dm_kdevname(snap->origin->dev), sizeof(org));
++		snprintf(result, maxlen, "%s %s %c %ld", org, cow,
++			 snap->type, snap->chunk_size);
++		break;
++	}
++
++	return 0;
++}
++
++/*-----------------------------------------------------------------
++ * Origin methods
++ *---------------------------------------------------------------*/
 +static void list_merge(struct list_head *l1, struct list_head *l2)
 +{
 +	struct list_head *l1_n, *l2_p;
@@ -5282,7 +5365,7 @@
 +
 +static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 +{
-+	int r = 1;
++	int r = 1, first = 1;
 +	struct list_head *sl;
 +	struct dm_snapshot *snap;
 +	struct exception *e;
@@ -5337,9 +5420,11 @@
 +		pe = last;
 +		do {
 +			down_write(&pe->snap->lock);
-+			queue_buffer(&pe->origin_bhs, bh);
++			if (first)
++				queue_buffer(&pe->origin_bhs, bh);
 +			start_copy(pe);
 +			up_write(&pe->snap->lock);
++			first = 0;
 +			pe = list_entry(pe->siblings.next,
 +					struct pending_exception, siblings);
 +
@@ -5347,48 +5432,6 @@
 +	}
 +
 +	return r;
-+}
-+
-+static int snapshot_status(struct dm_target *ti, status_type_t type,
-+			   char *result, unsigned int maxlen)
-+{
-+	struct dm_snapshot *snap = (struct dm_snapshot *) ti->private;
-+	char cow[16];
-+	char org[16];
-+
-+	switch (type) {
-+	case STATUSTYPE_INFO:
-+		if (!snap->valid)
-+			snprintf(result, maxlen, "Invalid");
-+		else {
-+			if (snap->store.fraction_full) {
-+				sector_t numerator, denominator;
-+				snap->store.fraction_full(&snap->store,
-+							  &numerator,
-+							  &denominator);
-+				snprintf(result, maxlen,
-+					 SECTOR_FORMAT "/" SECTOR_FORMAT,
-+					 numerator, denominator);
-+			}
-+			else
-+				snprintf(result, maxlen, "Unknown");
-+		}
-+		break;
-+
-+	case STATUSTYPE_TABLE:
-+		/*
-+		 * kdevname returns a static pointer so we need
-+		 * to make private copies if the output is to
-+		 * make sense.
-+		 */
-+		strncpy(cow, dm_kdevname(snap->cow->dev), sizeof(cow));
-+		strncpy(org, dm_kdevname(snap->origin->dev), sizeof(org));
-+		snprintf(result, maxlen, "%s %s %c %ld", org, cow,
-+			 snap->type, snap->chunk_size);
-+		break;
-+	}
-+
-+	return 0;
 +}
 +
 +/*
@@ -5577,7 +5620,7 @@
 +	kmem_cache_destroy(exception_cache);
 +}
 --- linux-2.4.21/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.h	Fri Jul  4 16:49:03 2003
++++ linux/drivers/md/dm-snapshot.h	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,158 @@
 +/*
 + * dm-snapshot.c
@@ -5738,7 +5781,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Fri Jul  4 15:43:21 2003
++++ linux/drivers/md/dm-stripe.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,258 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -5999,7 +6042,7 @@
 +	return;
 +}
 --- linux-2.4.21/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-table.c	Tue Jul  1 20:17:31 2003
++++ linux/drivers/md/dm-table.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,687 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6689,7 +6732,7 @@
 +EXPORT_SYMBOL(dm_table_event);
 +EXPORT_SYMBOL(dm_table_get_mode);
 --- linux-2.4.21/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-target.c	Tue Jun 17 17:24:26 2003
++++ linux/drivers/md/dm-target.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,188 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
@@ -6880,7 +6923,7 @@
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
 --- linux-2.4.21/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Fri Jul  4 16:14:39 2003
++++ linux/drivers/md/dm.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,1115 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -7998,7 +8041,7 @@
 +
 +EXPORT_SYMBOL(dm_kdevname);
 --- linux-2.4.21/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Fri Jul  4 16:13:26 2003
++++ linux/drivers/md/dm.h	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,175 @@
 +/*
 + * Internal header file for device mapper
@@ -8176,7 +8219,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.c	Tue Jul  1 18:31:37 2003
++++ linux/drivers/md/kcopyd.c	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,650 @@
 +/*
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
@@ -8829,7 +8872,7 @@
 +EXPORT_SYMBOL(kcopyd_copy);
 +EXPORT_SYMBOL(kcopyd_cancel);
 --- linux-2.4.21/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.h	Fri Jul  4 16:49:03 2003
++++ linux/drivers/md/kcopyd.h	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,47 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
@@ -8879,7 +8922,7 @@
 +
 +#endif
 --- linux-2.4.21/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Tue Jun 17 17:24:26 2003
++++ linux/include/linux/device-mapper.h	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,104 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -8986,7 +9029,7 @@
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 --- linux-2.4.21/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Tue Jul  1 22:48:55 2003
++++ linux/include/linux/dm-ioctl.h	Sat Jul 12 17:42:25 2003
 @@ -0,0 +1,237 @@
 +/*
 + * Copyright (C) 2001 - 2003 Sistina Software (UK) Limited.
@@ -9197,8 +9240,8 @@
 +
 +#define DM_VERSION_MAJOR	4
 +#define DM_VERSION_MINOR	0
-+#define DM_VERSION_PATCHLEVEL	0
-+#define DM_VERSION_EXTRA	"-ioctl (2003-07-04)"
++#define DM_VERSION_PATCHLEVEL	1
++#define DM_VERSION_EXTRA	"-ioctl (2003-07-12)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	(1 << 0) /* In/Out */
