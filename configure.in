@@ -48,9 +48,13 @@ AC_CANONICAL_SYSTEM
 
 case "$host_os" in
 	linux*)
-		CFLAGS= ;;
+		CFLAGS=
+		CLDFLAGS="-Wl,--version-script,.export.sym"
+		LD_DEPS=".export.sym" ;;
 	darwin*)
-		CFLAGS="-no-cpp-precomp" ;;
+		CFLAGS="-no-cpp-precomp"
+		CLDFLAGS=
+		LD_DEPS= ;;
 esac
 
 dnl -- prefix is /usr by default, the exec_prefix default is setup later
@@ -188,6 +192,9 @@ AC_SUBST(kerneldir)
 AC_SUBST(missingkernel)
 AC_SUBST(kernelvsn)
 AC_SUBST(tmpdir)
+AC_SUBST(CFLAGS)
+AC_SUBST(CLDFLAGS)
+AC_SUBST(LD_DEPS)
 AC_SUBST(DEBUG)
 AC_SUBST(DM_LIB_VERSION)
 AC_SUBST(COMPAT)

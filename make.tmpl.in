@@ -28,6 +28,7 @@ INSTALL = @INSTALL@
 LN_S = @LN_S@
 LIBS = @LIBS@
 CFLAGS += @CFLAGS@
+LD_DEPS += @LD_DEPS@
 
 # Setup directory variables
 prefix = $(DESTDIR)@prefix@
@@ -109,7 +110,7 @@ install: all $(SUBDIRS.install)
 $(SUBDIRS):
 	$(MAKE) -C $@
 
-$(SUBDIRS.install): 
+$(SUBDIRS.install): $(SUBDIRS)
 	$(MAKE) -C $(@:.install=) install
 
 $(SUBDIRS.clean):
@@ -123,15 +124,11 @@ $(TARGETS): $(OBJECTS)
 %.o: %.c
 	$(CC) -c $(INCLUDES) $(CFLAGS) $< -o $@
 
-%.so: $(OBJECTS) .export.sym
-
-%.so: %.o
+$(LIB_SHARED): $(OBJECTS) $(LD_DEPS)
 	$(CC) -shared -Wl,-soname,$(notdir $@).$(LIB_VERSION) \
 	-Wl,--version-script,.export.sym $(OBJECTS) -o $@
 
-%.a: $(OBJECTS)
-
-%.a: %.o
+$(LIB_STATIC): $(OBJECTS)
 	$(RM) $@
 	$(AR) r $@ $(OBJECTS)
 	$(RANLIB) $@
@@ -151,6 +148,11 @@ distclean: $(SUBDIRS.distclean)
 	$(RM) $(OBJECTS) $(TARGETS) $(CLEAN_TARGETS) $(SOURCES:%.c=%.d) \
 	      config.cache config.log config.status \
 	      Makefile make.tmpl core
+
+.export.sym: .exported_symbols
+	set -e; (echo "Base {"; echo "	global:"; \
+		 sed "s/^/		/;s/$$/;/" < $<; \
+		 echo "	local:"; echo "		*;"; echo "};") > $@
 
 ifneq ($(MAKECMDGOALS),clean)
   ifneq ($(MAKECMDGOALS),distclean)
