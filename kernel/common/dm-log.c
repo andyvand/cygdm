@@ -124,6 +124,8 @@ struct core_log {
 	int sync_search;
 };
 
+#define BYTE_SHIFT 3
+
 static int core_ctr(struct dirty_log *log, sector_t dev_size,
 		    unsigned int argc, char **argv)
 {
@@ -153,8 +155,13 @@ static int core_ctr(struct dirty_log *log, sector_t dev_size,
 	clog->region_size = region_size;
 	clog->region_count = region_count;
 
-	bitset_size = dm_round_up((region_count + 7) >> 3,
-				  sizeof(*clog->clean_bits));
+	/*
+ 	 * Work out how many words we need to hold the bitset.
+ 	 */
+	bitset_size = dm_round_up(region_count,
+				  sizeof(*clog->clean_bits) << BYTE_SHIFT);
+	bitset_size >>= BYTE_SHIFT;
+
 	clog->clean_bits = vmalloc(bitset_size);
 	if (!clog->clean_bits) {
 		DMWARN("couldn't allocate clean bitset");

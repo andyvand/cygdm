@@ -27,6 +27,11 @@
 
 static struct dm_daemon _kcopyd;
 
+#define SECTORS_PER_PAGE (PAGE_SIZE / SECTOR_SIZE)
+#define SUB_JOB_SIZE 128
+#define PAGES_PER_SUB_JOB (SUB_JOB_SIZE / SECTORS_PER_PAGE)
+#define SUB_JOB_COUNT 8
+
 /*-----------------------------------------------------------------
  * Each kcopyd client has its own little pool of preallocated
  * pages for kcopyd io.
@@ -38,6 +43,7 @@ struct kcopyd_client {
 	struct list_head pages;
 	unsigned int nr_pages;
 	unsigned int nr_free_pages;
+	unsigned int max_split;
 };
 
 static inline void __push_page(struct kcopyd_client *kc, struct page *p)
@@ -122,6 +128,10 @@ static int client_alloc_pages(struct kcopyd_client *kc, unsigned int nr)
 
 	kcopyd_put_pages(kc, &new);
 	kc->nr_pages += nr;
+	kc->max_split = kc->nr_pages / PAGES_PER_SUB_JOB;
+	if (kc->max_split > SUB_JOB_COUNT)
+		kc->max_split = SUB_JOB_COUNT;
+
 	return 0;
 }
 
@@ -334,7 +344,6 @@ static int run_io_job(struct kcopyd_job *job)
 	return r;
 }
 
-#define SECTORS_PER_PAGE (PAGE_SIZE / SECTOR_SIZE)
 static int run_pages_job(struct kcopyd_job *job)
 {
 	int r;
@@ -422,7 +431,6 @@ static void dispatch_job(struct kcopyd_job *job)
 	dm_daemon_wake(&_kcopyd);
 }
 
-#define SUB_JOB_SIZE 128
 static void segment_complete(int read_err,
 			     unsigned int write_err, void *context)
 {
@@ -491,17 +499,19 @@ static void segment_complete(int read_err,
  * Create some little jobs that will do the move between
  * them.
  */
-#define SPLIT_COUNT 8
 static void split_job(struct kcopyd_job *job)
 {
-	int i;
+	int nr;
 
-	atomic_set(&job->sub_jobs, SPLIT_COUNT);
-	for (i = 0; i < SPLIT_COUNT; i++)
+	nr = dm_div_up(job->source.count, SUB_JOB_SIZE);
+	if (nr > job->kc->max_split)
+		nr = job->kc->max_split;
+
+	atomic_set(&job->sub_jobs, nr);
+	while (nr--)
 		segment_complete(0, 0u, job);
 }
 
-#define SUB_JOB_THRESHOLD (SPLIT_COUNT * SUB_JOB_SIZE)
 int kcopyd_copy(struct kcopyd_client *kc, struct io_region *from,
 		unsigned int num_dests, struct io_region *dests,
 		unsigned int flags, kcopyd_notify_fn fn, void *context)
@@ -534,7 +544,7 @@ int kcopyd_copy(struct kcopyd_client *kc, struct io_region *from,
 	job->fn = fn;
 	job->context = context;
 
-	if (job->source.count < SUB_JOB_THRESHOLD)
+	if (job->source.count < SUB_JOB_SIZE)
 		dispatch_job(job);
 
 	else {
@@ -582,9 +592,9 @@ int kcopyd_client_create(unsigned int nr_pages, struct kcopyd_client **result)
 	int r = 0;
 	struct kcopyd_client *kc;
 
-	if (nr_pages * SECTORS_PER_PAGE < SUB_JOB_SIZE * SPLIT_COUNT) {
+	if (nr_pages * SECTORS_PER_PAGE < SUB_JOB_SIZE) {
 		DMERR("kcopyd client requested %u pages: minimum is %lu",
-		      nr_pages, SUB_JOB_SIZE * SPLIT_COUNT / SECTORS_PER_PAGE);
+		      nr_pages, SUB_JOB_SIZE / SECTORS_PER_PAGE);
 		return -ENOMEM;
 	}
 

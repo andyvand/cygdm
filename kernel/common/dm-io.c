@@ -10,6 +10,7 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
+#include <linux/bitops.h>
 
 /* FIXME: can we shrink this ? */
 struct io_context {

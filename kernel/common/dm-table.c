@@ -17,7 +17,6 @@
 #define NODE_SIZE L1_CACHE_BYTES
 #define KEYS_PER_NODE (NODE_SIZE / sizeof(sector_t))
 #define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
-#define MAX_TARGET_ARGS 64
 
 struct dm_table {
 	atomic_t holders;
@@ -113,40 +112,7 @@ static int setup_btree_index(unsigned int l, struct dm_table *t)
 	return 0;
 }
 
-/*
- * highs, and targets are managed as dynamic arrays during a
- * table load.
- */
-static int alloc_targets(struct dm_table *t, unsigned int num)
-{
-	sector_t *n_highs;
-	struct dm_target *n_targets;
-	int n = t->num_targets;
 
-	/*
-	 * Allocate both the target array and offset array at once.
-	 */
-	n_highs = (sector_t *) vcalloc(sizeof(struct dm_target) +
-				       sizeof(sector_t), num);
-	if (!n_highs)
-		return -ENOMEM;
-
-	n_targets = (struct dm_target *) (n_highs + num);
-
-	if (n) {
-		memcpy(n_highs, t->highs, sizeof(*n_highs) * n);
-		memcpy(n_targets, t->targets, sizeof(*n_targets) * n);
-	}
-
-	memset(n_highs + n, -1, sizeof(*n_highs) * (num - n));
-	vfree(t->highs);
-
-	t->num_allocated = num;
-	t->highs = n_highs;
-	t->targets = n_targets;
-
-	return 0;
-}
 
 int dm_table_create(struct dm_table **result, int mode, unsigned num_targets)
 {
@@ -159,15 +125,20 @@ int dm_table_create(struct dm_table **result, int mode, unsigned num_targets)
 	INIT_LIST_HEAD(&t->devices);
 	atomic_set(&t->holders, 1);
 
-	if (!num_targets)
-		num_targets = KEYS_PER_NODE;
+	num_targets = dm_round_up(num_targets, KEYS_PER_NODE);
 
-	if (alloc_targets(t, num_targets)) {
+	/* Allocate both the target array and offset array at once. */
+	t->highs = (sector_t *) vcalloc(sizeof(struct dm_target) +
+					sizeof(sector_t), num_targets);
+	if (!t->highs) {
 		kfree(t);
-		t = NULL;
 		return -ENOMEM;
 	}
 
+	memset(t->highs, -1, sizeof(*t->highs) * num_targets);
+
+	t->targets = (struct dm_target *) (t->highs + num_targets);
+	t->num_allocated = num_targets;
 	t->mode = mode;
 	*result = t;
 	return 0;
@@ -224,17 +195,6 @@ void dm_table_put(struct dm_table *t)
 {
 	if (atomic_dec_and_test(&t->holders))
 		table_destroy(t);
-}
-
-/*
- * Checks to see if we need to extend highs or targets.
- */
-static inline int check_space(struct dm_table *t)
-{
-	if (t->num_targets >= t->num_allocated)
-		return alloc_targets(t, t->num_allocated * 2);
-
-	return 0;
 }
 
 /*
@@ -444,16 +404,34 @@ static int adjoin(struct dm_table *table, struct dm_target *ti)
 }
 
 /*
+ * Used to dynamically allocate the arg array.
+ */
+static char **realloc_argv(unsigned *array_size, char **old_argv)
+{
+	char **argv;
+	unsigned new_size;
+
+	new_size = *array_size ? *array_size * 2 : 64;
+	argv = kmalloc(new_size * sizeof(*argv), GFP_NOIO);
+	if (argv) {
+		memcpy(argv, old_argv, *array_size * sizeof(*argv));
+		*array_size = new_size;
+	}
+
+	kfree(old_argv);
+	return argv;
+}
+
+/*
  * Destructively splits up the argument list to pass to ctr.
  */
 static int split_args(int *argc, char ***argvp, char *input)
 {
-	char *start, *end = input, *out;
-	char **argv;
-	int max_args = MAX_TARGET_ARGS;
+	char *start, *end = input, *out, **argv = NULL;
+	unsigned array_size = 0;
 
 	*argc = 0;
-	argv = kmalloc(sizeof(*argv) * max_args, GFP_NOIO);
+	argv = realloc_argv(&array_size, argv);
 	if (!argv)
 		return -ENOMEM;
 
@@ -484,19 +462,10 @@ static int split_args(int *argc, char ***argvp, char *input)
 		}
 
 		/* have we already filled the array ? */
-		if ((*argc + 1) > max_args) {
-			char **argv2;
-			
-			max_args *= 2;
-			argv2 = kmalloc(sizeof(*argv2) * max_args, GFP_NOIO);
-			if (!argv2) {
-				kfree(argv);
+		if ((*argc + 1) > array_size) {
+			argv = realloc_argv(&array_size, argv);
+			if (!argv)
 				return -ENOMEM;
-			}
-
-			memcpy(argv2, argv, sizeof(*argv) * *argc);
-			kfree(argv);
-			argv = argv2;
 		}
 
 		/* we know this is whitespace */
@@ -520,8 +489,8 @@ int dm_table_add_target(struct dm_table *t, const char *type,
 	char **argv;
 	struct dm_target *tgt;
 
-	if ((r = check_space(t)))
-		return r;
+	if (t->num_targets >= t->num_allocated)
+		return -ENOMEM;
 
 	tgt = t->targets + t->num_targets;
 	memset(tgt, 0, sizeof(*tgt));
