@@ -2013,6 +2013,7 @@ make.tmpl                                                               \
 include/Makefile                                                        \
 dmsetup/Makefile							\
 lib/Makefile							 	\
+kernel/Makefile								\
 " | sed "s/:[^ ]*//g"` conftest*; exit 1' 1 2 15
 EOF
 cat >> $CONFIG_STATUS <<EOF
@@ -2106,6 +2107,7 @@ make.tmpl                                                               \
 include/Makefile                                                        \
 dmsetup/Makefile							\
 lib/Makefile							 	\
+kernel/Makefile								\
 "}
 EOF
 cat >> $CONFIG_STATUS <<\EOF

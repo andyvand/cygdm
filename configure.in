@@ -98,4 +98,5 @@ make.tmpl                                                               \
 include/Makefile                                                        \
 dmsetup/Makefile							\
 lib/Makefile							 	\
+kernel/Makefile								\
 )
