@@ -18,7 +18,8 @@ Device Mapper installation
 
    If there is already a patch for your kernel and you gave 'configure'
    appropriate parameters in step 1, you can just run 'make apply-patches' 
-   from the top directory and go on to step 3.
+   from the top directory and go on to step 3.  (This also attempts to
+   apply the VFS lock patch, which will fail if you've already applied it.)
    
    Configure, build and install your kernel in the normal way, selecting
    'Device mapper support' from the 'Multiple devices driver support' menu.
@@ -28,11 +29,13 @@ Device Mapper installation
    version it was generated against and whether it is for the 'fs' or
    'ioctl' interface.  Current development effort is concentrated
    on the 'ioctl' interface.  (Use CVS to get the older 'fs' patches if
-   you want.)  
+   you want - see note below.)
 
    patches/common holds the constituent patches.
    You may need to use these if some of the patches (e.g. mempool)
    have already been applied to your kernel.  See patches/common/README.
+   You should also apply the VFS lock patch (but not required if you're only
+   using ext2).
 
    Running 'make symlinks' from the 'kernel' subdirectory will put symbolic 
    links into your kernel tree pointing back at the device-mapper source files.

@@ -39,7 +39,7 @@ diff -Nru a/drivers/md/lvm.c b/drivers/md/lvm.c
 diff -Nru a/fs/buffer.c b/fs/buffer.c
 --- a/fs/buffer.c	Wed May 22 10:43:49 2002
 +++ b/fs/buffer.c	Wed May 22 10:43:49 2002
-@@ -363,6 +363,34 @@
+@@ -362,6 +362,34 @@
  	fsync_dev(dev);
  }
  
@@ -208,7 +208,7 @@ diff -Nru a/fs/super.c b/fs/super.c
 diff -Nru a/include/linux/fs.h b/include/linux/fs.h
 --- a/include/linux/fs.h	Wed May 22 10:43:49 2002
 +++ b/include/linux/fs.h	Wed May 22 10:43:49 2002
-@@ -1218,6 +1218,7 @@
+@@ -1235,6 +1235,7 @@
  extern int sync_buffers(kdev_t, int);
  extern void sync_dev(kdev_t);
  extern int fsync_dev(kdev_t);
@@ -216,7 +216,7 @@ diff -Nru a/include/linux/fs.h b/include/linux/fs.h
  extern int fsync_super(struct super_block *);
  extern int fsync_no_super(kdev_t);
  extern void sync_inodes_sb(struct super_block *);
-@@ -1234,6 +1235,8 @@
+@@ -1251,6 +1251,8 @@
  extern int filemap_fdatasync(struct address_space *);
  extern int filemap_fdatawait(struct address_space *);
  extern void sync_supers(kdev_t);
@@ -228,7 +228,7 @@ diff -Nru a/include/linux/fs.h b/include/linux/fs.h
 diff -Nru a/kernel/ksyms.c b/kernel/ksyms.c
 --- a/kernel/ksyms.c	Wed May 22 10:43:49 2002
 +++ b/kernel/ksyms.c	Wed May 22 10:43:49 2002
-@@ -180,6 +180,8 @@
+@@ -181,6 +181,8 @@
  EXPORT_SYMBOL(invalidate_inode_pages);
  EXPORT_SYMBOL(truncate_inode_pages);
  EXPORT_SYMBOL(fsync_dev);
@@ -237,10 +237,3 @@ diff -Nru a/kernel/ksyms.c b/kernel/ksyms.c
  EXPORT_SYMBOL(fsync_no_super);
  EXPORT_SYMBOL(permission);
  EXPORT_SYMBOL(vfs_permission);
-
-
-_______________________________________________
-lvm-devel mailing list
-lvm-devel@sistina.com
-http://lists.sistina.com/mailman/listinfo/lvm-devel
-
