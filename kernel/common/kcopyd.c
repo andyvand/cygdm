@@ -21,19 +21,25 @@
 #define SECTOR_SIZE 512
 
 /* Number of entries in the free list to start with */
-#define INITIAL_FREE_LIST_SIZE 10
+#define FREE_LIST_SIZE 10
+
+/* Slab cache for work/freelist entries */
+static kmem_cache_t *entry_cachep;
 
 /* Structure of work to do in the list */
 struct copy_work
 {
 	unsigned long fromsec;
 	unsigned long tosec;
+	unsigned long nr_sectors;
+	unsigned long done_sectors;
 	kdev_t fromdev;
 	kdev_t todev;
-	unsigned long nr_sectors;
-	int  throttle;
-	void (*callback)(copy_cb_reason_t, void *, long);
-	void *context;
+	int    throttle;
+	int    priority; /* 0=highest */
+	void   (*callback)(copy_cb_reason_t, void *, long);
+	void   *context;
+	int    freelist;      /* Whether we came from the free list */
 	struct list_head list;
 };
 
@@ -53,7 +59,7 @@ static long last_jiffies = 0;
 
 
 /* Find a free entry from the free-list */
-struct copy_work *get_work_struct(void)
+static struct copy_work *get_work_struct(void)
 {
 	struct copy_work *entry = NULL;
 
@@ -66,7 +72,12 @@ struct copy_work *get_work_struct(void)
 
 	/* Nothing on the free-list - try to allocate one without doing IO */
 	if (!entry) {
-		entry = kmalloc(sizeof(struct copy_work), GFP_NOIO);
+		entry = kmem_cache_alloc(entry_cachep, GFP_NOIO);
+
+		/* Make sure know it didn't come from the free list */
+		if (entry) {
+			entry->freelist = 0;
+		}
 
 		/* Failed...wait for IO to finish */
 		while (!entry) {
@@ -125,6 +136,25 @@ static int alloc_iobuf_pages(struct kiobuf *iobuf, int nr_sectors)
 
 out:
 	return err;
+}
+
+
+/* Add a new entry to the work list - in priority+FIFO order.
+   The work_list_lock semaphore must be held */
+static void add_to_work_list(struct copy_work *item)
+{
+	struct list_head *entry;
+
+	list_for_each(entry, &work_list) {
+		struct copy_work *cw;
+
+		cw = list_entry(entry, struct copy_work, list);
+		if (cw->priority > item->priority) {
+			__list_add(&item->list, cw->list.prev, &cw->list);
+			return;
+		}
+	}
+	list_add_tail(&item->list, &work_list);
 }
 
 /* Read in a chunk from the origin device */
@@ -189,17 +219,19 @@ static int copy_kthread(void *unused)
 
 			struct copy_work *work_item = list_entry(work_list.next, struct copy_work, list);
 			int done_sps;
-			long done_sectors = 0;
 			copy_cb_reason_t callback_reason = COPY_CB_COMPLETE;
+			int preempted = 0;
 
 			list_del(&work_item->list);
 			up_write(&work_list_lock);
 
-			while (done_sectors < work_item->nr_sectors) {
-				long nr_sectors = min((long)KIO_MAX_SECTORS, (long)work_item->nr_sectors - done_sectors);
+			while (!preempted && work_item->done_sectors < work_item->nr_sectors) {
+				long nr_sectors = min((unsigned long)KIO_MAX_SECTORS,
+						      work_item->nr_sectors - work_item->done_sectors);
 
 				/* Read original blocks */
-				if (read_blocks(iobuf, work_item->fromdev, work_item->fromsec + done_sectors, nr_sectors)) {
+				if (read_blocks(iobuf, work_item->fromdev, work_item->fromsec + work_item->done_sectors,
+						nr_sectors)) {
 					DMERR("Read blocks from device %s failed\n", kdevname(work_item->fromdev));
 
 					/* Callback error */
@@ -208,14 +240,15 @@ static int copy_kthread(void *unused)
 				}
 
 				/* Write them out again */
-				if (write_blocks(iobuf, work_item->todev, work_item->tosec + done_sectors, nr_sectors)) {
+				if (write_blocks(iobuf, work_item->todev, work_item->tosec + work_item->done_sectors,
+						 nr_sectors)) {
 					DMERR("Write blocks to %s failed\n", kdevname(work_item->todev));
 
 					/* Callback error */
 					callback_reason = COPY_CB_FAILED_WRITE;
 					goto done_copy;
 				}
-				done_sectors += nr_sectors;
+				work_item->done_sectors += nr_sectors;
 
 				/* If we have exceeded the throttle value (in sectors/second) then
 				   sleep for a while */
@@ -228,24 +261,42 @@ static int copy_kthread(void *unused)
 				}
 
 				/* Do a progress callback */
-				if (work_item->callback && done_sectors < work_item->nr_sectors)
-					work_item->callback(COPY_CB_PROGRESS, work_item->context, done_sectors);
+				if (work_item->callback && work_item->done_sectors < work_item->nr_sectors)
+					work_item->callback(COPY_CB_PROGRESS, work_item->context, work_item->done_sectors);
 
+				/* Look for higher priority work */
+				down_write(&work_list_lock);
+				if (!list_empty(&work_list)) {
+					struct copy_work *peek_item = list_entry(work_list.next, struct copy_work, list);
+
+					if (peek_item->priority < work_item->priority) {
+
+						/* Put this back on the list and restart to get the new one */
+						add_to_work_list(work_item);
+						preempted = 1;
+						goto restart;
+					}
+				}
+				up_write(&work_list_lock);
 			}
 
 		done_copy:
 			/* Call the callback */
 			if (work_item->callback)
-				work_item->callback(callback_reason, work_item->context, done_sectors);
+				work_item->callback(callback_reason, work_item->context, work_item->done_sectors);
 
-			/* Add it back to the free list and notify anybody waiting for an entry */
-			down_write(&free_list_lock);
-			list_add(&work_item->list, &free_list);
-			up_write(&free_list_lock);
+			/* Add it back to the free list (if it came from there)
+			   and notify anybody waiting for an entry */
+			if (work_item->freelist) {
+				down_write(&free_list_lock);
+				list_add(&work_item->list, &free_list);
+				up_write(&free_list_lock);
+			}
 			wake_up_interruptible(&freelist_waitq);
 
 			/* Get the work lock again for the top of the while loop */
 			down_write(&work_list_lock);
+		restart:
 		}
 		up_write(&work_list_lock);
 
@@ -271,7 +322,7 @@ static int copy_kthread(void *unused)
 /* API entry point */
 int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_sectors,
 		 kdev_t fromdev, kdev_t todev,
-		 int throttle, void (*callback)(copy_cb_reason_t, void *, long), void *context)
+		 int priority, int throttle, void (*callback)(copy_cb_reason_t, void *, long), void *context)
 {
 	struct copy_work *newwork;
 	static pid_t thread_pid = 0;
@@ -315,17 +366,19 @@ int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_se
 	/* This will wait until one is available */
 	newwork = get_work_struct();
 
-	newwork->fromsec    = fromsec;
-	newwork->tosec      = tosec;
-	newwork->fromdev    = fromdev;
-	newwork->todev      = todev;
-	newwork->nr_sectors = nr_sectors;
-	newwork->throttle   = throttle;
-	newwork->callback   = callback;
-	newwork->context    = context;
+	newwork->fromsec      = fromsec;
+	newwork->tosec        = tosec;
+	newwork->fromdev      = fromdev;
+	newwork->todev        = todev;
+	newwork->nr_sectors   = nr_sectors;
+	newwork->done_sectors = 0;
+	newwork->throttle     = throttle;
+	newwork->priority     = priority;
+	newwork->callback     = callback;
+	newwork->context      = context;
 
 	down_write(&work_list_lock);
-	list_add_tail(&newwork->list, &work_list);
+	add_to_work_list(newwork);
 	up_write(&work_list_lock);
 
 	wake_up_interruptible(&work_waitq);
@@ -339,7 +392,7 @@ static int allocate_free_list(void)
 	int i;
 	struct copy_work *newwork;
 
-	for (i=0; i<INITIAL_FREE_LIST_SIZE; i++) {
+	for (i=0; i<FREE_LIST_SIZE; i++) {
 		newwork = kmalloc(sizeof(struct copy_work), GFP_KERNEL);
 		if (!newwork)
 			return i;
@@ -366,9 +419,21 @@ static int __init kcopyd_init(void)
 		return -1;
 	}
 
+	entry_cachep = kmem_cache_create("kcopyd",
+					 sizeof(struct copy_work),
+					 __alignof__(struct copy_work),
+					 0, NULL, NULL);
+	if (!entry_cachep) {
+		unmap_kiobuf(iobuf);
+		free_kiovec(1, &iobuf);
+		DMERR("Unable to allocate slab cache for kcopyd\n");
+		return -1;
+	}
+
 	if (allocate_free_list() == 0) {
 		unmap_kiobuf(iobuf);
 		free_kiovec(1, &iobuf);
+		kmem_cache_destroy(entry_cachep);
 		DMERR("Unable to allocate any work structures for the free list\n");
 		return -1;
 	}
@@ -387,13 +452,16 @@ static void kcopyd_exit(void)
 	down(&run_lock);
 	up(&run_lock);
 
-	/* Free the free list */
+        /* Free the free list */
 	list_for_each_safe(entry, temp, &free_list) {
 		struct copy_work *cw;
 		cw = list_entry(entry, struct copy_work, list);
 		list_del(&cw->list);
 		kfree(cw);
 	}
+
+	if (entry_cachep)
+		kmem_cache_destroy(entry_cachep);
 }
 
 /* These are only here until it gets added to dm.c */

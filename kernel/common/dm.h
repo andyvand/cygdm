@@ -168,7 +168,7 @@ typedef enum {COPY_CB_COMPLETE, COPY_CB_FAILED_READ, COPY_CB_FAILED_WRITE, COPY_
 int dm_blockcopy(unsigned long fromsec, unsigned long tosec, 
 		 unsigned long nr_sectors,
 		 kdev_t fromdev, kdev_t todev,
-		 int throttle, void (*callback)(copy_cb_reason_t, void *, long), void *context);
+		 int priority, int throttle, void (*callback)(copy_cb_reason_t, void *, long), void *context);
 
 
 #define DMWARN(f, x...) printk(KERN_WARNING DM_NAME ": " f "\n" , ## x)

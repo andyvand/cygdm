@@ -10,6 +10,9 @@
 #include <linux/init.h>
 #include <linux/blkdev.h>
 
+/* kcopyd priority of mirror operations */
+#define MIRROR_COPY_PRIORITY 5
+
 /*
  * Mirror: maps a mirror range of a device.
  */
@@ -17,14 +20,13 @@ struct mirror_c {
 	struct dm_dev *fromdev;
 	struct dm_dev *todev;
 
-	unsigned long endsec;
 	unsigned long from_delta;
 	unsigned long to_delta;
 
 	unsigned long frompos;
 	unsigned long topos;
-	unsigned long chunk_size;
 
+	unsigned long got_to;
 	struct rw_semaphore lock;
 	int error;
 };
@@ -44,52 +46,41 @@ static void mirror_end_io(struct buffer_head *bh, int uptodate)
 }
 
 
-/* Called when a chunk I/O has finished - we move onto the next one */
-static void copy_callback(int status, void *context)
+/* Called when the copy I/O has finished */
+static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 {
 	struct mirror_c *lc = (struct mirror_c *) context;
 
-	if (status != 0) {
-		DMERR("Mirror block %s on %s failed\n", status==1?"read":"write",
-		      status==1?kdevname(lc->fromdev->dev):kdevname(lc->todev->dev));
-		lc->error = 1;
+	printk("PJC: callback: reason %d, block = %ld\n", reason, arg);
+	if (reason == COPY_CB_PROGRESS) {
+		lc->got_to = arg;
 		return;
 	}
 
-	down_write(&lc->lock);
-
-	if (lc->frompos < lc->endsec && !lc->error) {
-		int chunks = min(lc->chunk_size, lc->endsec - lc->frompos);
-
-		/* Move onto the next block */
-		lc->frompos += lc->chunk_size;
-		lc->topos += lc->chunk_size;
-
-		if (dm_blockcopy(lc->frompos, lc->topos, chunks, lc->fromdev->dev, lc->todev->dev, 0, copy_callback, lc)) {
-			DMERR("Mirror block copy to %s failed\n", kdevname(lc->todev->dev));
-
-			dm_notify(lc); /* TODO: interface ?? */
-		}
+	if (reason == COPY_CB_FAILED_READ ||
+	    reason == COPY_CB_FAILED_WRITE) {
+		DMERR("Mirror block %s on %s failed, sector %ld\n", reason==COPY_CB_FAILED_READ?"read":"write",
+		      reason==COPY_CB_FAILED_READ?kdevname(lc->fromdev->dev):kdevname(lc->todev->dev), arg);
+		lc->error = 1;
 	}
-	else {
+
+	if (reason == COPY_CB_COMPLETE) {
 		/* Say we've finished */
 		dm_notify(lc); /* TODO: interface ?? */
 	}
-	up_write(&lc->lock);
 }
 
 /*
- * Construct a mirror mapping: <dev_path1> <offset> <dev_path2> <offset> <chunk-size>
+ * Construct a mirror mapping: <dev_path1> <offset> <dev_path2> <offset>
  */
 static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 		      int argc, char **argv, void **context)
 {
 	struct mirror_c *lc;
-	unsigned int chunk_size;
 	unsigned long offset1, offset2;
 	char *value;
 
-	if (argc != 5) {
+	if (argc != 4) {
 		*context = "dm-mirror: Not enough arguments";
 		return -EINVAL;
 	}
@@ -122,28 +113,22 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad;
 	}
 
-	chunk_size = simple_strtoul(argv[4], &value, 10);
-	if (chunk_size == 0 || value == NULL) {
-		*context = "Invalid chunk size";
-		goto bad;
-	}
-
 	lc->from_delta = (int) offset1 - (int) b;
 	lc->to_delta = (int) offset2 - (int) b;
 	lc->frompos = offset1;
 	lc->topos = offset2;
-	lc->endsec = l;
 	lc->error  = 0;
-	lc->chunk_size = chunk_size;
 	init_rwsem(&lc->lock);
 	*context = lc;
 
-	if (dm_blockcopy(offset1, offset2, chunk_size, lc->fromdev->dev, lc->todev->dev, 0, copy_callback, lc)) {
-		DMERR("Initial mirror block copy failed\n");
+	if (dm_blockcopy(offset1, offset2,
+			 l - offset1,
+			 lc->fromdev->dev, lc->todev->dev,
+			 MIRROR_COPY_PRIORITY, 0, copy_callback, lc)) {
+		DMERR("block copy call failed\n");
 		dm_table_put_device(t, lc->fromdev);
 		dm_table_put_device(t, lc->todev);
-		kfree(lc);
-		return -EINVAL;
+		goto bad;
 	}
 	return 0;
 
@@ -171,11 +156,11 @@ static int mirror_map(struct buffer_head *bh, int rw, void *context)
 	bh->b_rsector = bh->b_rsector + lc->from_delta;
 
 	/* If we've already copied this block then duplicated it to the mirror device */
-	if (rw == WRITE && bh->b_rsector < lc->frompos+lc->chunk_size) {
+	if (rw == WRITE && bh->b_rsector < lc->got_to) {
 
 		/* Schedule copy of I/O to other target */
 		/* TODO: kmalloc is naff here */
-		struct buffer_head *dbh = kmalloc(sizeof(struct buffer_head), GFP_KERNEL);
+		struct buffer_head *dbh = kmalloc(sizeof(struct buffer_head), GFP_NOIO);
 		if (dbh) {
 			*dbh = *bh;
 			dbh->b_rdev    = lc->todev->dev;
@@ -188,7 +173,6 @@ static int mirror_map(struct buffer_head *bh, int rw, void *context)
 		else {
 			DMERR("kmalloc failed for mirror bh\n");
 			lc->error = 1;
-			dm_notify(lc); /* TODO: interface ?? */
 		}
 	}
 	up_read(&lc->lock);

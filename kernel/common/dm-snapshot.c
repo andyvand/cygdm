@@ -23,6 +23,9 @@
 /* Hard sector size used all over the kernel */
 #define SECTOR_SIZE 512
 
+/* kcopyd priority of snapshot operations */
+#define SNAPSHOT_COPY_PRIORITY 2
+
 /* The on-disk version of the metadata. Only applicable to
    persistent snapshots.
    There is no backward or forward compatibility implemented, snapshots
@@ -978,7 +981,8 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 
 			/* Get kcopyd to do the work */
 			dm_blockcopy(read_start, reloc_sector, lc->chunk_size,
-				     lc->origin_dev->dev, lc->cow_dev->dev, 0,
+				     lc->origin_dev->dev, lc->cow_dev->dev,
+				     SNAPSHOT_COPY_PRIORITY, 0,
 				     copy_callback, ex);
 
 			/* Update the bh bits so the write goes to the newly remapped volume...
@@ -1081,7 +1085,8 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 
 					/* Get kcopyd to do the copy */
 					dm_blockcopy(read_start, reloc_sector, snap->chunk_size,
-						     snap->origin_dev->dev, snap->cow_dev->dev, 0,
+						     snap->origin_dev->dev, snap->cow_dev->dev,
+						     SNAPSHOT_COPY_PRIORITY, 0,
 						     copy_callback, ex);
 				}
 			}
