@@ -88,6 +88,12 @@ int dm_task_set_newname(struct dm_task *dmt, const char *newname)
 	return 0;
 }
 
+int dm_task_get_driver_version(struct dm_task *dmt, char *version, size_t size)
+{
+	log("The filesystem interface cannot return its version yet");
+	return 0;
+}
+
 struct target *create_target(uint64_t start,
 			     uint64_t len, const char *type, const char *params)
 {

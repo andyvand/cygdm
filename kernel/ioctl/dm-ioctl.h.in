@@ -31,12 +31,18 @@ struct dm_target_spec {
 
 struct dm_ioctl {
 	char version[16];
-	unsigned long data_size;	/* the size of this structure */
+
+	unsigned long data_size;	/* total size of data passed in */
+					/* including this struct */
+
+	unsigned long data_start;	/* offset to start of data */
+					/* relative to start of this struct */
+
 	char name[DM_NAME_LEN];		/* device name */
 
 	unsigned int target_count;	/* in/out */
 	unsigned int open_count;	/* out */
-	unsigned int status;		/* in/out */
+	unsigned int flags;		/* in/out */
 
 	__kernel_dev_t dev;		/* in/out */
 };
@@ -49,6 +55,7 @@ struct dm_ioctl {
 #define	DM_RELOAD _IOW(DM_IOCTL, 0x03, struct dm_ioctl)
 #define DM_INFO _IOWR(DM_IOCTL, 0x04, struct dm_ioctl)
 #define DM_RENAME _IOW(DM_IOCTL, 0x05, struct dm_ioctl)
+#define DM_VERSION _IOR(DM_IOCTL, 0x06, struct dm_ioctl)
 
 #define DM_IOCTL_VERSION @DM_IOCTL_VERSION@
 

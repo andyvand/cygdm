@@ -14,6 +14,11 @@ static void free_params(struct dm_ioctl *p)
 	vfree(p);
 }
 
+static int version(struct dm_ioctl *user)
+{
+        return copy_to_user(user, DM_IOCTL_VERSION, sizeof(DM_IOCTL_VERSION));
+}
+
 static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
 {
 	struct dm_ioctl tmp, *dmi;
@@ -55,20 +60,12 @@ static int valid_str(char *str, void *begin, void *end)
 	return -EINVAL;
 }
 
-static int first_target(struct dm_ioctl *a, void *begin, void *end,
-			struct dm_target_spec **spec, char **params)
-{
-	*spec = (struct dm_target_spec *) (a + 1);
-	*params = (char *) (*spec + 1);
-
-	return valid_str(*params, begin, end);
-}
-
-static int next_target(struct dm_target_spec *last, void *begin, void *end,
+static int next_target(struct dm_target_spec *last, unsigned long next,
+		       void *begin, void *end,
 		       struct dm_target_spec **spec, char **params)
 {
 	*spec = (struct dm_target_spec *)
-		(((unsigned char *) last) + last->next);
+		((unsigned char *) last + next);
 	*params = (char *) (*spec + 1);
 
 	if (*spec < (last + 1) || ((void *)*spec > end))
@@ -118,8 +115,11 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 
 	for (i = 0; i < args->target_count; i++) {
 
-		r = first ? first_target(args, begin, end, &spec, &params) :
-		    next_target(spec, begin, end, &spec, &params);
+		r = first ? next_target((struct dm_target_spec *)args, 
+					args->data_start,
+					begin, end, &spec, &params) :
+			    next_target(spec, spec->next, 
+					begin, end, &spec, &params);
 
 		if (r)
 			PARSE_ERROR("unable to find target");
@@ -166,16 +166,18 @@ static int info(const char *name, struct dm_ioctl *user)
 	struct dm_ioctl param;
 	struct mapped_device *md = dm_get(name);
 
-	param.status = 0;
+	param.flags = 0;
+
+	strncpy(param.version, DM_IOCTL_VERSION, sizeof(param.version));
 
 	if (!md)
 		goto out;
 
-	param.status |= DM_EXISTS_FLAG;
+	param.flags |= DM_EXISTS_FLAG;
 	if (md->suspended)
-		param.status |= DM_SUSPEND_FLAG;
+		param.flags |= DM_SUSPEND_FLAG;
 	if (md->read_only)
-		param.status |= DM_READONLY_FLAG;
+		param.flags |= DM_READONLY_FLAG;
 
 	param.data_size = 0;
 	strncpy(param.name, md->name, sizeof(param.name));
@@ -206,14 +208,14 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 	if (r)
 		goto bad;
 
-	minor = (param->status & DM_PERSISTENT_DEV_FLAG) ?
+	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
 		minor = MINOR(to_kdev_t(param->dev)) : -1;
 
 	r = dm_create(param->name, minor, t, &md);
 	if (r)
 		goto bad;
 
-	dm_set_ro(md, (param->status & DM_READONLY_FLAG) ? 1 : 0);
+	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
 
 	r = info(param->name, user);
 	if (r) {
@@ -247,7 +249,7 @@ static int suspend(struct dm_ioctl *param)
 	if (!md)
 		return -ENXIO;
 
-	r = (param->status & DM_SUSPEND_FLAG) ? 
+	r = (param->flags & DM_SUSPEND_FLAG) ? 
 	     dm_suspend(md) : dm_resume(md);
 	dm_put(md);
 	return r;
@@ -274,7 +276,7 @@ static int reload(struct dm_ioctl *param)
 	if (r)
 		goto bad;
 
-	dm_set_ro(md, (param->status & DM_READONLY_FLAG) ? 1 : 0);
+	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
 
 	dm_put(md);
 	return 0;
@@ -289,7 +291,7 @@ static int reload(struct dm_ioctl *param)
 
 static int rename(struct dm_ioctl *param)
 {
-	char *newname = (char *) (param + 1);
+	char *newname = (char *) param + param->data_start;
 	struct mapped_device *md = dm_get(param->name);
 
 	if (!md)
@@ -328,6 +330,9 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 {
 	int r;
 	struct dm_ioctl *p;
+
+	if (command == DM_VERSION)
+		return version((struct dm_ioctl *) a);
 
 	r = copy_params((struct dm_ioctl *) a, &p);
 	if (r)
