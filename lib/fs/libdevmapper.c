@@ -343,6 +343,7 @@ int dm_task_run(struct dm_task *dmt)
 		if (!do_newold(mnt, dmt->dev_name, DIR_CREATE) ||
 		    !do_load(mnt, dmt->dev_name, dmt) ||
 		    !do_error_check(mnt, dmt->dev_name) ||
+		    !do_suspend(mnt, dmt->dev_name, 0) ||
 		    !do_info(mnt, dmt->dev_name, &dmt->info))
 			return 0;
 		add_dev_node(dmt->dev_name,
