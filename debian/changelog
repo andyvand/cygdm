@@ -1,3 +1,12 @@
+devmapper (0.96.07-1) unstable; urgency=low
+
+  * New upstream version.  (Closes: #171671)
+  * Char signedness assumption fixed.  (Closes: #163825)
+  * Remove types.h inclusion fix from 2.4.19 kernel patch; committed upstream.
+  * debian/copyright fix to appease lintian.
+
+ -- Andres Salomon <dilinger@mp3revolution.net>  Mon,  9 Dec 2002 02:16:28 -0400
+
 devmapper (0.96.04-2) unstable; urgency=low
 
   * Make the new version of dh-kpatches happy.  (Closes: #160927)
