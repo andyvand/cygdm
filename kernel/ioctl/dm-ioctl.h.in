@@ -58,6 +58,7 @@ struct dm_ioctl {
 #define DM_VERSION _IOR(DM_IOCTL, 0x06, struct dm_ioctl)
 
 #define DM_IOCTL_VERSION @DM_IOCTL_VERSION@
+#define DM_DRIVER_VERSION @DM_DRIVER_VERSION@
 
 /* Status bits */
 #define DM_READONLY_FLAG	0x00000001

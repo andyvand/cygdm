@@ -144,10 +144,16 @@ fi
 echo "$ac_t""$interface" 1>&6
 
 if test "-f VERSION" ; then
-  DM_VERSION="\"`cat VERSION|sed -e \"s/[[0-9.]]*/\0-$interface/\"`\""
-  DM_IOCTL_VERSION="\"`cat VERSION| awk -F '.' '{printf \"%s.%s\",\$1,\$2}'`\""
+  DM_LIB_VERSION="\"`cat VERSION|sed -e \"s/[[0-9.]]*/\0-$interface/\"`\""
 else
-  DM_VERSION="Unknown version ($interface)"
+  DM_LIB_VERSION="Unknown version ($interface)"
+fi
+
+if test "-f kernel/VERSION"; then
+  DM_DRIVER_VERSION="\"`cat kernel/VERSION|sed -e \"s/[[0-9.]]*/\0-$interface/\"`\""
+  DM_IOCTL_VERSION="\"`cat kernel/VERSION| awk -F '.' '{printf \"%s.%s\",\$1,\$2}'`\""
+else
+  DM_DRIVER_VERSION="Unknown"
   DM_IOCTL_VERSION="Unknown"
 fi
 
@@ -159,8 +165,9 @@ AC_SUBST(interface)
 AC_SUBST(kerneldir)
 AC_SUBST(kernelvsn)
 AC_SUBST(tmpdir)
-AC_SUBST(DM_VERSION)
+AC_SUBST(DM_DRIVER_VERSION)
 AC_SUBST(DM_IOCTL_VERSION)
+AC_SUBST(DM_LIB_VERSION)
 dnl First and last lines should not contain files to generate in order to 
 dnl keep utility scripts running properly
 AC_OUTPUT( 								\

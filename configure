@@ -1957,12 +1957,19 @@ fi
 echo "$ac_t""$interface" 1>&6
 
 if test "-f VERSION" ; then
-  DM_VERSION="\"`cat VERSION|sed -e \"s/[0-9.]*/\0-$interface/\"`\""
-  DM_IOCTL_VERSION="\"`cat VERSION| awk -F '.' '{printf \"%s.%s\",\$1,\$2}'`\""
+  DM_LIB_VERSION="\"`cat VERSION|sed -e \"s/[0-9.]*/\0-$interface/\"`\""
 else
-  DM_VERSION="Unknown version ($interface)"
+  DM_LIB_VERSION="Unknown version ($interface)"
+fi
+
+if test "-f kernel/VERSION"; then
+  DM_DRIVER_VERSION="\"`cat kernel/VERSION|sed -e \"s/[0-9.]*/\0-$interface/\"`\""
+  DM_IOCTL_VERSION="\"`cat kernel/VERSION| awk -F '.' '{printf \"%s.%s\",\$1,\$2}'`\""
+else
+  DM_DRIVER_VERSION="Unknown"
   DM_IOCTL_VERSION="Unknown"
 fi
+
 
 
 
@@ -2145,8 +2152,9 @@ s%@interface@%$interface%g
 s%@kerneldir@%$kerneldir%g
 s%@kernelvsn@%$kernelvsn%g
 s%@tmpdir@%$tmpdir%g
-s%@DM_VERSION@%$DM_VERSION%g
+s%@DM_DRIVER_VERSION@%$DM_DRIVER_VERSION%g
 s%@DM_IOCTL_VERSION@%$DM_IOCTL_VERSION%g
+s%@DM_LIB_VERSION@%$DM_LIB_VERSION%g
 
 CEOF
 EOF

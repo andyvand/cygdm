@@ -16,7 +16,7 @@
 #define DEFAULT_READ_AHEAD 64
 
 static const char *_name = DM_NAME;
-static const char *_version = @DM_VERSION@;
+static const char *_version = @DM_DRIVER_VERSION@;
 static const char *_email = "lvm-devel@lists.sistina.com";
 
 static int major = 0;

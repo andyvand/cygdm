@@ -66,7 +66,10 @@ CFLAGS+=-g -fno-omit-frame-pointer
 STRIP=
 #STRIP=-s
 
-VERSION := $(shell cat $(top_srcdir)/VERSION | \
+LIB_VERSION := $(shell cat $(top_srcdir)/VERSION | \
+		   awk -F '.' '{printf "%s.%s",$$1,$$2}')
+
+IOCTL_VERSION := $(shell cat $(top_srcdir)/kernel/VERSION | \
 		   awk -F '.' '{printf "%s.%s",$$1,$$2}')
 
 INCLUDES+=-I. -I$(top_srcdir)/include -I$(kerneldir)/include
@@ -74,7 +77,8 @@ INC_LNS=$(top_srcdir)/include/.symlinks_created
 
 LD_FLAGS+=-L$(interfacedir)
 
-DEPS=$(top_srcdir)/make.tmpl $(top_srcdir)/VERSION Makefile $(INC_LNS)
+DEPS=$(top_srcdir)/make.tmpl $(top_srcdir)/VERSION \
+	$(top_srcdir)/kernel/VERSION Makefile $(INC_LNS)
 
 OBJECTS=$(SOURCES:%.c=%.o)
 
@@ -105,7 +109,7 @@ $(SUBDIRS.distclean):
 	$(CC) -c $(INCLUDES) $(CFLAGS) $< -o $@
 
 %.so: $(OBJECTS)
-	$(CC) -shared -Wl,-soname,$(notdir $@).$(VERSION) $(OBJECTS) -o $@
+	$(CC) -shared -Wl,-soname,$(notdir $@).$(LIB_VERSION) $(OBJECTS) -o $@
 
 %.d: %.c
 	set -e; \

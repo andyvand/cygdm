@@ -16,7 +16,7 @@ static void free_params(struct dm_ioctl *p)
 
 static int version(struct dm_ioctl *user)
 {
-        return copy_to_user(user, DM_IOCTL_VERSION, sizeof(DM_IOCTL_VERSION));
+        return copy_to_user(user, DM_DRIVER_VERSION, sizeof(DM_DRIVER_VERSION));
 }
 
 static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
