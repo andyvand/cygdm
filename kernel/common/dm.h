@@ -118,18 +118,27 @@ int split_args(int max, int *argc, char **argv, char *input);
 /* dm.c */
 struct mapped_device *dm_get_r(int minor);
 struct mapped_device *dm_get_w(int minor);
-struct mapped_device *dm_get_name_r(const char *name, const char *uuid);
-struct mapped_device *dm_get_name_w(const char *name, const char *uuid);
 
-void dm_put_r(int minor);
-void dm_put_w(int minor);
+/*
+ * There are two ways to lookup a device.
+ */
+enum {
+	DM_LOOKUP_BY_NAME,
+	DM_LOOKUP_BY_UUID
+};
+
+struct mapped_device *dm_get_name_r(const char *name, int nametype);
+struct mapped_device *dm_get_name_w(const char *name, int nametype);
+
+void dm_put_r(struct mapped_device *md);
+void dm_put_w(struct mapped_device *md);
 
 /*
  * Call with no lock.
  */
-int dm_create(const char *name, const char *uuid,
-	      int minor, struct dm_table *table);
-int dm_set_name(const char *oldname, const char *newname);
+int dm_create(const char *name, const char *uuid, int minor, int ro,
+	      struct dm_table *table);
+int dm_set_name(const char *name, int nametype, const char *newname);
 void dm_destroy_all(void);
 
 /*
@@ -182,8 +191,6 @@ void kcopyd_exit(void);
 /* Snapshots */
 int dm_snapshot_init(void);
 void dm_snapshot_exit(void);
-int dm_origin_init(void);
-void dm_origin_exit(void);
 
 /* dm-mirror.c */
 int dm_mirror_init(void);
@@ -215,7 +222,7 @@ static inline offset_t *get_node(struct dm_table *t, int l, int n)
  */
 
 int __init dm_interface_init(void);
-void __exit dm_interface_exit(void);
+void dm_interface_exit(void);
 
 /* Code in dm-snapshot called by dm-origin to do snapshot COW */
 int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh);

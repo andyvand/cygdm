@@ -10,9 +10,9 @@
 #include <linux/dm-ioctl.h>
 #include <linux/init.h>
 
-static void free_params(struct dm_ioctl *p)
+static void free_params(struct dm_ioctl *param)
 {
-	vfree(p);
+	/*vfree(param); */
 }
 
 static int version(struct dm_ioctl *user)
@@ -20,7 +20,7 @@ static int version(struct dm_ioctl *user)
 	return copy_to_user(user, DM_DRIVER_VERSION, sizeof(DM_DRIVER_VERSION));
 }
 
-static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
+static int copy_params(struct dm_ioctl *user, struct dm_ioctl **param)
 {
 	struct dm_ioctl tmp, *dmi;
 
@@ -28,7 +28,7 @@ static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
 		return -EFAULT;
 
 	if (strcmp(DM_IOCTL_VERSION, tmp.version)) {
-		DMWARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
+		DMWARN("struct dm_ioctl version incompatible");
 		return -EINVAL;
 	}
 
@@ -40,11 +40,29 @@ static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
 		return -ENOMEM;
 
 	if (copy_from_user(dmi, user, tmp.data_size)) {
-		vfree(dmi);
+		/*vfree(dmi);*/
 		return -EFAULT;
 	}
 
-	*result = dmi;
+	*param = dmi;
+	return 0;
+}
+
+static int validate_params(uint cmd, struct dm_ioctl *param)
+{
+	/* Unless creating, either name of uuid but not both */
+	if (cmd != DM_CREATE_CMD) {
+		if ((!*param->uuid && !*param->name) ||
+		    (*param->uuid && *param->name)) {
+			DMWARN("one of name or uuid must be supplied");
+			return -EINVAL;
+		}
+	}
+
+	/* Ensure strings are terminated */
+	param->name[DM_NAME_LEN - 1] = '\0';
+	param->uuid[DM_UUID_LEN - 1] = '\0';
+
 	return 0;
 }
 
@@ -208,7 +226,7 @@ static void __info(struct mapped_device *md, struct dm_ioctl *param)
 	strncpy(param->name, md->name, sizeof(param->name));
 
 	if (md->uuid)
-		strncpy(param->uuid, md->uuid, sizeof(param->uuid));
+		strncpy(param->uuid, md->uuid, sizeof(param->uuid) - 1);
 	else
 		param->uuid[0] = '\0';
 
@@ -218,26 +236,37 @@ static void __info(struct mapped_device *md, struct dm_ioctl *param)
 }
 
 /*
+ * Always use UUID for lookups if it's present, otherwise use name.
+ */
+static inline char *lookup_name(struct dm_ioctl *param)
+{
+	return (*param->uuid) ? param->uuid : param->name;
+}
+
+static inline int lookup_type(struct dm_ioctl *param)
+{
+	return (*param->uuid) ? DM_LOOKUP_BY_UUID : DM_LOOKUP_BY_NAME;
+}
+
+/*
  * Copies device info back to user space, used by
  * the create and info ioctls.
  */
 static int info(struct dm_ioctl *param, struct dm_ioctl *user)
 {
-	int minor;
 	struct mapped_device *md;
 
 	param->flags = 0;
 
-	md = dm_get_name_r(param->name, param->uuid);
+	md = dm_get_name_r(lookup_name(param), lookup_type(param));
 	if (!md)
 		/*
 		 * Device not found - returns cleared exists flag.
 		 */
 		goto out;
 
-	minor = MINOR(md->dev);
 	__info(md, param);
-	dm_put_r(minor);
+	dm_put_r(md);
 
       out:
 	return results_to_user(user, param, NULL, 0);
@@ -248,16 +277,15 @@ static int info(struct dm_ioctl *param, struct dm_ioctl *user)
  */
 static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
 {
-	int minor, count, r;
+	int count, r;
 	struct mapped_device *md;
 	struct list_head *tmp;
 	size_t len = 0;
 	struct dm_target_deps *deps = NULL;
 
-	md = dm_get_name_r(param->name, param->uuid);
+	md = dm_get_name_r(lookup_name(param), lookup_type(param));
 	if (!md)
 		goto out;
-	minor = MINOR(md->dev);
 
 	/*
 	 * Setup the basic dm_ioctl structure.
@@ -278,7 +306,7 @@ static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
 	len = sizeof(*deps) + (sizeof(*deps->dev) * count);
 	deps = kmalloc(len, GFP_KERNEL);
 	if (!deps) {
-		dm_put_r(minor);
+		dm_put_r(md);
 		return -ENOMEM;
 	}
 
@@ -291,7 +319,7 @@ static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
 		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
 		deps->dev[count++] = kdev_t_to_nr(dd->dev);
 	}
-	dm_put_r(minor);
+	dm_put_r(md);
 
       out:
 	r = results_to_user(user, param, deps, len);
@@ -302,8 +330,7 @@ static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
 
 static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 {
-	int r;
-	struct mapped_device *md;
+	int r, ro;
 	struct dm_table *t;
 	int minor;
 
@@ -318,22 +345,15 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 	}
 
 	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
-	    MINOR(to_kdev_t(param->dev)) : -1;
+		MINOR(to_kdev_t(param->dev)) : -1;
 
-	r = dm_create(param->name, param->uuid, minor, t);
+	ro = (param->flags & DM_READONLY_FLAG) ? 1 : 0;
+
+	r = dm_create(param->name, param->uuid, minor, ro, t);
 	if (r) {
 		dm_table_destroy(t);
 		return r;
 	}
-
-	md = dm_get_name_w(param->name, param->uuid);
-	if (!md)
-		/* shouldn't get here */
-		return -EINVAL;
-
-	minor = MINOR(md->dev);
-	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
-	dm_put_w(minor);
 
 	r = info(param, user);
 	return r;
@@ -341,39 +361,39 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 
 static int remove(struct dm_ioctl *param)
 {
-	int r, minor;
+	int r;
 	struct mapped_device *md;
 
-	md = dm_get_name_w(param->name, param->uuid);
+	md = dm_get_name_w(lookup_name(param), lookup_type(param));
 	if (!md)
 		return -ENXIO;
 
-	minor = MINOR(md->dev);
 	r = dm_destroy(md);
-	dm_put_w(minor);
+	dm_put_w(md);
+	if (!r)
+		kfree(md);
 
 	return r;
 }
 
 static int suspend(struct dm_ioctl *param)
 {
-	int r, minor;
+	int r;
 	struct mapped_device *md;
 
-	md = dm_get_name_w(param->name, param->uuid);
+	md = dm_get_name_w(lookup_name(param), lookup_type(param));
 	if (!md)
 		return -ENXIO;
 
-	minor = MINOR(md->dev);
 	r = (param->flags & DM_SUSPEND_FLAG) ? dm_suspend(md) : dm_resume(md);
-	dm_put_w(minor);
+	dm_put_w(md);
 
 	return r;
 }
 
-static int reload(struct dm_ioctl *param)
+static int reload(struct dm_ioctl *param, struct dm_ioctl *user)
 {
-	int r, minor;
+	int r;
 	struct mapped_device *md;
 	struct dm_table *t;
 
@@ -387,24 +407,24 @@ static int reload(struct dm_ioctl *param)
 		return r;
 	}
 
-	md = dm_get_name_w(param->name, param->uuid);
+	md = dm_get_name_w(lookup_name(param), lookup_type(param));
 	if (!md) {
 		dm_table_destroy(t);
 		return -ENXIO;
 	}
 
-	minor = MINOR(md->dev);
-
 	r = dm_swap_table(md, t);
 	if (r) {
-		dm_put_w(minor);
+		dm_put_w(md);
 		dm_table_destroy(t);
 		return r;
 	}
 
 	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
-	dm_put_w(minor);
-	return 0;
+	dm_put_w(md);
+
+	r = info(param, user);
+	return r;
 }
 
 static int rename(struct dm_ioctl *param)
@@ -413,7 +433,7 @@ static int rename(struct dm_ioctl *param)
 
 	if (valid_str(newname, (void *) param,
 		      (void *) param + param->data_size) ||
-	    dm_set_name(param->name, newname)) {
+	    dm_set_name(lookup_name(param), lookup_type(param), newname)) {
 		DMWARN("Invalid new logical volume name supplied.");
 		return -EINVAL;
 	}
@@ -439,53 +459,60 @@ static int ctl_close(struct inode *inode, struct file *file)
 }
 
 static int ctl_ioctl(struct inode *inode, struct file *file,
-		     uint command, ulong a)
+		     uint command, ulong u)
 {
-	int r;
-	struct dm_ioctl *p;
+	int r = 0;
+	struct dm_ioctl *param;
+	struct dm_ioctl *user = (struct dm_ioctl *) u;
 	uint cmd = _IOC_NR(command);
 
+	/* Process commands without params first - always return version */
 	switch (cmd) {
 	case DM_REMOVE_ALL_CMD:
 		dm_destroy_all();
 	case DM_VERSION_CMD:
-		return version((struct dm_ioctl *) a);
+		return version(user);
 	default:
 		break;
 	}
 
-	r = copy_params((struct dm_ioctl *) a, &p);
+	r = copy_params(user, &param);
 	if (r)
-		return r;
+		goto err;
 
-	/* FIXME: Change to use size 0 next time ioctl version gets changed */
+	r = validate_params(cmd, param);
+	if (r) {
+		free_params(param);
+		goto err;
+	}
+
 	switch (cmd) {
-	case DM_CREATE_CMD:
-		r = create(p, (struct dm_ioctl *) a);
-		break;
-
-	case DM_REMOVE_CMD:
-		r = remove(p);
+	case DM_INFO_CMD:
+		r = info(param, user);
 		break;
 
 	case DM_SUSPEND_CMD:
-		r = suspend(p);
+		r = suspend(param);
+		break;
+
+	case DM_CREATE_CMD:
+		r = create(param, user);
 		break;
 
 	case DM_RELOAD_CMD:
-		r = reload(p);
+		r = reload(param, user);
 		break;
 
-	case DM_INFO_CMD:
-		r = info(p, (struct dm_ioctl *) a);
-		break;
-
-	case DM_DEPS_CMD:
-		r = dep(p, (struct dm_ioctl *) a);
+	case DM_REMOVE_CMD:
+		r = remove(param);
 		break;
 
 	case DM_RENAME_CMD:
-		r = rename(p);
+		r = rename(param);
+		break;
+
+	case DM_DEPS_CMD:
+		r = dep(param, user);
 		break;
 
 	default:
@@ -493,7 +520,11 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 		r = -EINVAL;
 	}
 
-	free_params(p);
+	free_params(param);
+	return r;
+
+      err:
+	version(user);
 	return r;
 }
 
@@ -550,7 +581,7 @@ int __init dm_interface_init(void)
 	return r;
 }
 
-void __exit dm_interface_exit(void)
+void dm_interface_exit(void)
 {
 	if (misc_deregister(&_dm_misc) < 0)
 		DMERR("misc_deregister failed for control device");

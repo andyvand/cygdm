@@ -13,6 +13,7 @@
 #include <linux/list.h>
 #include <linux/fs.h>
 #include <linux/blkdev.h>
+#include <linux/mempool.h>
 #include <linux/device-mapper.h>
 
 #include "dm-snapshot.h"
@@ -31,7 +32,8 @@ struct pending_exception {
 	struct exception e;
 
 	/* Chain of WRITE buffer heads to submit when this COW has completed */
-	struct buffer_head *bh;
+	struct buffer_head *origin_buffers;
+	struct buffer_head *snapshot_buffers;
 
 	/* Pointer back to snapshot context */
 	struct dm_snapshot *snap;
@@ -43,6 +45,7 @@ struct pending_exception {
  */
 static kmem_cache_t *exception_cachep;
 static kmem_cache_t *pending_cachep;
+static mempool_t *pending_pool;
 
 /*
  * One of these per registered origin, held in the snapshot_origins hash
@@ -56,6 +59,17 @@ struct origin {
 	/* List of snapshots for this origin */
 	struct list_head snapshots;
 };
+
+/*
+ * Useful macro for running the store functions.  Use store_int_fn if you want the return value.
+ */
+#define store_fn(snap, fn, args...) \
+    if ((snap)->store. ## fn) \
+        (snap)->store. ## fn ( &(snap)->store , ## args )
+
+#define store_int_fn(snap, fn, args...) \
+    (((snap)->store. ## fn) ? \
+        ((snap)->store. ## fn ( &(snap)->store , ## args )) : 0)
 
 /*
  * Size of the hash table for origin volumes. If we make this
@@ -242,14 +256,31 @@ static struct exception *lookup_exception(struct exception_table *et,
 	return NULL;
 }
 
-static inline struct exception *alloc_exception(void)
+void *pool_alloc_pending(int gfp_mask, void *pool_data)
 {
-	return kmem_cache_alloc(exception_cachep, GFP_NOIO);
+	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
+	return kmem_cache_alloc(mem, gfp_mask);
+}
+
+void pool_free_pending(void *element, void *pool_data)
+{
+	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
+	kmem_cache_free(mem, element);
 }
 
 static inline struct pending_exception *alloc_pending_exception(void)
 {
-	return kmem_cache_alloc(pending_cachep, GFP_NOIO);
+	return mempool_alloc(pending_pool, GFP_NOIO);
+}
+
+static inline void free_pending_exception(struct pending_exception *pe)
+{
+	mempool_free(pe, pending_pool);
+}
+
+static inline struct exception *alloc_exception(void)
+{
+	return kmem_cache_alloc(exception_cachep, GFP_NOIO);
 }
 
 static inline void free_exception(struct exception *e)
@@ -257,65 +288,18 @@ static inline void free_exception(struct exception *e)
 	kmem_cache_free(exception_cachep, e);
 }
 
-static inline void free_pending_exception(struct pending_exception *pe)
+int dm_add_exception(struct dm_snapshot *s, chunk_t old, chunk_t new)
 {
-	kmem_cache_free(pending_cachep, pe);
-}
-
-/*
- * Called when the copy I/O has finished
- */
-static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
-{
-	struct pending_exception *pe = (struct pending_exception *) context;
-	struct dm_snapshot *s = pe->snap;
 	struct exception *e;
 
-	if (reason == COPY_CB_COMPLETE) {
-		struct buffer_head *bh;
+	e = alloc_exception();
+	if (!e)
+		return -ENOMEM;
 
-		/* Update the metadata if we are persistent */
-		if (s->store->commit_exception)
-			s->store->commit_exception(s->store, &pe->e);
-
-		e = alloc_exception();
-		if (!e) {
-			/* FIXME: what do we do now ? */
-			return;
-		}
-
-		/* Add a proper exception,
-		   and remove the inflight exception from the list */
-		down_write(&pe->snap->lock);
-
-		memcpy(e, &pe->e, sizeof(*e));
-		insert_exception(&s->complete, e);
-		remove_exception(&pe->e);
-
-		/* Submit any pending write BHs */
-		bh = pe->bh;
-		pe->bh = NULL;
-		up_write(&pe->snap->lock);
-
-		kmem_cache_free(pending_cachep, pe);
-
-		while (bh) {
-			struct buffer_head *nextbh = bh->b_reqnext;
-			bh->b_reqnext = NULL;
-			generic_make_request(WRITE, bh);
-			bh = nextbh;
-		}
-	}
-
-	/* Read/write error - snapshot is unusable */
-	if (reason == COPY_CB_FAILED_WRITE || reason == COPY_CB_FAILED_READ) {
-		DMERR("Error reading/writing snapshot");
-
-		if (pe->snap->store->drop_snapshot)
-			pe->snap->store->drop_snapshot(pe->snap->store);
-		remove_exception(&pe->e);
-		kmem_cache_free(pending_cachep, pe);
-	}
+	e->old_chunk = old;
+	e->new_chunk = new;
+	insert_exception(&s->complete, e);
+	return 0;
 }
 
 /*
@@ -447,7 +431,6 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	r = dm_table_get_device(t, origin_path, 0, 0, &s->origin);
 	if (r) {
 		*context = "Cannot get origin device";
-		r = -EINVAL;
 		goto bad_free;
 	}
 
@@ -455,7 +438,6 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	if (r) {
 		dm_table_put_device(t, s->origin);
 		*context = "Cannot get COW device";
-		r = -EINVAL;
 		goto bad_free;
 	}
 
@@ -496,7 +478,9 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	s->chunk_size = chunk_size;
 	s->chunk_mask = chunk_size - 1;
 	for (s->chunk_shift = 0; chunk_size;
-	     s->chunk_shift++, chunk_size >>= 1) ;
+	     s->chunk_shift++, chunk_size >>= 1)
+		;
+	s->chunk_shift--;
 
 	s->valid = 1;
 	init_rwsem(&s->lock);
@@ -512,25 +496,22 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	 * Check the persistent flag - done here because we need the iobuf
 	 * to check the LV header
 	 */
-#if 0
-	if ((*persistent & 0x5f) == 'P')
-		s->store = dm_create_persistent(s, blocksize,
-						extent_size, context);
-	else
-#endif
-		s->store = dm_create_transient(s, blocksize, context);
+	/*AGKAGKAGKif ((*persistent & 0x5f) == 'P')
+		r = dm_create_persistent(&s->store, s, blocksize,
+					 extent_size, context);
+	else */
+		r = dm_create_transient(&s->store, s, blocksize, context);
 
-	if (!s->store) {
+	if (r) {
 		*context = "Couldn't create exception store";
 		r = -EINVAL;
 		goto bad_free1;
 	}
 
 	/* Allocate the COW iobuf and set associated variables */
-	if (s->store->init &&
-	    s->store->init(s->store, blocksize, extent_size, context)) {
+	r = store_int_fn(s, init, blocksize, extent_size, context);
+	if (r) {
 		*context = "Couldn't initialise exception store";
-		r = -ENOMEM;
 		goto bad_free1;
 	}
 
@@ -556,8 +537,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	return 0;
 
  bad_free2:
-	if (s->store->destroy)
-		s->store->destroy(s->store);
+	store_fn(s, destroy);
 
  bad_free1:
 	exit_exception_table(&s->pending, pending_cachep);
@@ -584,8 +564,7 @@ static void snapshot_dtr(struct dm_table *t, void *context)
 	exit_exception_table(&s->complete, exception_cachep);
 
 	/* Deallocate memory used */
-	if (s->store->destroy)
-		s->store->destroy(s->store);
+	store_fn(s, destroy);
 
 	dm_table_put_device(t, s->origin);
 	dm_table_put_device(t, s->cow);
@@ -593,9 +572,125 @@ static void snapshot_dtr(struct dm_table *t, void *context)
 }
 
 /*
+ * Flush a list of pending writes, that were waiting for an
+ * exception.
+ */
+static void flush_buffers(struct buffer_head *bh)
+{
+	struct buffer_head *n;
+
+	while (bh) {
+		n = bh->b_reqnext;
+		bh->b_reqnext = NULL;
+		generic_make_request(WRITE, bh);
+		bh = n;
+	}
+}
+
+/*
+ * Error a list of buffers.
+ */
+static void error_buffers(struct buffer_head *bh)
+{
+	struct buffer_head *n;
+
+	while (bh) {
+		n = bh->b_reqnext;
+		bh->b_reqnext = NULL;
+		buffer_IO_error(bh);
+		bh = n;
+	}
+}
+
+/*
+ * Called when the copy I/O has finished
+ */
+static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
+{
+	struct pending_exception *pe = (struct pending_exception *) context;
+	struct dm_snapshot *s = pe->snap;
+	struct exception *e;
+	struct buffer_head *origin_bh, *snapshot_bh;
+
+	switch (reason) {
+	case COPY_CB_COMPLETE:
+		/* Update the metadata if we are persistent */
+		store_fn(s, commit_exception, &pe->e);
+
+		e = alloc_exception();
+		if (!e) {
+			/* FIXME: what do we do now ? */
+			return;
+		}
+
+		/*
+		 * Add a proper exception, and remove the
+		 * inflight exception from the list.
+		 */
+		down_write(&pe->snap->lock);
+
+		memcpy(e, &pe->e, sizeof(*e));
+		insert_exception(&s->complete, e);
+		remove_exception(&pe->e);
+
+		/* Submit any pending write BHs */
+		origin_bh = pe->origin_buffers;
+		snapshot_bh = pe->snapshot_buffers;
+		up_write(&pe->snap->lock);
+
+		free_pending_exception(pe);
+		flush_buffers(origin_bh);
+		flush_buffers(snapshot_bh);
+		DMWARN("Exception completed successfully.");
+		break;
+
+	case COPY_CB_FAILED_WRITE:
+	case COPY_CB_FAILED_READ:
+		/* Read/write error - snapshot is unusable */
+		DMERR("Error reading/writing snapshot");
+
+		down_write(&pe->snap->lock);
+		store_fn(pe->snap, drop_snapshot);
+		pe->snap->valid = 0;
+		origin_bh = pe->origin_buffers;
+		snapshot_bh = pe->snapshot_buffers;
+		remove_exception(&pe->e);
+		up_write(&pe->snap->lock);
+
+		free_pending_exception(pe);
+		flush_buffers(origin_bh);
+		error_buffers(snapshot_bh);
+		DMWARN("Exception failed.");
+		break;
+
+	default:
+		DMWARN("Unknown kcopyd callback reason.");
+		BUG();
+	}
+}
+
+/*
+ * Inserts the buffer head on the correct queue, depending
+ * whether its a snapshot or origin buffer.
+ */
+static void queue_buffer(struct pending_exception *pe,
+			 struct buffer_head *bh,
+			 int snapshot_buffer)
+{
+	struct buffer_head **bh_list;
+
+	bh_list = snapshot_buffer ? &pe->snapshot_buffers :
+		&pe->origin_buffers;
+
+	bh->b_reqnext = *bh_list;
+	*bh_list = bh;
+}
+
+/*
  * Performs a new copy on write.
  */
-static int new_exception(struct dm_snapshot *s, struct buffer_head *bh)
+static int new_exception(struct dm_snapshot *s, struct buffer_head *bh,
+			 int snapshot_buffer)
 {
 	struct exception *e;
 	struct pending_exception *pe;
@@ -607,14 +702,11 @@ static int new_exception(struct dm_snapshot *s, struct buffer_head *bh)
 	 * If the exception is in flight then we just defer the
 	 * bh until this copy has completed.
 	 */
-
-	/* FIXME: great big race. */
 	e = lookup_exception(&s->pending, chunk);
 	if (e) {
 		/* cast the exception to a pending exception */
 		pe = list_entry(e, struct pending_exception, e);
-		bh->b_reqnext = pe->bh;
-		pe->bh = bh;
+		queue_buffer(pe, bh, snapshot_buffer);
 
 	} else {
 		/* Create a new pending exception */
@@ -626,11 +718,11 @@ static int new_exception(struct dm_snapshot *s, struct buffer_head *bh)
 
 		pe->e.old_chunk = chunk;
 		pe->snap = s;
-		bh->b_reqnext = NULL;
-		pe->bh = bh;
+		pe->origin_buffers = pe->snapshot_buffers = NULL;
+		queue_buffer(pe, bh, snapshot_buffer);
 
-		if (s->store->prepare_exception &&
-		    s->store->prepare_exception(s->store, &pe->e)) {
+		if (store_int_fn(s, prepare_exception, &pe->e)) {
+			free_pending_exception(pe);
 			s->valid = 0;
 			return -ENXIO;
 		}
@@ -681,12 +773,16 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 
 		/* If the block is already remapped - use that, else remap it */
 		e = lookup_exception(&s->complete, chunk);
-		if (!e)
-			r = new_exception(s, bh);
+		if (e)
+			remap_exception(s, e, bh);
 
 		else {
-			remap_exception(s, e, bh);
-			r = 1;
+			r = new_exception(s, bh, 1);
+
+			if (r < 0) {
+				store_fn(s, drop_snapshot);
+				s->valid = 0;
+			}
 		}
 
 		up_write(&s->lock);
@@ -715,62 +811,127 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 	return r;
 }
 
+static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
+{
+	int r = 1;
+	struct list_head *sl;
+	struct dm_snapshot *snap;
+	struct exception *e;
+	chunk_t chunk;
+
+	/* Do all the snapshots on this origin */
+	list_for_each(sl, snapshots) {
+		snap = list_entry(sl, struct dm_snapshot, list);
+
+		down_write(&snap->lock);
+
+		/*
+		 * Remember, different snapshots can have
+		 * different chunk sizes.
+		 */
+		chunk = sector_to_chunk(snap, bh->b_rsector);
+
+		/* Only deal with valid snapshots */
+		if (snap->valid) {
+			/*
+			 * Check exception table to see if block
+			 * is already remapped in this snapshot
+			 * and trigger an exception if not.
+			 */
+			e = lookup_exception(&snap->complete, chunk);
+			if (!e) {
+				int lr;
+
+				lr = new_exception(snap, bh, 1);
+				if (lr < 0) {
+					store_fn(snap, drop_snapshot);
+					snap->valid = 0;
+
+				} else if (lr == 0)
+					r = 0; /* we must wait */
+			}
+		}
+
+		up_write(&snap->lock);
+	}
+
+	return r;
+}
+
 /*
  * Called on a write from the origin driver.
  */
-int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
+int do_origin(struct dm_dev *origin, struct buffer_head *bh)
 {
-	struct list_head *snap_list;
 	struct origin *o;
-	int r = 1;
-	chunk_t chunk;
+	int r;
 
 	down_read(&_origins_lock);
 	o = __lookup_origin(origin->dev);
+	if (!o)
+		BUG();
 
-	if (o) {
-		struct list_head *origin_snaps = &o->snapshots;
-		struct dm_snapshot *lock_snap;
-
-		/* Lock the metadata */
-		lock_snap = list_entry(origin_snaps->next,
-				       struct dm_snapshot, list);
-
-		/* Do all the snapshots on this origin */
-		list_for_each(snap_list, origin_snaps) {
-			struct dm_snapshot *snap;
-			struct exception *e;
-			snap = list_entry(snap_list, struct dm_snapshot, list);
-
-			down_write(&snap->lock);
-
-			/*
-			 * Remember different snapshots can have
-			 * different chunk sizes.
-			 */
-			chunk = sector_to_chunk(snap, bh->b_rsector);
-
-			/* Only deal with valid snapshots */
-			if (snap->valid) {
-				/*
-				 * Check exception table to see
-				 * if block is already remapped
-				 * in this snapshot and mark the
-				 * snapshot as needing a COW if
-				 * not
-				 */
-				e = lookup_exception(&snap->complete, chunk);
-				if (!e && !new_exception(snap, bh))
-					r = 0;
-			}
-
-			up_write(&snap->lock);
-		}
-	}
-
+	r = __origin_write(&o->snapshots, bh);
 	up_read(&_origins_lock);
+
 	return r;
 }
+
+
+/*
+ * Origin: maps a linear range of a device, with hooks for snapshotting.
+ */
+
+/*
+ * Construct an origin mapping: <dev_path>
+ * The context for an origin is merely a 'struct dm_dev *'
+ * pointing to the real device.
+ */
+static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
+		      int argc, char **argv, void **context)
+{
+	int r;
+	struct dm_dev *dev;
+
+	if (argc != 1) {
+		*context = "dm-origin: incorrect number of arguments";
+		return -EINVAL;
+	}
+
+	r = dm_table_get_device(t, argv[0], 0, l, &dev);
+	if (r) {
+		*context = "Cannot get target device";
+		return r;
+	}
+
+	*context = dev;
+
+	return 0;
+}
+
+static void origin_dtr(struct dm_table *t, void *c)
+{
+	struct dm_dev *dev = (struct dm_dev *) c;
+	dm_table_put_device(t, dev);
+}
+
+static int origin_map(struct buffer_head *bh, int rw, void *context)
+{
+	struct dm_dev *dev = (struct dm_dev *) context;
+	bh->b_rdev = dev->dev;
+
+	/* Only tell snapshots if this is a write */
+	return (rw == WRITE) ? do_origin(dev, bh) : 1;
+}
+
+static struct target_type origin_target = {
+	name:	"snapshot-origin",
+	module:	THIS_MODULE,
+	ctr:	origin_ctr,
+	dtr:	origin_dtr,
+	map:	origin_map,
+	err:	NULL
+};
 
 static struct target_type snapshot_target = {
 	name:"snapshot",
@@ -791,10 +952,16 @@ int __init dm_snapshot_init(void)
 		return r;
 	}
 
+	r = dm_register_target(&origin_target);
+	if (r < 0) {
+		DMERR("Device mapper: Origin: register failed %d\n", r);
+		goto bad1;
+	}
+
 	r = init_origin_hash();
 	if (r) {
 		DMERR("init_origin_hash failed.");
-		return r;
+		goto bad2;
 	}
 
 	exception_cachep = kmem_cache_create("dm-snapshot-ex",
@@ -802,8 +969,9 @@ int __init dm_snapshot_init(void)
 					     __alignof__(struct exception),
 					     0, NULL, NULL);
 	if (!exception_cachep) {
-		exit_origin_hash();
-		return -1;
+		DMERR("Couldn't create exception cache.");
+		r = -ENOMEM;
+		goto bad3;
 	}
 
 	pending_cachep =
@@ -812,23 +980,48 @@ int __init dm_snapshot_init(void)
 			      __alignof__(struct pending_exception),
 			      0, NULL, NULL);
 	if (!pending_cachep) {
-		exit_origin_hash();
-		kmem_cache_destroy(exception_cachep);
-		return -1;
+		DMERR("Couldn't create pending cache.");
+		r = -ENOMEM;
+		goto bad4;
+	}
+
+	pending_pool = mempool_create(128, pool_alloc_pending,
+				      pool_free_pending, pending_cachep);
+	if (!pending_pool) {
+		DMERR("Couldn't create pending pool.");
+		r = -ENOMEM;
+		goto bad5;
 	}
 
 	return 0;
+
+ bad5:
+	kmem_cache_destroy(pending_cachep);
+ bad4:
+	kmem_cache_destroy(exception_cachep);
+ bad3:
+	exit_origin_hash();
+ bad2:
+	dm_unregister_target(&origin_target);
+ bad1:
+	dm_unregister_target(&snapshot_target);
+	return r;
 }
 
 void dm_snapshot_exit(void)
 {
-	int r = dm_unregister_target(&snapshot_target);
+	int r;
 
-	if (r < 0)
-		DMERR("Device mapper: Snapshot: unregister failed %d", r);
+	r = dm_unregister_target(&snapshot_target);
+	if (r)
+		DMERR("snapshot unregister failed %d", r);
+
+	r = dm_unregister_target(&origin_target);
+	if (r)
+		DMERR("origin unregister failed %d", r);
 
 	exit_origin_hash();
-
+	mempool_destroy(pending_pool);
 	kmem_cache_destroy(pending_cachep);
 	kmem_cache_destroy(exception_cachep);
 }

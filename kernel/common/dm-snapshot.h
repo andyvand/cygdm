@@ -24,30 +24,6 @@ struct exception_table {
 /* FIXME: can we get away with limiting these to a uint32_t ? */
 typedef offset_t chunk_t;
 
-struct dm_snapshot {
-	struct rw_semaphore lock;
-
-	struct dm_dev *origin;
-	struct dm_dev *cow;
-
-	/* List of snapshots per Origin */
-	struct list_head list;
-
-	/* Size of data blocks saved - must be a power of 2 */
-	chunk_t chunk_size;
-	chunk_t chunk_mask;
-	chunk_t chunk_shift;
-
-	/* You can't use a snapshot if this is 0 (e.g. if full) */
-	int valid;
-
-	struct exception_table pending;
-	struct exception_table complete;
-
-	/* The on disk metadata handler */
-	struct exception_store *store;
-};
-
 /*
  * An exception is used where an old chunk of data has been
  * replaced by a new one.
@@ -60,7 +36,8 @@ struct exception {
 };
 
 /*
- * Abstraction to handle persistent snapshots.
+ * Abstraction to handle the meta/layout of exception stores (the
+ * COW device).
  */
 struct exception_store {
 
@@ -96,17 +73,49 @@ struct exception_store {
 	void *context;
 };
 
+struct dm_snapshot {
+	struct rw_semaphore lock;
+
+	struct dm_dev *origin;
+	struct dm_dev *cow;
+
+	/* List of snapshots per Origin */
+	struct list_head list;
+
+	/* Size of data blocks saved - must be a power of 2 */
+	chunk_t chunk_size;
+	chunk_t chunk_mask;
+	chunk_t chunk_shift;
+
+	/* You can't use a snapshot if this is 0 (e.g. if full) */
+	int valid;
+
+	struct exception_table pending;
+	struct exception_table complete;
+
+	/* The on disk metadata handler */
+	struct exception_store store;
+};
+
+/*
+ * Used by the exception stores to load exceptions hen
+ * initialising.
+ */
+int dm_add_exception(struct dm_snapshot *s, chunk_t old, chunk_t new);
+
 /*
  * Constructor and destructor for the default persistent
  * store.
  */
-struct exception_store *dm_create_persistent(struct dm_snapshot *s,
-					     int blocksize,
-					     offset_t extent_size,
-					     void **error);
+int dm_create_persistent(struct exception_store *store,
+				struct dm_snapshot *s,
+				int blocksize,
+				offset_t extent_size,
+				void **error);
 
-struct exception_store *dm_create_transient(struct dm_snapshot *s,
-					    int blocksize, void **error);
+int dm_create_transient(struct exception_store *store,
+			struct dm_snapshot *s,
+			int blocksize, void **error);
 
 /*
  * Return the number of sectors in the device.

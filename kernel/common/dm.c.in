@@ -66,7 +66,6 @@ struct mapped_device *dm_get_r(int minor)
 	md = _devs[minor];
 	if (!md)
 		up_read(_dev_locks + minor);
-
 	return md;
 }
 
@@ -81,8 +80,29 @@ struct mapped_device *dm_get_w(int minor)
 	md = _devs[minor];
 	if (!md)
 		up_write(_dev_locks + minor);
-
 	return md;
+}
+
+static int namecmp(struct mapped_device *md, const char *name, int nametype)
+{
+	switch (nametype) {
+	case DM_LOOKUP_BY_NAME:
+		return strcmp(md->name, name);
+		break;
+
+	case DM_LOOKUP_BY_UUID:
+		if (!md->uuid)
+			return -1; 	/* never equal */
+
+		return strcmp(md->uuid, name);
+		break;
+
+	default:
+		DMWARN("Unknown comparison type in namecmp: %d", nametype);
+		BUG();
+	}
+
+	return -1;
 }
 
 /*
@@ -91,7 +111,7 @@ struct mapped_device *dm_get_w(int minor)
  * some point if people start playing with *large* numbers of dm
  * devices.
  */
-struct mapped_device *dm_get_name_r(const char *name, const char *uuid)
+struct mapped_device *dm_get_name_r(const char *name, int nametype)
 {
 	int i;
 	struct mapped_device *md;
@@ -99,18 +119,17 @@ struct mapped_device *dm_get_name_r(const char *name, const char *uuid)
 	for (i = 0; i < MAX_DEVICES; i++) {
 		md = dm_get_r(i);
 		if (md) {
-			if (!strcmp(md->name, name) ||
-			    (*uuid && !strcmp(md->uuid, uuid)))
+			if (!namecmp(md, name, nametype))
 				return md;
 
-			dm_put_r(i);
+			dm_put_r(md);
 		}
 	}
 
 	return NULL;
 }
 
-struct mapped_device *dm_get_name_w(const char *name, const char *uuid)
+struct mapped_device *dm_get_name_w(const char *name, int nametype)
 {
 	int i;
 	struct mapped_device *md;
@@ -122,45 +141,48 @@ struct mapped_device *dm_get_name_w(const char *name, const char *uuid)
 	 */
 
       restart:
-
 	for (i = 0; i < MAX_DEVICES; i++) {
 		md = dm_get_r(i);
-		if (md) {
-			if (strcmp(md->name, name) &&
-			    (!*uuid || strcmp(md->uuid, uuid)))
-				dm_put_r(i);
-			else {
-				/* found it */
-				dm_put_r(i);
+		if (!md)
+			continue;
 
-				md = dm_get_w(i);
-				if (!md)
-					goto restart;
-				if (strcmp(md->name, name) &&
-				    (!*uuid || strcmp(md->uuid, uuid))) {
-					dm_put_w(i);
-					goto restart;
-				}
-
-				return md;
-
-			}
+		if (namecmp(md, name, nametype)) {
+			dm_put_r(md);
+			continue;
 		}
+
+		/* found it */
+		dm_put_r(md);
+
+		md = dm_get_w(i);
+		if (!md)
+			goto restart;
+
+		if (namecmp(md, name, nametype)) {
+			dm_put_w(md);
+			goto restart;
+		}
+
+		return md;
 	}
 
 	return NULL;
 }
 
-void dm_put_r(int minor)
+void dm_put_r(struct mapped_device *md)
 {
+	int minor = MINOR(md->dev);
+
 	if (minor >= MAX_DEVICES)
 		return;
 
 	up_read(_dev_locks + minor);
 }
 
-void dm_put_w(int minor)
+void dm_put_w(struct mapped_device *md)
 {
+	int minor = MINOR(md->dev);
+
 	if (minor >= MAX_DEVICES)
 		return;
 
@@ -239,24 +261,22 @@ static void local_exit(void)
  * store them in an array.  The disposable macro 'xx'
  * expands a prefix into a pair of function names.
  */
-#define xx(n) {n ## _init, n ## _exit}
 static struct {
 	int (*init)(void);
 	void (*exit)(void);
 
 } _inits[] = {
+#define xx(n) {n ## _init, n ## _exit}
 	xx(local),
 	xx(dm_target),
 	xx(dm_linear),
 	xx(dm_stripe),
 	xx(kcopyd),
 	xx(dm_snapshot),
-	xx(dm_origin),
 	xx(dm_mirror),
 	xx(dm_interface),
-};
-
 #undef xx
+};
 
 static int __init dm_init(void)
 {
@@ -284,7 +304,6 @@ static void __exit dm_exit(void)
 	int i = sizeof(_inits) / sizeof(*_inits);
 
 	dm_destroy_all();
-
 	while (i--)
 		_inits[i].exit();
 }
@@ -294,25 +313,23 @@ static void __exit dm_exit(void)
  */
 static int dm_blk_open(struct inode *inode, struct file *file)
 {
-	int minor = MINOR(inode->i_rdev);
 	struct mapped_device *md;
 
-	md = dm_get_w(minor);
+	md = dm_get_w(MINOR(inode->i_rdev));
 	if (!md)
 		return -ENXIO;
 
 	md->use_count++;
-	dm_put_w(minor);
+	dm_put_w(md);
 
 	return 0;
 }
 
 static int dm_blk_close(struct inode *inode, struct file *file)
 {
-	int minor = MINOR(inode->i_rdev);
 	struct mapped_device *md;
 
-	md = dm_get_w(minor);
+	md = dm_get_w(MINOR(inode->i_rdev));
 	if (!md)
 		return -ENXIO;
 
@@ -320,7 +337,7 @@ static int dm_blk_close(struct inode *inode, struct file *file)
 		DMWARN("incorrect reference count found in mapped_device");
 
 	md->use_count--;
-	dm_put_w(minor);
+	dm_put_w(md);
 
 	return 0;
 }
@@ -445,19 +462,18 @@ static int queue_io(struct buffer_head *bh, int rw)
 {
 	struct deferred_io *di = alloc_deferred();
 	struct mapped_device *md;
-	int minor = MINOR(bh->b_rdev);
 
 	if (!di)
 		return -ENOMEM;
 
-	md = dm_get_w(minor);
+	md = dm_get_w(MINOR(bh->b_rdev));
 	if (!md) {
 		free_deferred(di);
 		return -ENXIO;
 	}
 
 	if (!md->suspended) {
-		dm_put_w(minor);
+		dm_put_w(md);
 		free_deferred(di);
 		return 1;
 	}
@@ -467,7 +483,7 @@ static int queue_io(struct buffer_head *bh, int rw)
 	di->next = md->deferred;
 	md->deferred = di;
 
-	dm_put_w(minor);
+	dm_put_w(md);
 
 	return 0;		/* deferred successfully */
 }
@@ -554,7 +570,7 @@ static int request(request_queue_t * q, int rw, struct buffer_head *bh)
 	 * this io for later.
 	 */
 	while (md->suspended) {
-		dm_put_r(minor);
+		dm_put_r(md);
 
 		if (rw == READA)
 			goto bad_no_lock;
@@ -581,11 +597,11 @@ static int request(request_queue_t * q, int rw, struct buffer_head *bh)
 	if ((r = __map_buffer(md, bh, rw, __find_node(md->map, bh))) < 0)
 		goto bad;
 
-	dm_put_r(minor);
+	dm_put_r(md);
 	return r;
 
       bad:
-	dm_put_r(minor);
+	dm_put_r(md);
 
       bad_no_lock:
 	buffer_IO_error(bh);
@@ -617,12 +633,12 @@ static int do_bmap(kdev_t dev, unsigned long block,
 		return -ENXIO;
 
 	if (md->suspended) {
-		dm_put_r(minor);
+		dm_put_r(md);
 		return -EPERM;
 	}
 
 	if (!check_dev_size(minor, block)) {
-		dm_put_r(minor);
+		dm_put_r(md);
 		return -EINVAL;
 	}
 
@@ -642,7 +658,7 @@ static int do_bmap(kdev_t dev, unsigned long block,
 	*r_dev = bh.b_rdev;
 	*r_block = bh.b_rsector / (bh.b_size >> 9);
 
-	dm_put_r(minor);
+	dm_put_r(md);
 	return r;
 }
 
@@ -687,7 +703,6 @@ static inline int specific_dev(int minor, struct mapped_device *md)
 		return -1;
 	}
 
-	_devs[minor] = md;
 	return minor;
 }
 
@@ -707,8 +722,9 @@ static int any_old_dev(struct mapped_device *md)
 }
 
 /*
- * Allocate and initialise a blank device.  Device is returned
- * with a write lock held.
+ * Allocate and initialise a blank device.
+ * Caller must ensure uuid is null-terminated.
+ * Device is returned with a write lock held.
  */
 static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 				       int minor)
@@ -732,26 +748,26 @@ static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 		return NULL;
 	}
 
-	_devs[minor] = md;
 	md->dev = MKDEV(_major, minor);
 	md->suspended = 0;
 
 	strncpy(md->name, name, sizeof(md->name) - 1);
 	md->name[sizeof(md->name) - 1] = '\0';
 
-	if (*uuid) {
-		len = strnlen(uuid, DM_UUID_LEN - 1) + 1;
+	/*
+	 * Copy in the uuid.
+	 */
+	if (uuid && *uuid) {
+		len = strlen(uuid) + 1;
 		if (!(md->uuid = kmalloc(len, GFP_KERNEL))) {
 			DMWARN("unable to allocate uuid - out of memory.");
+			kfree(md);
 			return NULL;
 		}
-
-		strncpy(md->uuid, uuid, len - 1);
-		md->uuid[len - 1] = '\0';
+		strcpy(md->uuid, uuid);
 	}
 
 	init_waitqueue_head(&md->wait);
-
 	return md;
 }
 
@@ -828,7 +844,7 @@ static void __unbind(struct mapped_device *md)
 	_hardsect_size[minor] = 0;
 }
 
-static int check_name(const char *name, const char *uuid)
+static int check_name(const char *name)
 {
 	struct mapped_device *md;
 
@@ -837,33 +853,43 @@ static int check_name(const char *name, const char *uuid)
 		return -1;
 	}
 
-	if (strnlen(uuid, DM_UUID_LEN + 1) > DM_UUID_LEN) {
-		DMWARN("uuid too long");
-		return -1;
-	}
-
-	md = dm_get_name_r(name, uuid);
-
+	md = dm_get_name_r(name, DM_LOOKUP_BY_NAME);
 	if (md) {
-		dm_put_r(MINOR(md->dev));
-		DMWARN("device name or uuid already in use");
+		dm_put_r(md);
+		DMWARN("device name already in use");
 		return -1;
 	}
 
 	return 0;
 }
 
+static int check_uuid(const char *uuid)
+{
+	struct mapped_device *md;
+
+	if (uuid) {
+		md = dm_get_name_r(uuid, DM_LOOKUP_BY_UUID);
+		if (md) {
+			dm_put_r(md);
+			DMWARN("device uuid already in use");
+			return -1;
+		}
+	}
+
+	return 0;
+}
+
 /*
- * Constructor for a new device
+ * Constructor for a new device.
  */
-int dm_create(const char *name, const char *uuid,
-	      int minor, struct dm_table *table)
+int dm_create(const char *name, const char *uuid, int minor, int ro,
+	      struct dm_table *table)
 {
 	int r;
 	struct mapped_device *md;
 
 	spin_lock(&_create_lock);
-	if (check_name(name, uuid) < 0) {
+	if (check_name(name) || check_uuid(uuid)) {
 		spin_unlock(&_create_lock);
 		return -EINVAL;
 	}
@@ -874,6 +900,7 @@ int dm_create(const char *name, const char *uuid,
 		return -ENXIO;
 	}
 	minor = MINOR(md->dev);
+	_devs[minor] = md;
 
 	r = __register_device(md);
 	if (r)
@@ -883,8 +910,10 @@ int dm_create(const char *name, const char *uuid,
 	if (r)
 		goto err;
 
-	dm_put_w(minor);
+	dm_set_ro(md, ro);
+
 	spin_unlock(&_create_lock);
+	dm_put_w(md);
 	return 0;
 
       err:
@@ -892,8 +921,8 @@ int dm_create(const char *name, const char *uuid,
 	if (md->uuid)
 		kfree(md->uuid);
 
+	dm_put_w(md);
 	kfree(md);
-	dm_put_w(minor);
 	spin_unlock(&_create_lock);
 	return r;
 }
@@ -901,23 +930,22 @@ int dm_create(const char *name, const char *uuid,
 /*
  * Renames the device.  No lock held.
  */
-int dm_set_name(const char *oldname, const char *newname)
+int dm_set_name(const char *name, int nametype, const char *newname)
 {
-	int r, minor;
+	int r;
 	struct mapped_device *md;
 
 	spin_lock(&_create_lock);
-	if (check_name(newname, "") < 0) {
+	if (check_name(newname) < 0) {
 		spin_unlock(&_create_lock);
 		return -EINVAL;
 	}
 
-	md = dm_get_name_w(oldname, "");
+	md = dm_get_name_w(name, nametype);
 	if (!md) {
 		spin_unlock(&_create_lock);
 		return -ENXIO;
 	}
-	minor = MINOR(md->dev);
 
 	r = __unregister_device(md);
 	if (r)
@@ -927,7 +955,7 @@ int dm_set_name(const char *oldname, const char *newname)
 	r = __register_device(md);
 
       out:
-	dm_put_w(minor);
+	dm_put_w(md);
 	spin_unlock(&_create_lock);
 	return r;
 }
@@ -935,6 +963,7 @@ int dm_set_name(const char *oldname, const char *newname)
 /*
  * Destructor for the device.  You cannot destroy an open
  * device.  Write lock must be held before calling.
+ * Caller must dm_put_w(md) then kfree(md) if call was successful.
  */
 int dm_destroy(struct mapped_device *md)
 {
@@ -954,8 +983,6 @@ int dm_destroy(struct mapped_device *md)
 	if (md->uuid)
 		kfree(md->uuid);
 
-	kfree(md);
-
 	return 0;
 }
 
@@ -964,17 +991,25 @@ int dm_destroy(struct mapped_device *md)
  */
 void dm_destroy_all(void)
 {
-	int i;
+	int i, some_destroyed, r;
 	struct mapped_device *md;
 
-	for (i = 0; i < MAX_DEVICES; i++) {
-		md = dm_get_w(i);
-		if (!md)
-			continue;
+	do {
+		some_destroyed = 0;
+		for (i = 0; i < MAX_DEVICES; i++) {
+			md = dm_get_w(i);
+			if (!md)
+				continue;
 
-		dm_destroy(md);
-		dm_put_w(i);
-	}
+			r = dm_destroy(md);
+			dm_put_w(md);
+
+			if (!r) {
+				kfree(md);
+				some_destroyed = 1;
+			}
+		}
+	} while (some_destroyed);
 }
 
 /*
@@ -1047,7 +1082,7 @@ int dm_suspend(struct mapped_device *md)
 		return -EINVAL;
 
 	md->suspended = 1;
-	dm_put_w(minor);
+	dm_put_w(md);
 
 	/* wait for all the pending io to flush */
 	add_wait_queue(&md->wait, &wait);
@@ -1063,7 +1098,7 @@ int dm_suspend(struct mapped_device *md)
 		if (!atomic_read(&md->pending))
 			break;
 
-		dm_put_w(minor);
+		dm_put_w(md);
 		schedule();
 
 	} while (1);
@@ -1086,9 +1121,9 @@ int dm_resume(struct mapped_device *md)
 	def = md->deferred;
 	md->deferred = NULL;
 
-	dm_put_w(minor);
+	dm_put_w(md);
 	flush_deferred_io(def);
-	fsync_dev(md->dev);
+	sync_buffers(md->dev, 0);
 	if (!dm_get_w(minor)) {
 		/* FIXME: yuck */
 		down_write(_dev_locks + minor);
