@@ -17,13 +17,6 @@
 
 #include "dm.h"
 
-/*
-TODOs:
-- allow chunks bigger than one iovec can handle (& prepare for ksnapd)
-- lots of testing
-*/
-
-
 /* Magic for persistent snapshots: "SnAp" - Feeble isn't it. */
 #define SNAP_MAGIC 0x70416e53
 
@@ -48,6 +41,9 @@ TODOs:
    redirection as the header is here) and if rsector_org has a value it is the
    sector number of the next COW metadata sector on the disk. if rsector_org is
    also zero then this is the end of the COW metadata.
+
+   The metadata is written in hardblocksize lumps rather than in units of extents
+   for efficiency so don't expect a whole sector to be zeroed out at any time.
 
    Non-persistent snapshots simple have redirected blocks stored (in chunk_size
    sectors) from hard block 1 to avoid inadvertantly creating a bad header.
@@ -137,8 +133,9 @@ static inline int get_dev_size(kdev_t dev)
 		return 0;
 }
 
-/* Return the list of snapshots for a given origin device */
-static struct list_head *__lookup_snapshot_list(kdev_t origin, struct origin_list **ret_ol)
+/* Return the list of snapshots for a given origin device.
+   The origin_hash_lock must be held when calling this */
+static struct origin_list *__lookup_snapshot_list(kdev_t origin)
 {
         struct list_head *slist;
 	struct list_head *snapshot_list;
@@ -149,26 +146,24 @@ static struct list_head *__lookup_snapshot_list(kdev_t origin, struct origin_lis
 		ol = list_entry(slist, struct origin_list, list);
 
 		if (ol->origin_dev == origin) {
-			if (ret_ol) *ret_ol = ol;
-			return &ol->snap_list;
+			return ol;
 		}
 	}
 	return NULL;
 }
 
-/* Make a note of the snapshot and it's origin so we can look it up when
+/* Make a note of the snapshot and its origin so we can look it up when
    the origin has a write on it */
 static int register_snapshot(kdev_t origin_dev, struct snapshot_c *snap)
 {
 	struct origin_list *ol;
-        struct list_head *sl;
 
 	down_write(&origin_hash_lock);
-	sl = (struct list_head *)__lookup_snapshot_list(origin_dev, &ol);
+	ol = __lookup_snapshot_list(origin_dev);
 
-	if (sl) {
+	if (ol) {
 		/* Add snapshot to an existing origin */
-		list_add_tail(&snap->list, sl);
+		list_add_tail(&snap->list, &ol->snap_list);
 	}
 	else {
 		struct list_head *snapshot_list;
@@ -213,7 +208,7 @@ static struct exception *find_exception(struct snapshot_c *sc, uint32_t b_rsecto
 	return NULL;
 }
 
-/* Allocate an kiobuf. This is the only code nicked from the
+/* Allocate a kiobuf. This is the only code nicked from the
    old snapshot driver and I've changed it anyway */
 static int alloc_iobuf_pages(struct kiobuf *iobuf, int nr_sectors)
 {
@@ -312,8 +307,7 @@ static int read_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, in
 
 	iobuf->length = nr_sectors << 9;
 
-	status = brw_kiovec(READ, 1, &iobuf, dev,
-			    blocks, blocksize);
+	status = brw_kiovec(READ, 1, &iobuf, dev, blocks, blocksize);
 	return (status != (nr_sectors << 9));
 }
 
@@ -336,8 +330,7 @@ static int write_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, i
 
 	iobuf->length = nr_sectors << 9;
 
-	status = brw_kiovec(WRITE, 1, &iobuf, dev,
-			    blocks, blocksize);
+	status = brw_kiovec(WRITE, 1, &iobuf, dev, blocks, blocksize);
 	return (status != (nr_sectors << 9));
 }
 
@@ -409,6 +402,7 @@ static int add_exception(struct snapshot_c *sc, unsigned long org, unsigned long
 			memset(sc->disk_cow, 0, PAGE_SIZE);
 			sc->current_metadata_sector = next_md_block;
 
+			/* If this is also the end of an extent then go backto the start */
 			if (sc->current_metadata_entry >= sc->highest_metadata_entry)
 				sc->current_metadata_entry = 0;
 
@@ -438,7 +432,7 @@ static int read_metadata(struct snapshot_c *lc)
 	struct kiobuf *read_iobuf;
 	int err = 0;
 
-	/* Allocate out own iovec for this operation cos the others
+	/* Allocate our own iovec for this operation 'cos the others
 	   are way too small */
 	if (alloc_kiovec(1, &read_iobuf)) {
 		DMERR("Error allocating iobuf for %s\n", kdevname(lc->cow_dev->dev));
@@ -451,6 +445,8 @@ static int read_metadata(struct snapshot_c *lc)
 		return -1;
 	}
 
+	/* Similarly, allocate a whole extent's block so we can easily
+	   process the data */
 	cow_block = vmalloc(lc->extent_size * SECTOR_SIZE);
 	if (cow_block == NULL) {
 		DMERR("Error allocating space for metadata on %s\n", kdevname(lc->cow_dev->dev));
@@ -459,8 +455,8 @@ static int read_metadata(struct snapshot_c *lc)
 		return -1;
 	}
 
-	/* Clear the persistent flag so that add_exception() doesn't try to rewrite the table
-	   while we are populating it. */
+	/* Temporarily clear the persistent flag so that add_exception() doesn't
+	   try to rewrite the on-disk table while we are populating it. */
 	lc->persistent = 0;
 	do
 	{
@@ -474,8 +470,8 @@ static int read_metadata(struct snapshot_c *lc)
 			}
 
 			/* Now populate the hash table from this data */
-			for (i=0; i<=lc->highest_metadata_entry &&
-				     cow_block[i].rsector_new != 0; i++) {
+			for (i=0; i <= lc->highest_metadata_entry &&
+				  cow_block[i].rsector_new != 0; i++) {
 				add_exception(lc,
 					      le64_to_cpu(cow_block[i].rsector_org),
 					      le64_to_cpu(cow_block[i].rsector_new));
@@ -511,7 +507,9 @@ static int read_metadata(struct snapshot_c *lc)
 }
 
 /* Read the snapshot volume header, returns 0 only if it read OK and
-   it was valid. The snapshot_c struct is filled in. */
+   it was valid. returns 1 if no header was found, -1 on error.
+   All fields are checked against the snapshot structure itself to
+   make sure we don't corrupt the data */
 static int read_header(struct snapshot_c *lc)
 {
 	int status;
@@ -519,6 +517,7 @@ static int read_header(struct snapshot_c *lc)
 	int blocksize = get_hardsect_size(lc->cow_dev->dev);
 	unsigned long devsize;
 
+	/* Get it */
 	status = read_blocks(lc->cow_iobuf, lc->cow_dev->dev, 0L, blocksize/SECTOR_SIZE);
 	if (status != 0) {
 		DMERR("Snapshot dev %s error reading header\n", kdevname(lc->cow_dev->dev));
@@ -575,34 +574,55 @@ static int read_header(struct snapshot_c *lc)
 }
 
 /* Write (or update) the header. The only time we should need to do
-   an update is when the snapshot becomes full */
+   an update is when the snapshot becomes full. */
 static int write_header(struct snapshot_c *lc)
 {
 	struct snap_disk_header *header;
+	struct kiobuf *head_iobuf;
 	int blocksize = get_hardsect_size(lc->cow_dev->dev);
+	int status;
 
-	header = (struct snap_disk_header *)page_address(lc->iobuf->maplist[0]);
+	/* Allocate our own iobuf for this so we don't corrupt any
+	   of the other writes that may be going on */
+	if (alloc_kiovec(1, &head_iobuf)) {
+		DMERR("Error allocating iobuf for header on %s\n", kdevname(lc->cow_dev->dev));
+		return -1;
+	}
 
-	header->magic = cpu_to_le32(SNAP_MAGIC);
-	header->version = cpu_to_le32(SNAPSHOT_DISK_VERSION);
-	header->chunk_size = cpu_to_le32(lc->chunk_size);
+	if (alloc_iobuf_pages(head_iobuf, PAGE_SIZE/SECTOR_SIZE)) {
+		DMERR("Error allocating iobuf space for header on %s\n", kdevname(lc->cow_dev->dev));
+		free_kiovec(1, &head_iobuf);
+		return -1;
+	}
+
+	header = (struct snap_disk_header *)page_address(head_iobuf->maplist[0]);
+
+	header->magic       = cpu_to_le32(SNAP_MAGIC);
+	header->version     = cpu_to_le32(SNAPSHOT_DISK_VERSION);
+	header->chunk_size  = cpu_to_le32(lc->chunk_size);
 	header->extent_size = cpu_to_le32(lc->extent_size);
-	header->full = cpu_to_le32(lc->full);
+	header->full        = cpu_to_le32(lc->full);
 
 	header->start_of_exceptions = cpu_to_le64(lc->start_of_exceptions);
 
 	/* Must write at least a full block */
-	return write_blocks(lc->iobuf, lc->cow_dev->dev, 0, blocksize/SECTOR_SIZE);
+	status = write_blocks(head_iobuf, lc->cow_dev->dev, 0, blocksize/SECTOR_SIZE);
+
+	unmap_kiobuf(head_iobuf);
+	free_kiovec(1, &head_iobuf);
+	return status;
 }
+
 
 /* Write the latest COW metadata block */
 static int write_metadata(struct snapshot_c *lc, int entry)
 {
 	unsigned long start_sector;
-	int  blocksize = get_hardsect_size(lc->cow_dev->dev);
-	int  writesize = blocksize/SECTOR_SIZE;
+	int blocksize = get_hardsect_size(lc->cow_dev->dev);
+	int writesize = blocksize/SECTOR_SIZE;
 
 	start_sector = lc->current_metadata_sector + (entry)/lc->md_entries_per_block*writesize;
+
 	if (write_blocks(lc->cow_iobuf, lc->cow_dev->dev, start_sector, writesize) != 0) {
 		DMERR("Error writing COW block\n");
 		return -1;
@@ -722,7 +742,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		lc->persistent = 0;
 	}
 
-	/* For a persistent snapshot the COW iobuf and set associated variables */
+	/* For a persistent snapshot allocate the COW iobuf and set associated variables */
 	lc->disk_cow = NULL;
 	if (lc->persistent) {
 		int status;
@@ -732,31 +752,29 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		lc->highest_metadata_entry = (extent_size*SECTOR_SIZE) / sizeof(struct disk_exception) - 1;
 		lc->md_entries_per_block   = blocksize / sizeof(struct disk_exception);
 
-		/* Make room for the header and make sure it's hard sector aligned */
-		lc->next_free_sector = blocksize/SECTOR_SIZE;
-
 		/* Allocate and set up iobuf for metadata I/O*/
 		*context = "Unable to allocate COW iovec";
 		if (alloc_kiovec(1, &lc->cow_iobuf))
 			goto bad_free3;
 
-
-		/* Allocate space for the COW buffer. This should be enough for 2*blocksize
-		   buffers rounded up to the nearest PAGE_SIZE. */
-		cow_sectors = blocksize*2/SECTOR_SIZE + PAGE_SIZE/SECTOR_SIZE;
+		/* Allocate space for the COW buffer. It should be at least PAGE_SIZE. */
+		cow_sectors = blocksize/SECTOR_SIZE + PAGE_SIZE/SECTOR_SIZE;
 		*context = "Unable to allocate COW I/O buffer space";
 		if (alloc_iobuf_pages(lc->cow_iobuf, cow_sectors)) {
 			free_kiovec(1, &lc->cow_iobuf);
 			goto bad_free3;
 		}
+
 		for (i=0; i < lc->cow_iobuf->nr_pages; i++) {
 			memset(page_address(lc->cow_iobuf->maplist[i]), 0, PAGE_SIZE);
 		}
+
 		lc->disk_cow = page_address(lc->cow_iobuf->maplist[0]);
 
 		*context = "Error in disk header";
 		/* Check for a header on disk and create a new one if not */
 		if ( (status = read_header(lc)) == 1) {
+
 			/* Write a new header */
 			lc->start_of_exceptions = lc->next_free_sector;
 			lc->next_free_sector += lc->extent_size;
@@ -770,7 +788,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 				goto bad_free4;
 			}
 
-			/* Write a blank metadata extent to the device */
+			/* Write a blank metadata block to the device */
 			if (write_metadata(lc, 0) != 0) {
 				DMERR("Error writing initial COW table to snapshot volume %s\n",
 				       kdevname(lc->cow_dev->dev));
@@ -875,7 +893,6 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 
 		/* If the block is already remapped - use that, else remap it */
 		if (!ex) {
-			/* Remap block for writing */
 			unsigned long read_start = bh->b_rsector - (bh->b_rsector % lc->chunk_size);
 			unsigned long devsize = get_dev_size(lc->cow_dev->dev);
 			unsigned long reloc_sector;
@@ -918,9 +935,6 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 			/* Update the bh bits to the write goes to the newly remapped volume */
 			bh->b_rdev = lc->cow_dev->dev;
 			bh->b_rsector = lc->next_free_sector + bh->b_rsector%lc->chunk_size;
-
-			/* Advance the free sector pointer */
-			lc->next_free_sector += lc->chunk_size;
 		}
 		up_write(&lc->origin->lock);
 	}
@@ -931,30 +945,32 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 /* Called on a write from the origin driver */
 int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 {
-        struct list_head *origin_snaps;
 	struct list_head *snap_list;
+	struct origin_list *ol;
 	unsigned int max_chunksize = 0;
 	int need_cow = 0;
-	int max_blksize;
-	int min_blksize;
 
 	down_read(&origin_hash_lock);
-	origin_snaps = (struct list_head *)__lookup_snapshot_list(origin->dev, NULL);
+	ol = __lookup_snapshot_list(origin->dev);
 	up_read(&origin_hash_lock);
 
-	max_blksize = get_hardsect_size(origin->dev);
-	min_blksize = get_hardsect_size(origin->dev);
-
-	if (origin_snaps) {
+	if (ol) {
+		struct list_head *origin_snaps = &ol->snap_list;
 		struct snapshot_c *lock_snap;
+		int max_blksize;
+		int min_blksize;
+
+		max_blksize = get_hardsect_size(origin->dev);
+		min_blksize = get_hardsect_size(origin->dev);
 
 		/* Lock the metadata */
 		lock_snap = list_entry(origin_snaps->next, struct snapshot_c, list);
 		down_write(&lock_snap->origin->lock);
 
+		/* Do all the snapshots on this origin */
 		list_for_each(snap_list, origin_snaps) {
 			struct snapshot_c *snap;
-			struct exception *ex;
+			struct exception  *ex;
 			snap = list_entry(snap_list, struct snapshot_c, list);
 
 			/* Ignore full snapshots */
@@ -973,7 +989,7 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 				min_blksize = min(min_blksize, get_hardsect_size(snap->cow_dev->dev));
 
                                 /* Check for full snapshot. Doing the size calculation here means that
-				   the COW device can be resized without telling us */
+				   the COW device can be resized without us being told */
 				dev_size = get_dev_size(snap->cow_dev->dev);
 				if (snap->next_free_sector + snap->chunk_size >= dev_size) {
 					        /* Snapshot is full, we can't use it */
@@ -993,8 +1009,8 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 		/* At least one snapshot needs a COW */
 		if (need_cow) {
 			unsigned long read_start;
-			unsigned int nr_sectors;
-			unsigned int max_sectors;
+			unsigned int  nr_sectors;
+			unsigned int  max_sectors;
 			struct snapshot_c *read_snap = NULL;
 
 			/* Read the original block(s) from origin device */
@@ -1023,6 +1039,7 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 				return -1;
 			}
 
+			/* And the COW writes */
 			list_for_each(snap_list, origin_snaps) {
 				struct snapshot_c *snap;
 				unsigned long reloc_sector;
@@ -1048,8 +1065,6 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 						snap->full = 1;
 						write_header(snap);
 					}
-
-					snap->next_free_sector += snap->chunk_size;
 
 					/* Done this one */
 					snap->need_cow = 0;
