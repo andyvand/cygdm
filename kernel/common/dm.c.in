@@ -757,7 +757,7 @@ static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 	md->name[sizeof(md->name) - 1] = '\0';
 
 	if (*uuid) {
-		if (!(md->uuid = kmalloc(strnlen(uuid, DM_UUID_LEN),
+		if (!(md->uuid = kmalloc(strnlen(uuid, DM_UUID_LEN) + 1,
 					 GFP_KERNEL))) {
 			DMWARN("unable to allocate uuid - out of memory.");
 			return NULL;
