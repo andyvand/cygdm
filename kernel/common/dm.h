@@ -9,6 +9,7 @@
 #ifndef DM_INTERNAL_H
 #define DM_INTERNAL_H
 
+#include <linux/config.h>
 #include <linux/version.h>
 #include <linux/major.h>
 #include <linux/iobuf.h>
@@ -23,6 +24,7 @@
 #include <linux/device-mapper.h>
 #include <linux/list.h>
 
+#define DM_NAME "device-mapper"	/* Name for messaging */
 #define MAX_DEPTH 16
 #define NODE_SIZE L1_CACHE_BYTES
 #define KEYS_PER_NODE (NODE_SIZE / sizeof(offset_t))
@@ -137,7 +139,9 @@ int dm_table_add_target(struct dm_table *t, offset_t high,
 			struct target_type *type, void *private);
 int dm_table_complete(struct dm_table *t);
 
-#define WARN(f, x...) printk(KERN_WARNING "device-mapper: " f "\n" , ## x)
+#define DMWARN(f, x...) printk(KERN_WARNING DM_NAME ": " f "\n" , ## x)
+#define DMERR(f, x...) printk(KERN_ERR DM_NAME ": " f "\n" , ## x)
+#define DMINFO(f, x...) printk(KERN_INFO DM_NAME ": " f "\n" , ## x)
 
 /*
  * Calculate the index of the child node of the n'th node k'th key.

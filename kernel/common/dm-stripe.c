@@ -4,15 +4,11 @@
  * This file is released under the GPL.
  */
 
-#include <linux/config.h>
+#include "dm.h"
+
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/slab.h>
-#include <linux/fs.h>
 #include <linux/blkdev.h>
-#include <linux/device-mapper.h>
-
-#include "dm.h"
 
 struct stripe {
 	struct dm_dev *dev;
@@ -189,7 +185,7 @@ static int __init stripe_init(void)
 
 	r = dm_register_target(&stripe_target);
 	if (r < 0)
-		WARN("linear target register failed");
+		DMWARN("striped target registration failed");
 
 	return r;
 }
@@ -197,7 +193,7 @@ static int __init stripe_init(void)
 static void __exit stripe_exit(void)
 {
 	if (dm_unregister_target(&stripe_target))
-		WARN("striped target unregister failed");
+		DMWARN("striped target unregistration failed");
 
 	return;
 }
@@ -206,5 +202,5 @@ module_init(stripe_init);
 module_exit(stripe_exit);
 
 MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
-MODULE_DESCRIPTION("Device Mapper: Striped mapping");
+MODULE_DESCRIPTION(DM_NAME ": striped mapping");
 MODULE_LICENSE("GPL");

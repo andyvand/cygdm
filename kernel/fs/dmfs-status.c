@@ -19,12 +19,10 @@
  * Boston, MA 02111-1307, USA.
  */
 
-#include <linux/config.h>
-#include <linux/fs.h>
-#include <linux/seq_file.h>
-
 #include "dm.h"
 #include "dmfs.h"
+
+#include <linux/seq_file.h>
 
 static void *s_start(struct seq_file *s, loff_t *pos)
 {

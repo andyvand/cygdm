@@ -21,12 +21,10 @@
 
 /* Heavily based upon ramfs */
 
-#include <linux/config.h>
-#include <linux/fs.h>
-#include <linux/seq_file.h>
-
 #include "dm.h"
 #include "dmfs.h"
+
+#include <linux/seq_file.h>
 
 struct dmfs_inode_info {
 	const char *name;

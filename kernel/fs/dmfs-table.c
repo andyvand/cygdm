@@ -19,12 +19,10 @@
  * Boston, MA 02111-1307, USA.
  */
 
-#include <linux/config.h>
-#include <linux/fs.h>
-#include <linux/mm.h>
-
 #include "dm.h"
 #include "dmfs.h"
+
+#include <linux/mm.h>
 
 static offset_t start_of_next_range(struct dm_table *t)
 {

@@ -154,8 +154,8 @@ void dm_table_destroy(struct dm_table *t)
 
 	/* free the device list */
 	if (t->devices.next != &t->devices) {
-		WARN("there are still devices present: someone isn't "
-		     "calling dm_table_remove_device");
+		DMWARN("devices still present during destroy: "
+			"dm_table_remove_device calls missing");
 
 		free_devices(&t->devices);
 	}
@@ -310,7 +310,7 @@ int dm_table_get_device(struct dm_table *t, const char *path,
 	atomic_inc(&dd->count);
 
 	if (!check_device_area(dd->dev, start, len)) {
-		WARN("device '%s' not large enough for target", path);
+		DMWARN("device %s too small for target", path);
 		dm_table_put_device(t, dd);
 		return -EINVAL;
 	}

@@ -19,13 +19,11 @@
  * Boston, MA 02111-1307, USA.
  */
 
-#include <linux/config.h>
-#include <linux/list.h>
-#include <linux/fs.h>
-#include <linux/seq_file.h>
-
 #include "dm.h"
 #include "dmfs.h"
+
+#include <linux/list.h>
+#include <linux/seq_file.h>
 
 struct dmfs_error {
 	struct list_head list;

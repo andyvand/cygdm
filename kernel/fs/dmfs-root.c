@@ -21,10 +21,6 @@
 
 /* Heavily based upon ramfs */
 
-#include <linux/config.h>
-#include <linux/ctype.h>
-#include <linux/fs.h>
-
 #include "dm.h"
 #include "dmfs.h"
 

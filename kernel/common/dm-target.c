@@ -5,6 +5,7 @@
  */
 
 #include "dm.h"
+
 #include <linux/kmod.h>
 
 struct tt_internal {
@@ -230,7 +231,7 @@ int dm_target_init(void)
 void dm_target_exit(void)
 {
 	if (dm_unregister_target(&error_target))
-		WARN("unregister of error target failed.");
+		DMWARN("error target unregistration failed");
 }
 
 EXPORT_SYMBOL(dm_register_target);

@@ -63,7 +63,7 @@ static int next_target(struct dm_target_spec *last, void *begin, void *end,
 
 void dm_error(const char *message)
 {
-	WARN("%s", message);
+	DMWARN("%s", message);
 }
 
 /*
@@ -91,7 +91,7 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 	offset_t high = 0;
 
 	if (!args->target_count) {
-		WARN("No targets specified");
+		DMWARN("populate_table: no targets specified");
 		return -EINVAL;
 	}
 
@@ -272,7 +272,7 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 		return r;
 
 	if (strcmp(DM_IOCTL_VERSION, p->version)) {
-		WARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
+		DMWARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
 		r = -EINVAL;
 		goto out;
 	}
@@ -299,7 +299,7 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 		break;
 
 	default:
-		WARN("dm_ctl_ioctl: unknown command 0x%x\n", command);
+		DMWARN("dm_ctl_ioctl: unknown command 0x%x", command);
 		r = -EINVAL;
 	}
 
@@ -323,7 +323,7 @@ int dm_interface_init(void)
 
 	r = devfs_register_chrdev(DM_CHAR_MAJOR, DM_DIR, &_ctl_fops);
 	if (r < 0) {
-		WARN("devfs_register_chrdev failed for dm control dev");
+		DMERR("devfs_register_chrdev failed for control device");
 		return -EIO;
 	}
 
@@ -340,5 +340,5 @@ void dm_interface_exit(void)
 	// FIXME: remove control device
 
 	if (devfs_unregister_chrdev(DM_CHAR_MAJOR, DM_DIR) < 0)
-		WARN("devfs_unregister_chrdev failed for dm control device");
+		DMERR("devfs_unregister_chrdev failed for control device");
 }

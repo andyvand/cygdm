@@ -19,13 +19,11 @@
  * Boston, MA 02111-1307, USA.
  */
 
-#include <linux/config.h>
-#include <linux/fs.h>
+#include "dm.h"
+#include "dmfs.h"
+
 #include <linux/init.h>
 #include <linux/kmod.h>
-
-#include "dmfs.h"
-#include "dm.h"
 
 #define DMFS_MAGIC 0x444D4653
 

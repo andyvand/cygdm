@@ -4,15 +4,11 @@
  * This file is released under the GPL.
  */
 
-#include <linux/config.h>
+#include "dm.h"
+
 #include <linux/module.h>
 #include <linux/init.h>
-#include <linux/slab.h>
-#include <linux/fs.h>
 #include <linux/blkdev.h>
-#include <linux/device-mapper.h>
-
-#include "dm.h"
 
 /*
  * Linear: maps a linear range of a device.
@@ -94,8 +90,7 @@ static int __init linear_init(void)
 	int r = dm_register_target(&linear_target);
 
 	if (r < 0)
-		printk(KERN_ERR "Device mapper: Linear: "
-		       "register failed %d\n", r);
+		DMERR("linear: register failed %d", r);
 
 	return r;
 }
@@ -105,13 +100,12 @@ static void __exit linear_exit(void)
 	int r = dm_unregister_target(&linear_target);
 
 	if (r < 0)
-		printk(KERN_ERR "Device mapper: Linear: "
-		       "unregister failed %d\n", r);
+		DMERR("linear: unregister failed %d", r);
 }
 
 module_init(linear_init);
 module_exit(linear_exit);
 
 MODULE_AUTHOR("Joe Thornber <thornber@uk.sistina.com>");
-MODULE_DESCRIPTION("Device Mapper: Linear mapping");
+MODULE_DESCRIPTION(DM_NAME ": linear mapping");
 MODULE_LICENSE("GPL");

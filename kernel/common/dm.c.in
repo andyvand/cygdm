@@ -14,9 +14,8 @@
 
 #define MAX_DEVICES 64
 #define DEFAULT_READ_AHEAD 64
-#define DEVICE_NAME "device-mapper"	/* Name for messaging */
 
-static const char *_name = DEVICE_NAME;
+static const char *_name = DM_NAME;
 static const char *_version = @DM_VERSION@;
 static const char *_email = "lvm-devel@lists.sistina.com";
 
@@ -84,7 +83,7 @@ static int __init local_init(void)
 
 	r = devfs_register_blkdev(_major, _name, &dm_blk_dops);
 	if (r < 0) {
-		printk(KERN_ERR "%s -- register_blkdev failed\n", _name);
+		DMERR("register_blkdev failed");
 		kmem_cache_destroy(_io_hook_cache);
 		return r;
 	}
@@ -102,25 +101,25 @@ static int __init local_init(void)
 
 	_dev_dir = devfs_mk_dir(0, DM_DIR, NULL);
 
-	printk(KERN_INFO "%s %s initialised, %s\n", _name, _version, _email);
+	DMINFO("%s initialised: %s", _version, _email);
 	return 0;
 }
 
 static void local_exit(void)
 {
 	if (kmem_cache_destroy(_io_hook_cache))
-		WARN("it looks like there are still some io_hooks allocated");
+		DMWARN("io_hooks still allocated during unregistration");
 	_io_hook_cache = NULL;
 
 	if (devfs_unregister_blkdev(_major, _name) < 0)
-		printk(KERN_ERR "%s -- unregister_blkdev failed\n", _name);
+		DMERR("devfs_unregister_blkdev failed");
 
 	read_ahead[_major] = 0;
 	blk_size[_major] = NULL;
 	blksize_size[_major] = NULL;
 	hardsect_size[_major] = NULL;
 
-	printk(KERN_INFO "%s %s cleaned up\n", _name, _version);
+	DMINFO("%s cleaned up", _version);
 }
 
 static int __init dm_init(void)
@@ -190,7 +189,7 @@ static int dm_blk_close(struct inode *inode, struct file *file)
 	dm_lock_w();
 	md = _devs[minor];
 	if (!md || md->use_count < 1) {
-		WARN("reference count in mapped_device incorrect");
+		DMWARN("incorrect reference count found in mapped_device");
 		dm_unlock_w();
 		return -ENXIO;
 	}
@@ -247,7 +246,7 @@ static int dm_blk_ioctl(struct inode *inode, struct file *file,
 		return dm_user_bmap(inode, (struct lv_bmap *) a);
 
 	default:
-		WARN("unknown block ioctl %d", command);
+		DMWARN("unknown block ioctl 0x%x", command);
 		return -EINVAL;
 	}
 
@@ -536,7 +535,7 @@ static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb)
 static inline int __specific_dev(int minor)
 {
 	if (minor > MAX_DEVICES) {
-		WARN("request for a mapped_device > than MAX_DEVICES");
+		DMWARN("request for a mapped_device beyond MAX_DEVICES");
 		return 0;
 	}
 
@@ -576,7 +575,7 @@ static struct mapped_device *alloc_dev(int minor)
 	minor = (minor < 0) ? __any_old_dev() : __specific_dev(minor);
 
 	if (minor < 0) {
-		WARN("no free devices available");
+		DMWARN("no free devices available");
 		dm_unlock_w();
 		kfree(md);
 		return 0;
@@ -686,12 +685,12 @@ static struct mapped_device *__get_by_name(const char *name)
 static int check_name(const char *name)
 {
 	if (strchr(name, '/')) {
-		WARN("invalid device name");
+		DMWARN("invalid device name");
 		return -1;
 	}
 
 	if (__get_by_name(name)) {
-		WARN("device name already in use");
+		DMWARN("device name already in use");
 		return -1;
 	}
 
@@ -927,6 +926,6 @@ module_exit(dm_exit);
 
 MODULE_PARM(_major, "i");
 MODULE_PARM_DESC(_major, "The major number of the device mapper");
-MODULE_DESCRIPTION("device-mapper driver");
+MODULE_DESCRIPTION(DM_NAME " driver");
 MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 MODULE_LICENSE("GPL");
