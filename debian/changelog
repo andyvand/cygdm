@@ -1,3 +1,11 @@
+devmapper (0.95.07-2) unstable; urgency=low
+
+  * Fix link error on hppa, due to lack of -fPIC.  (Closes: #144792)
+  * Fix postinst error in libdevmapper0.  (Closes: #144889)
+  * Updated depends (removed patch, bzip2, added modutils, fileutils).
+
+ -- Andres Salomon <dilinger@mp3revolution.net>  Sun, 28 Apr 2002 14:26:59 -0500
+
 devmapper (0.95.07-1) unstable; urgency=low
 
   * New release (Beta2).
