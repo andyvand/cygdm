@@ -38,9 +38,11 @@ static LIST_HEAD(work_list);
 static struct task_struct *copy_task = NULL;
 static struct rw_semaphore list_lock;
 static DECLARE_MUTEX(start_lock);
+static DECLARE_MUTEX(run_lock);
 static DECLARE_WAIT_QUEUE_HEAD(start_waitq);
 static DECLARE_WAIT_QUEUE_HEAD(work_waitq);
 static struct kiobuf *iobuf;
+static int thread_exit = 0;
 
 
 /* Allocate pages for a kiobuf. */
@@ -123,6 +125,7 @@ static int copy_kthread(void *unused)
 {
 	copy_task = current;
 	daemonize();
+	down(&run_lock);
 
 	strcpy(current->comm, "kcopyd");
 	wake_up_interruptible(&start_waitq);
@@ -134,7 +137,7 @@ static int copy_kthread(void *unused)
 		down_write(&list_lock);
 
 		/* if/while, ugh! but we need to up the semaphore somehow */
-		if (!list_empty(&work_list)) {
+		if (!list_empty(&work_list) && !thread_exit) {
 			while (!list_empty(&work_list)) {
 
 				struct copy_work *work_item = list_entry(work_list.next, struct copy_work, list);
@@ -169,7 +172,8 @@ static int copy_kthread(void *unused)
 
 			done_copy:
 				/* Call the callback */
-				work_item->callback(callback_reason, work_item->context);
+				if (work_item->callback)
+					work_item->callback(callback_reason, work_item->context);
 
 				kfree(work_item);
 			}
@@ -188,8 +192,9 @@ static int copy_kthread(void *unused)
 		set_task_state(tsk, TASK_RUNNING);
 		remove_wait_queue(&work_waitq, &wq);
 
-	} while(1);
+	} while (thread_exit == 0);
 
+	up(&run_lock);
 	return 0;
 }
 
@@ -263,6 +268,7 @@ static int __init kcopyd_init(void)
 {
 	init_rwsem(&list_lock);
 	init_MUTEX(&start_lock);
+	init_MUTEX(&run_lock);
 
 	if (alloc_kiovec(1, &iobuf)) {
 		DMERR("Unable to allocate kiobuf for kcopyd\n");
@@ -279,6 +285,12 @@ static int __init kcopyd_init(void)
 
 static void kcopyd_exit(void)
 {
+	thread_exit = 1;
+	wake_up_interruptible(&work_waitq);
+
+	/* Wait for the thread to finish */
+	down(&run_lock);
+	up(&run_lock);
 }
 
 module_init(kcopyd_init);
