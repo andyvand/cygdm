@@ -14,7 +14,8 @@ Device Mapper installation
    ./configure --with-kernel-dir=/usr/src/linux-2.4.19
 
 
-2) Patch, configure and build a new kernel containing device-mapper.
+2) Patch, configure and build a new kernel containing device-mapper
+   (unless, of course, your kernel already contains device-mapper).
 
    If there is already a patch for your kernel and you gave 'configure'
    appropriate parameters in step 1, you can just run 'make apply-patches' 
@@ -83,12 +84,13 @@ Note if you are upgrading
    /dev/mapper was called /dev/device-mapper prior to 0.96.04.
    Consequently scripts/devmap_mknod.sh has been updated.
 
-Notes about the 'proof of concept' filesystem interface
-=======================================================
-The filesystem interface has not been updated for several months,
-requires an old kernel, and is missing lots of features.
+Notes about the alternative filesystem interface
+================================================
+The original 2.4 filesystem interface has not been updated for several 
+months, requires an old kernel, and is missing lots of features.
 
-To experiment with it you should check out an old version from
-CVS and then 'configure --with-interface=fs'.
-You will need to mount dmfs.  e.g. mount -t dmfs dmfs /dmfs
+A new filesystem interface is under development for 2.5 kernels (and
+will get back-ported to 2.4 if it's successful).
+Look for "dmfs" patches at:
+   http://people.sistina.com/~thornber/patches/
 
