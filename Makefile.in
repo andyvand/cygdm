@@ -29,6 +29,9 @@ endif
 
 include make.tmpl
 
+lib: include
+dmsetup: lib
+
 apply-patches:
 	patch -d $(kerneldir) -p1 -i \
 		`pwd`/patches/linux-$(kernelvsn)-devmapper-$(interface).patch
