@@ -1,6 +1,6 @@
-diff -ruN linux-2.4.19/Documentation/Configure.help linux-2.4.19-dm-test1/Documentation/Configure.help
+diff -ruN linux-2.4.19/Documentation/Configure.help linux-2.4.19-dm/Documentation/Configure.help
 --- linux-2.4.19/Documentation/Configure.help	Wed Aug 14 11:49:48 2002
-+++ linux-2.4.19-dm-test1/Documentation/Configure.help	Wed Nov 13 19:04:25 2002
++++ linux-2.4.19-dm/Documentation/Configure.help	Thu Nov 14 13:50:32 2002
 @@ -1775,6 +1775,20 @@
    want), say M here and read <file:Documentation/modules.txt>.  The
    module will be called lvm-mod.o.
@@ -22,9 +22,9 @@ diff -ruN linux-2.4.19/Documentation/Configure.help linux-2.4.19-dm-test1/Docume
  Multiple devices driver support (RAID and LVM)
  CONFIG_MD
    Support multiple physical spindles through a single logical device.
-diff -ruN linux-2.4.19/MAINTAINERS linux-2.4.19-dm-test1/MAINTAINERS
+diff -ruN linux-2.4.19/MAINTAINERS linux-2.4.19-dm/MAINTAINERS
 --- linux-2.4.19/MAINTAINERS	Wed Aug 14 11:49:45 2002
-+++ linux-2.4.19-dm-test1/MAINTAINERS	Wed Nov 13 19:04:25 2002
++++ linux-2.4.19-dm/MAINTAINERS	Thu Nov 14 13:50:32 2002
 @@ -426,6 +426,13 @@
  W:	http://www.debian.org/~dz/i8k/
  S:	Maintained
@@ -39,9 +39,132 @@ diff -ruN linux-2.4.19/MAINTAINERS linux-2.4.19-dm-test1/MAINTAINERS
  DEVICE NUMBER REGISTRY
  P:	H. Peter Anvin
  M:	hpa@zytor.com
-diff -ruN linux-2.4.19/drivers/md/Config.in linux-2.4.19-dm-test1/drivers/md/Config.in
+diff -ruN linux-2.4.19/arch/mips64/kernel/ioctl32.c linux-2.4.19-dm/arch/mips64/kernel/ioctl32.c
+--- linux-2.4.19/arch/mips64/kernel/ioctl32.c	Wed Aug 14 11:50:16 2002
++++ linux-2.4.19-dm/arch/mips64/kernel/ioctl32.c	Thu Nov 14 13:57:06 2002
+@@ -27,6 +27,7 @@
+ #include <linux/auto_fs.h>
+ #include <linux/ext2_fs.h>
+ #include <linux/raid/md_u.h>
++#include <linux/dm-ioctl.h>
+ #include <scsi/scsi.h>
+ #undef __KERNEL__		/* This file was born to be ugly ...  */
+ #include <scsi/scsi_ioctl.h>
+@@ -816,6 +817,20 @@
+ 	IOCTL32_DEFAULT(STOP_ARRAY_RO),
+ 	IOCTL32_DEFAULT(RESTART_ARRAY_RW),
+ #endif /* CONFIG_MD */
++
++#if defined(CONFIG_BLK_DEV_DM) || defined(CONFIG_BLK_DEV_DM_MODULE)
++	IOCTL32_DEFAULT(DM_VERSION),
++	IOCTL32_DEFAULT(DM_REMOVE_ALL),
++	IOCTL32_DEFAULT(DM_DEV_CREATE),
++	IOCTL32_DEFAULT(DM_DEV_REMOVE),
++	IOCTL32_DEFAULT(DM_DEV_RELOAD),
++	IOCTL32_DEFAULT(DM_DEV_SUSPEND),
++	IOCTL32_DEFAULT(DM_DEV_RENAME),
++	IOCTL32_DEFAULT(DM_DEV_DEPS),
++	IOCTL32_DEFAULT(DM_DEV_STATUS),
++	IOCTL32_DEFAULT(DM_TARGET_STATUS),
++	IOCTL32_DEFAULT(DM_TARGET_WAIT),
++#endif /* CONFIG_BLK_DEV_DM */
+ 
+ 	IOCTL32_DEFAULT(MTIOCTOP),			/* mtio.h ioctls  */
+ 	IOCTL32_HANDLER(MTIOCGET32, mt_ioctl_trans),
+diff -ruN linux-2.4.19/arch/ppc64/kernel/ioctl32.c linux-2.4.19-dm/arch/ppc64/kernel/ioctl32.c
+--- linux-2.4.19/arch/ppc64/kernel/ioctl32.c	Wed Aug 14 11:50:22 2002
++++ linux-2.4.19-dm/arch/ppc64/kernel/ioctl32.c	Thu Nov 14 13:57:07 2002
+@@ -65,6 +65,7 @@
+ #if defined(CONFIG_BLK_DEV_LVM) || defined(CONFIG_BLK_DEV_LVM_MODULE)
+ #include <linux/lvm.h>
+ #endif /* LVM */
++#include <linux/dm-ioctl.h>
+ 
+ #include <scsi/scsi.h>
+ /* Ugly hack. */
+@@ -4187,6 +4188,18 @@
+ COMPATIBLE_IOCTL(NBD_PRINT_DEBUG),
+ COMPATIBLE_IOCTL(NBD_SET_SIZE_BLOCKS),
+ COMPATIBLE_IOCTL(NBD_DISCONNECT),
++/* device-mapper */
++COMPATIBLE_IOCTL(DM_VERSION),
++COMPATIBLE_IOCTL(DM_REMOVE_ALL),
++COMPATIBLE_IOCTL(DM_DEV_CREATE),
++COMPATIBLE_IOCTL(DM_DEV_REMOVE),
++COMPATIBLE_IOCTL(DM_DEV_RELOAD),
++COMPATIBLE_IOCTL(DM_DEV_SUSPEND),
++COMPATIBLE_IOCTL(DM_DEV_RENAME),
++COMPATIBLE_IOCTL(DM_DEV_DEPS),
++COMPATIBLE_IOCTL(DM_DEV_STATUS),
++COMPATIBLE_IOCTL(DM_TARGET_STATUS),
++COMPATIBLE_IOCTL(DM_TARGET_WAIT),
+ /* Remove *PRIVATE in 2.5 */
+ COMPATIBLE_IOCTL(SIOCDEVPRIVATE),
+ COMPATIBLE_IOCTL(SIOCDEVPRIVATE+1),
+diff -ruN linux-2.4.19/arch/s390x/kernel/ioctl32.c linux-2.4.19-dm/arch/s390x/kernel/ioctl32.c
+--- linux-2.4.19/arch/s390x/kernel/ioctl32.c	Wed Aug 14 11:50:27 2002
++++ linux-2.4.19-dm/arch/s390x/kernel/ioctl32.c	Thu Nov 14 13:57:07 2002
+@@ -25,6 +25,7 @@
+ #include <linux/ext2_fs.h>
+ #include <linux/hdreg.h>
+ #include <linux/if_bonding.h>
++#include <linux/dm-ioctl.h>
+ #include <asm/types.h>
+ #include <asm/uaccess.h>
+ #include <asm/dasd.h>
+@@ -507,6 +508,18 @@
+ 	IOCTL32_DEFAULT(VT_UNLOCKSWITCH),
+ 
+ 	IOCTL32_DEFAULT(SIOCGSTAMP),
++
++	IOCTL32_DEFAULT(DM_VERSION),
++	IOCTL32_DEFAULT(DM_REMOVE_ALL),
++	IOCTL32_DEFAULT(DM_DEV_CREATE),
++	IOCTL32_DEFAULT(DM_DEV_REMOVE),
++	IOCTL32_DEFAULT(DM_DEV_RELOAD),
++	IOCTL32_DEFAULT(DM_DEV_SUSPEND),
++	IOCTL32_DEFAULT(DM_DEV_RENAME),
++	IOCTL32_DEFAULT(DM_DEV_DEPS),
++	IOCTL32_DEFAULT(DM_DEV_STATUS),
++	IOCTL32_DEFAULT(DM_TARGET_STATUS),
++	IOCTL32_DEFAULT(DM_TARGET_WAIT),
+ 
+ 	IOCTL32_HANDLER(SIOCGIFNAME, dev_ifname32),
+ 	IOCTL32_HANDLER(SIOCGIFCONF, dev_ifconf),
+diff -ruN linux-2.4.19/arch/sparc64/kernel/ioctl32.c linux-2.4.19-dm/arch/sparc64/kernel/ioctl32.c
+--- linux-2.4.19/arch/sparc64/kernel/ioctl32.c	Wed Aug 14 11:50:32 2002
++++ linux-2.4.19-dm/arch/sparc64/kernel/ioctl32.c	Thu Nov 14 13:57:07 2002
+@@ -54,6 +54,7 @@
+ #if defined(CONFIG_BLK_DEV_LVM) || defined(CONFIG_BLK_DEV_LVM_MODULE)
+ #include <linux/lvm.h>
+ #endif /* LVM */
++#include <linux/dm-ioctl.h>
+ 
+ #include <scsi/scsi.h>
+ /* Ugly hack. */
+@@ -4608,6 +4609,19 @@
+ COMPATIBLE_IOCTL(NBD_PRINT_DEBUG)
+ COMPATIBLE_IOCTL(NBD_SET_SIZE_BLOCKS)
+ COMPATIBLE_IOCTL(NBD_DISCONNECT)
++/* device-mapper */
++COMPATIBLE_IOCTL(DM_VERSION)
++COMPATIBLE_IOCTL(DM_REMOVE_ALL)
++COMPATIBLE_IOCTL(DM_DEV_CREATE)
++COMPATIBLE_IOCTL(DM_DEV_REMOVE)
++COMPATIBLE_IOCTL(DM_DEV_RELOAD)
++COMPATIBLE_IOCTL(DM_DEV_SUSPEND)
++COMPATIBLE_IOCTL(DM_DEV_RENAME)
++COMPATIBLE_IOCTL(DM_DEV_DEPS)
++COMPATIBLE_IOCTL(DM_DEV_STATUS)
++COMPATIBLE_IOCTL(DM_TARGET_STATUS)
++COMPATIBLE_IOCTL(DM_TARGET_WAIT)
++
+ /* And these ioctls need translation */
+ HANDLE_IOCTL(MEMREADOOB32, mtd_rw_oob)
+ HANDLE_IOCTL(MEMWRITEOOB32, mtd_rw_oob)
+diff -ruN linux-2.4.19/drivers/md/Config.in linux-2.4.19-dm/drivers/md/Config.in
 --- linux-2.4.19/drivers/md/Config.in	Wed Aug 14 11:51:06 2002
-+++ linux-2.4.19-dm-test1/drivers/md/Config.in	Wed Nov 13 19:04:25 2002
++++ linux-2.4.19-dm/drivers/md/Config.in	Thu Nov 14 13:50:32 2002
 @@ -14,5 +14,8 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -51,9 +174,9 @@ diff -ruN linux-2.4.19/drivers/md/Config.in linux-2.4.19-dm-test1/drivers/md/Con
 +fi
  
  endmenu
-diff -ruN linux-2.4.19/drivers/md/Makefile linux-2.4.19-dm-test1/drivers/md/Makefile
+diff -ruN linux-2.4.19/drivers/md/Makefile linux-2.4.19-dm/drivers/md/Makefile
 --- linux-2.4.19/drivers/md/Makefile	Wed Aug 14 11:51:06 2002
-+++ linux-2.4.19-dm-test1/drivers/md/Makefile	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/Makefile	Thu Nov 14 13:50:32 2002
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -81,9 +204,9 @@ diff -ruN linux-2.4.19/drivers/md/Makefile linux-2.4.19-dm-test1/drivers/md/Make
 +
 +dm-mod.o: $(dm-mod-objs)
 +	$(LD) -r -o $@ $(dm-mod-objs)
-diff -ruN linux-2.4.19/drivers/md/dm-exception-store.c linux-2.4.19-dm-test1/drivers/md/dm-exception-store.c
+diff -ruN linux-2.4.19/drivers/md/dm-exception-store.c linux-2.4.19-dm/drivers/md/dm-exception-store.c
 --- linux-2.4.19/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/dm-exception-store.c	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/dm-exception-store.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,701 @@
 +/*
 + * dm-snapshot.c
@@ -786,9 +909,9 @@ diff -ruN linux-2.4.19/drivers/md/dm-exception-store.c linux-2.4.19-dm-test1/dri
 +
 +	return 0;
 +}
-diff -ruN linux-2.4.19/drivers/md/dm-ioctl.c linux-2.4.19-dm-test1/drivers/md/dm-ioctl.c
+diff -ruN linux-2.4.19/drivers/md/dm-ioctl.c linux-2.4.19-dm/drivers/md/dm-ioctl.c
 --- linux-2.4.19/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/dm-ioctl.c	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/dm-ioctl.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,1139 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -1929,9 +2052,9 @@ diff -ruN linux-2.4.19/drivers/md/dm-ioctl.c linux-2.4.19-dm-test1/drivers/md/dm
 +	if (misc_deregister(&_dm_misc) < 0)
 +		DMERR("misc_deregister failed for control device");
 +}
-diff -ruN linux-2.4.19/drivers/md/dm-linear.c linux-2.4.19-dm-test1/drivers/md/dm-linear.c
+diff -ruN linux-2.4.19/drivers/md/dm-linear.c linux-2.4.19-dm/drivers/md/dm-linear.c
 --- linux-2.4.19/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/dm-linear.c	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/dm-linear.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,120 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -2053,9 +2176,9 @@ diff -ruN linux-2.4.19/drivers/md/dm-linear.c linux-2.4.19-dm-test1/drivers/md/d
 +	if (r < 0)
 +		DMERR("linear: unregister failed %d", r);
 +}
-diff -ruN linux-2.4.19/drivers/md/dm-snapshot.c linux-2.4.19-dm-test1/drivers/md/dm-snapshot.c
+diff -ruN linux-2.4.19/drivers/md/dm-snapshot.c linux-2.4.19-dm/drivers/md/dm-snapshot.c
 --- linux-2.4.19/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/dm-snapshot.c	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/dm-snapshot.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,1169 @@
 +/*
 + * dm-snapshot.c
@@ -3226,9 +3349,9 @@ diff -ruN linux-2.4.19/drivers/md/dm-snapshot.c linux-2.4.19-dm-test1/drivers/md
 + * c-file-style: "linux"
 + * End:
 + */
-diff -ruN linux-2.4.19/drivers/md/dm-snapshot.h linux-2.4.19-dm-test1/drivers/md/dm-snapshot.h
+diff -ruN linux-2.4.19/drivers/md/dm-snapshot.h linux-2.4.19-dm/drivers/md/dm-snapshot.h
 --- linux-2.4.19/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/dm-snapshot.h	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/dm-snapshot.h	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,147 @@
 +/*
 + * dm-snapshot.c
@@ -3377,9 +3500,9 @@ diff -ruN linux-2.4.19/drivers/md/dm-snapshot.h linux-2.4.19-dm-test1/drivers/md
 +}
 +
 +#endif
-diff -ruN linux-2.4.19/drivers/md/dm-stripe.c linux-2.4.19-dm-test1/drivers/md/dm-stripe.c
+diff -ruN linux-2.4.19/drivers/md/dm-stripe.c linux-2.4.19-dm/drivers/md/dm-stripe.c
 --- linux-2.4.19/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/dm-stripe.c	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/dm-stripe.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,256 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -3637,9 +3760,9 @@ diff -ruN linux-2.4.19/drivers/md/dm-stripe.c linux-2.4.19-dm-test1/drivers/md/d
 +
 +	return;
 +}
-diff -ruN linux-2.4.19/drivers/md/dm-table.c linux-2.4.19-dm-test1/drivers/md/dm-table.c
+diff -ruN linux-2.4.19/drivers/md/dm-table.c linux-2.4.19-dm/drivers/md/dm-table.c
 --- linux-2.4.19/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/dm-table.c	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/dm-table.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,665 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -4306,9 +4429,9 @@ diff -ruN linux-2.4.19/drivers/md/dm-table.c linux-2.4.19-dm-test1/drivers/md/dm
 +EXPORT_SYMBOL(dm_get_device);
 +EXPORT_SYMBOL(dm_put_device);
 +EXPORT_SYMBOL(dm_table_event);
-diff -ruN linux-2.4.19/drivers/md/dm-target.c linux-2.4.19-dm-test1/drivers/md/dm-target.c
+diff -ruN linux-2.4.19/drivers/md/dm-target.c linux-2.4.19-dm/drivers/md/dm-target.c
 --- linux-2.4.19/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/dm-target.c	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/dm-target.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,190 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
@@ -4500,9 +4623,9 @@ diff -ruN linux-2.4.19/drivers/md/dm-target.c linux-2.4.19-dm-test1/drivers/md/d
 +
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
-diff -ruN linux-2.4.19/drivers/md/dm.c linux-2.4.19-dm-test1/drivers/md/dm.c
+diff -ruN linux-2.4.19/drivers/md/dm.c linux-2.4.19-dm/drivers/md/dm.c
 --- linux-2.4.19/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/dm.c	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/dm.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,868 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -5372,9 +5495,9 @@ diff -ruN linux-2.4.19/drivers/md/dm.c linux-2.4.19-dm-test1/drivers/md/dm.c
 +MODULE_DESCRIPTION(DM_NAME " driver");
 +MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 +MODULE_LICENSE("GPL");
-diff -ruN linux-2.4.19/drivers/md/dm.h linux-2.4.19-dm-test1/drivers/md/dm.h
+diff -ruN linux-2.4.19/drivers/md/dm.h linux-2.4.19-dm/drivers/md/dm.h
 --- linux-2.4.19/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/dm.h	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/dm.h	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,150 @@
 +/*
 + * Internal header file for device mapper
@@ -5526,9 +5649,9 @@ diff -ruN linux-2.4.19/drivers/md/dm.h linux-2.4.19-dm-test1/drivers/md/dm.h
 +void dm_snapshot_exit(void);
 +
 +#endif
-diff -ruN linux-2.4.19/drivers/md/kcopyd.c linux-2.4.19-dm-test1/drivers/md/kcopyd.c
+diff -ruN linux-2.4.19/drivers/md/kcopyd.c linux-2.4.19-dm/drivers/md/kcopyd.c
 --- linux-2.4.19/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/kcopyd.c	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/kcopyd.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,843 @@
 +/*
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
@@ -6373,9 +6496,9 @@ diff -ruN linux-2.4.19/drivers/md/kcopyd.c linux-2.4.19-dm-test1/drivers/md/kcop
 +
 +	up(&_client_count_sem);
 +}
-diff -ruN linux-2.4.19/drivers/md/kcopyd.h linux-2.4.19-dm-test1/drivers/md/kcopyd.h
+diff -ruN linux-2.4.19/drivers/md/kcopyd.h linux-2.4.19-dm/drivers/md/kcopyd.h
 --- linux-2.4.19/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/drivers/md/kcopyd.h	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/drivers/md/kcopyd.h	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,101 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
@@ -6478,9 +6601,9 @@ diff -ruN linux-2.4.19/drivers/md/kcopyd.h linux-2.4.19-dm-test1/drivers/md/kcop
 +void kcopyd_dec_client_count(void);
 +
 +#endif
-diff -ruN linux-2.4.19/fs/buffer.c linux-2.4.19-dm-test1/fs/buffer.c
+diff -ruN linux-2.4.19/fs/buffer.c linux-2.4.19-dm/fs/buffer.c
 --- linux-2.4.19/fs/buffer.c	Wed Aug 14 11:51:40 2002
-+++ linux-2.4.19-dm-test1/fs/buffer.c	Wed Nov 13 19:34:39 2002
++++ linux-2.4.19-dm/fs/buffer.c	Thu Nov 14 13:50:32 2002
 @@ -587,9 +587,10 @@
  void buffer_insert_inode_queue(struct buffer_head *bh, struct inode *inode)
  {
@@ -6552,9 +6675,9 @@ diff -ruN linux-2.4.19/fs/buffer.c linux-2.4.19-dm-test1/fs/buffer.c
  		BUG();
  	if (nr_unused_buffer_heads >= MAX_UNUSED_BUFFERS) {
  		kmem_cache_free(bh_cachep, bh);
-diff -ruN linux-2.4.19/fs/jbd/journal.c linux-2.4.19-dm-test1/fs/jbd/journal.c
+diff -ruN linux-2.4.19/fs/jbd/journal.c linux-2.4.19-dm/fs/jbd/journal.c
 --- linux-2.4.19/fs/jbd/journal.c	Wed Aug 14 11:51:43 2002
-+++ linux-2.4.19-dm-test1/fs/jbd/journal.c	Wed Nov 13 19:04:21 2002
++++ linux-2.4.19-dm/fs/jbd/journal.c	Thu Nov 14 13:50:32 2002
 @@ -1625,8 +1625,8 @@
   *
   * Whenever a buffer has an attached journal_head, its ->b_state:BH_JBD bit
@@ -6605,9 +6728,9 @@ diff -ruN linux-2.4.19/fs/jbd/journal.c linux-2.4.19-dm-test1/fs/jbd/journal.c
  			jh->b_bh = NULL;	/* debug, really */
  			clear_bit(BH_JBD, &bh->b_state);
  			__brelse(bh);
-diff -ruN linux-2.4.19/include/linux/device-mapper.h linux-2.4.19-dm-test1/include/linux/device-mapper.h
+diff -ruN linux-2.4.19/include/linux/device-mapper.h linux-2.4.19-dm/include/linux/device-mapper.h
 --- linux-2.4.19/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/include/linux/device-mapper.h	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/include/linux/device-mapper.h	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,85 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6694,9 +6817,9 @@ diff -ruN linux-2.4.19/include/linux/device-mapper.h linux-2.4.19-dm-test1/inclu
 +#endif				/* __KERNEL__ */
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
-diff -ruN linux-2.4.19/include/linux/dm-ioctl.h linux-2.4.19-dm-test1/include/linux/dm-ioctl.h
+diff -ruN linux-2.4.19/include/linux/dm-ioctl.h linux-2.4.19-dm/include/linux/dm-ioctl.h
 --- linux-2.4.19/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/include/linux/dm-ioctl.h	Wed Nov 13 19:21:59 2002
++++ linux-2.4.19-dm/include/linux/dm-ioctl.h	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,149 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6847,9 +6970,9 @@ diff -ruN linux-2.4.19/include/linux/dm-ioctl.h linux-2.4.19-dm-test1/include/li
 +#define DM_STATUS_TABLE_FLAG	0x00000010
 +
 +#endif				/* _LINUX_DM_IOCTL_H */
-diff -ruN linux-2.4.19/include/linux/fs.h linux-2.4.19-dm-test1/include/linux/fs.h
+diff -ruN linux-2.4.19/include/linux/fs.h linux-2.4.19-dm/include/linux/fs.h
 --- linux-2.4.19/include/linux/fs.h	Wed Aug 14 11:52:06 2002
-+++ linux-2.4.19-dm-test1/include/linux/fs.h	Wed Nov 13 19:34:39 2002
++++ linux-2.4.19-dm/include/linux/fs.h	Thu Nov 14 13:50:32 2002
 @@ -219,6 +219,7 @@
  	BH_Wait_IO,	/* 1 if we should write out this buffer */
  	BH_Launder,	/* 1 if we can throttle on this buffer */
@@ -6893,9 +7016,9 @@ diff -ruN linux-2.4.19/include/linux/fs.h linux-2.4.19-dm-test1/include/linux/fs
  }
  
  /*
-diff -ruN linux-2.4.19/include/linux/jbd.h linux-2.4.19-dm-test1/include/linux/jbd.h
+diff -ruN linux-2.4.19/include/linux/jbd.h linux-2.4.19-dm/include/linux/jbd.h
 --- linux-2.4.19/include/linux/jbd.h	Wed Aug 14 11:52:07 2002
-+++ linux-2.4.19-dm-test1/include/linux/jbd.h	Wed Nov 13 19:04:21 2002
++++ linux-2.4.19-dm/include/linux/jbd.h	Thu Nov 14 13:50:32 2002
 @@ -246,7 +246,7 @@
  
  static inline struct journal_head *bh2jh(struct buffer_head *bh)
@@ -6905,9 +7028,9 @@ diff -ruN linux-2.4.19/include/linux/jbd.h linux-2.4.19-dm-test1/include/linux/j
  }
  
  struct jbd_revoke_table_s;
-diff -ruN linux-2.4.19/include/linux/mempool.h linux-2.4.19-dm-test1/include/linux/mempool.h
+diff -ruN linux-2.4.19/include/linux/mempool.h linux-2.4.19-dm/include/linux/mempool.h
 --- linux-2.4.19/include/linux/mempool.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/include/linux/mempool.h	Wed Nov 13 19:04:55 2002
++++ linux-2.4.19-dm/include/linux/mempool.h	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,41 @@
 +/*
 + * memory buffer pool support
@@ -6950,9 +7073,9 @@ diff -ruN linux-2.4.19/include/linux/mempool.h linux-2.4.19-dm-test1/include/lin
 +void mempool_free_slab(void *element, void *pool_data);
 +
 +#endif /* _LINUX_MEMPOOL_H */
-diff -ruN linux-2.4.19/include/linux/vmalloc.h linux-2.4.19-dm-test1/include/linux/vmalloc.h
+diff -ruN linux-2.4.19/include/linux/vmalloc.h linux-2.4.19-dm/include/linux/vmalloc.h
 --- linux-2.4.19/include/linux/vmalloc.h	Wed Aug 14 11:52:09 2002
-+++ linux-2.4.19-dm-test1/include/linux/vmalloc.h	Wed Nov 13 19:05:03 2002
++++ linux-2.4.19-dm/include/linux/vmalloc.h	Thu Nov 14 13:50:32 2002
 @@ -25,6 +25,7 @@
  extern void vmfree_area_pages(unsigned long address, unsigned long size);
  extern int vmalloc_area_pages(unsigned long address, unsigned long size,
@@ -6961,9 +7084,9 @@ diff -ruN linux-2.4.19/include/linux/vmalloc.h linux-2.4.19-dm-test1/include/lin
  
  /*
   *	Allocate any pages
-diff -ruN linux-2.4.19/kernel/ksyms.c linux-2.4.19-dm-test1/kernel/ksyms.c
+diff -ruN linux-2.4.19/kernel/ksyms.c linux-2.4.19-dm/kernel/ksyms.c
 --- linux-2.4.19/kernel/ksyms.c	Wed Aug 14 11:52:12 2002
-+++ linux-2.4.19-dm-test1/kernel/ksyms.c	Wed Nov 13 19:34:39 2002
++++ linux-2.4.19-dm/kernel/ksyms.c	Thu Nov 14 13:50:32 2002
 @@ -109,6 +109,7 @@
  EXPORT_SYMBOL(vfree);
  EXPORT_SYMBOL(__vmalloc);
@@ -6972,9 +7095,9 @@ diff -ruN linux-2.4.19/kernel/ksyms.c linux-2.4.19-dm-test1/kernel/ksyms.c
  EXPORT_SYMBOL(mem_map);
  EXPORT_SYMBOL(remap_page_range);
  EXPORT_SYMBOL(max_mapnr);
-diff -ruN linux-2.4.19/mm/Makefile linux-2.4.19-dm-test1/mm/Makefile
+diff -ruN linux-2.4.19/mm/Makefile linux-2.4.19-dm/mm/Makefile
 --- linux-2.4.19/mm/Makefile	Wed Aug 14 11:52:12 2002
-+++ linux-2.4.19-dm-test1/mm/Makefile	Wed Nov 13 19:04:52 2002
++++ linux-2.4.19-dm/mm/Makefile	Thu Nov 14 13:50:32 2002
 @@ -9,12 +9,12 @@
  
  O_TARGET := mm.o
@@ -6990,9 +7113,9 @@ diff -ruN linux-2.4.19/mm/Makefile linux-2.4.19-dm-test1/mm/Makefile
  
  obj-$(CONFIG_HIGHMEM) += highmem.o
  
-diff -ruN linux-2.4.19/mm/mempool.c linux-2.4.19-dm-test1/mm/mempool.c
+diff -ruN linux-2.4.19/mm/mempool.c linux-2.4.19-dm/mm/mempool.c
 --- linux-2.4.19/mm/mempool.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm-test1/mm/mempool.c	Wed Nov 13 19:04:55 2002
++++ linux-2.4.19-dm/mm/mempool.c	Thu Nov 14 13:50:32 2002
 @@ -0,0 +1,295 @@
 +/*
 + *  linux/mm/mempool.c
@@ -7289,9 +7412,9 @@ diff -ruN linux-2.4.19/mm/mempool.c linux-2.4.19-dm-test1/mm/mempool.c
 +EXPORT_SYMBOL(mempool_alloc_slab);
 +EXPORT_SYMBOL(mempool_free_slab);
 +
-diff -ruN linux-2.4.19/mm/vmalloc.c linux-2.4.19-dm-test1/mm/vmalloc.c
+diff -ruN linux-2.4.19/mm/vmalloc.c linux-2.4.19-dm/mm/vmalloc.c
 --- linux-2.4.19/mm/vmalloc.c	Wed Aug 14 11:52:13 2002
-+++ linux-2.4.19-dm-test1/mm/vmalloc.c	Wed Nov 13 19:05:03 2002
++++ linux-2.4.19-dm/mm/vmalloc.c	Thu Nov 14 13:50:32 2002
 @@ -321,3 +321,22 @@
  	read_unlock(&vmlist_lock);
  	return buf - buf_start;

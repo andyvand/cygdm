@@ -39,7 +39,7 @@ diff -Nru a/drivers/md/lvm.c b/drivers/md/lvm.c
 diff -Nru a/fs/buffer.c b/fs/buffer.c
 --- a/fs/buffer.c	Wed May 22 10:43:49 2002
 +++ b/fs/buffer.c	Wed May 22 10:43:49 2002
-@@ -362,6 +362,34 @@
+@@ -362,6 +362,38 @@
  	fsync_dev(dev);
  }
  
@@ -60,7 +60,11 @@ diff -Nru a/fs/buffer.c b/fs/buffer.c
 +	** after these are done
 +	*/
 +	sync_inodes(dev);
++#ifdef DQUOT_SYNC_DEV
++	DQUOT_SYNC_DEV(dev);
++#else
 +	DQUOT_SYNC(dev);
++#endif
 +	/* if inodes or quotas could be dirtied during the
 +	** sync_supers_lockfs call, the FS is responsible for getting
 +	** them on disk, without deadlocking against the lock
