@@ -27,26 +27,29 @@
    persistent snapshots.
    There is no backward or forward compatibility implemented, snapshots
    with different disk versions than the kernel will not be usable. It is
-   expected that "lvcreate" will blank out the start of the COW device before
-   calling the snapshot constructor. */
+   expected that "lvcreate" will blank out the start of the COW device
+   before calling the snapshot constructor. */
 #define SNAPSHOT_DISK_VERSION 1
 
 /* Metadata format: (please keep this up-to-date!)
-   Persistent snapshots have a 1 block header (see below for structure) at the
-   very start of the device. The COW metadata starts at .start_of_exceptions.
+   Persistent snapshots have a 1 block header (see below for structure) at
+   the very start of the device. The COW metadata starts at
+   .start_of_exceptions.
 
-   COW metadata is stored in blocks that are "extent-size" sectors long as an
-   array of disk_exception structures in Little-Endian format.
-   The last entry in this array has rsector_new set to 0 (this cannot be a legal
-   redirection as the header is here) and if rsector_org has a value it is the
-   sector number of the next COW metadata sector on the disk. if rsector_org is
-   also zero then this is the end of the COW metadata.
+   COW metadata is stored in blocks that are "extent-size" sectors long as
+   an array of disk_exception structures in Little-Endian format.
+   The last entry in this array has rsector_new set to 0 (this cannot be a
+   legal redirection as the header is here) and if rsector_org has a value
+   it is the sector number of the next COW metadata sector on the disk. if
+   rsector_org is also zero then this is the end of the COW metadata.
 
-   The metadata is written in hardblocksize lumps rather than in units of extents
-   for efficiency so don't expect a whole sector to be zeroed out at any time.
+   The metadata is written in hardblocksize lumps rather than in units of
+   extents for efficiency so don't expect a whole extent to be zeroed out
+   at any time.
 
-   Non-persistent snapshots simple have redirected blocks stored (in chunk_size
-   sectors) from hard block 1 to avoid inadvertantly creating a bad header.
+   Non-persistent snapshots simple have redirected blocks stored
+   (in chunk_size sectors) from hard block 1 to avoid inadvertantly
+   creating a bad header.
 */
 
 /*
@@ -64,7 +67,8 @@ struct snapshot_c {
 	unsigned long next_free_sector; /* Number of the next free sector for COW/data */
 	unsigned long start_of_exceptions;    /* Where the metadata starts */
 	unsigned long current_metadata_sector;/* Where we are currently writing the metadata */
-	int    current_metadata_entry; /* Pointer into disk_cow array */
+	int    current_metadata_entry; /* Index into disk_cow array */
+	int    current_metadata_number;/* Index into mythical extent array */
 	int    highest_metadata_entry; /* Number of metadata entries in the disk_cow array */
 	int    md_entries_per_block;   /* Number of metadata entries per hard disk block */
  	struct kiobuf *iobuf;          /* kiobuf for doing I/O to chunks and cows */
@@ -102,7 +106,7 @@ struct snap_disk_header {
 	uint32_t full;
 };
 
-static int write_metadata(struct snapshot_c *lc, int entry);
+static int write_metadata(struct snapshot_c *lc);
 
 /* Size of the hash table for origin volumes. If we make this
    the size of the minors list then it should be nearly perfect */
@@ -371,12 +375,14 @@ static int add_exception(struct snapshot_c *sc, unsigned long org, unsigned long
 		int i = sc->current_metadata_entry++;
 		unsigned long next_md_block = sc->current_metadata_sector;
 
+		sc->current_metadata_number++;
+
 		/* Update copy of disk COW */
-		sc->disk_cow[i % sc->md_entries_per_block].rsector_org = cpu_to_le64(org);
-		sc->disk_cow[i % sc->md_entries_per_block].rsector_new = cpu_to_le64(new);
+		sc->disk_cow[i].rsector_org = cpu_to_le64(org);
+		sc->disk_cow[i].rsector_new = cpu_to_le64(new);
 
 		/* Have we filled this extent ? */
-		if (sc->current_metadata_entry >= sc->highest_metadata_entry) {
+		if (sc->current_metadata_number >= sc->highest_metadata_entry) {
 			/* Fill in pointer to next metadata extent */
 			i++;
 			sc->current_metadata_entry++;
@@ -384,27 +390,33 @@ static int add_exception(struct snapshot_c *sc, unsigned long org, unsigned long
 			next_md_block = sc->next_free_sector;
 			sc->next_free_sector += sc->extent_size;
 
-			sc->disk_cow[i % sc->md_entries_per_block].rsector_org = cpu_to_le64(next_md_block);
-			sc->disk_cow[i % sc->md_entries_per_block].rsector_new = 0;
+			sc->disk_cow[i].rsector_org = cpu_to_le64(next_md_block);
+			sc->disk_cow[i].rsector_new = 0;
 		}
 
 		/* Commit to disk */
-		if (write_metadata(sc, i)) {
+		if (write_metadata(sc)) {
 			sc->full = 1; /* Failed. don't try again */
 			return -1;
 		}
 
 		/* Write a new (empty) metadata block if we are at the end of an existing
 		   block so that read_metadata finds a terminating zero entry */
-		if ( (sc->current_metadata_entry % sc->md_entries_per_block) == 0) {
+		if (sc->current_metadata_entry == sc->md_entries_per_block) {
 			memset(sc->disk_cow, 0, PAGE_SIZE);
 			sc->current_metadata_sector = next_md_block;
 
-			/* If this is also the end of an extent then go backto the start */
-			if (sc->current_metadata_entry >= sc->highest_metadata_entry)
-				sc->current_metadata_entry = 0;
+			/* If this is also the end of an extent then go back to the start */
+			if (sc->current_metadata_number >= sc->highest_metadata_entry) {
+				sc->current_metadata_number = 0;
+			}
+			else {
+				int blocksize = get_hardsect_size(sc->cow_dev->dev);
+				sc->current_metadata_sector += blocksize/SECTOR_SIZE;
+			}
 
-			if (write_metadata(sc, sc->current_metadata_entry) != 0) {
+			sc->current_metadata_entry = 0;
+			if (write_metadata(sc) != 0) {
 				sc->full = 1;
 				return -1;
 			}
@@ -490,7 +502,8 @@ static int read_metadata(struct snapshot_c *lc)
 
 	lc->persistent = 1;
 	lc->current_metadata_sector = last_sector;
-	lc->current_metadata_entry = i;
+	lc->current_metadata_entry  = i % lc->md_entries_per_block;
+	lc->current_metadata_number = i;
 	lc->next_free_sector = first_free_sector;
 
 	/* Copy last block into cow_iobuf */
@@ -613,13 +626,13 @@ static int write_header(struct snapshot_c *lc)
 
 
 /* Write the latest COW metadata block */
-static int write_metadata(struct snapshot_c *lc, int entry)
+static int write_metadata(struct snapshot_c *lc)
 {
 	unsigned long start_sector;
 	int blocksize = get_hardsect_size(lc->cow_dev->dev);
 	int writesize = blocksize/SECTOR_SIZE;
 
-	start_sector = lc->current_metadata_sector + (entry)/lc->md_entries_per_block*writesize;
+	start_sector = lc->current_metadata_sector;
 
 	if (write_blocks(lc->cow_iobuf, lc->cow_dev->dev, start_sector, writesize) != 0) {
 		DMERR("Error writing COW block\n");
@@ -665,7 +678,8 @@ static int setup_persistent_snapshot(struct snapshot_c *lc, int blocksize, void 
 		lc->start_of_exceptions = lc->next_free_sector;
 		lc->next_free_sector += lc->extent_size;
 		lc->current_metadata_sector = lc->start_of_exceptions;
-		lc->current_metadata_entry = 0;
+		lc->current_metadata_entry  = 0;
+		lc->current_metadata_number = 0;
 
 		*context = "Unable to write snapshot header";
 		if (write_header(lc) != 0) {
@@ -675,7 +689,7 @@ static int setup_persistent_snapshot(struct snapshot_c *lc, int blocksize, void 
 		}
 
 		/* Write a blank metadata block to the device */
-		if (write_metadata(lc, 0) != 0) {
+		if (write_metadata(lc) != 0) {
 			DMERR("Error writing initial COW table to snapshot volume %s\n",
 			      kdevname(lc->cow_dev->dev));
 			goto free_ret;
@@ -1077,7 +1091,8 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 				if (snap->need_cow) {
 
 					/* Write snapshot block */
-					if (write_blocks(read_snap->iobuf, snap->cow_dev->dev, snap->next_free_sector, snap->chunk_size)) {
+					if (write_blocks(read_snap->iobuf, snap->cow_dev->dev, snap->next_free_sector,
+							 snap->chunk_size)) {
 						DMERR("remap: write blocks to %s failed\n", kdevname(snap->cow_dev->dev));
 						snap->need_cow = 0;
 						continue;
@@ -1087,7 +1102,8 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 					reloc_sector = snap->next_free_sector;
 					snap->next_free_sector += snap->chunk_size;
 					if (add_exception(snap, read_start, reloc_sector)) {
-						DMERR("Snapshot %s error adding new exception entry\n", kdevname(snap->cow_dev->dev));
+						DMERR("Snapshot %s error adding new exception entry\n",
+						      kdevname(snap->cow_dev->dev));
 						/* Error here - treat it as full */
 						snap->full = 1;
 						write_header(snap);
