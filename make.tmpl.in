@@ -143,12 +143,12 @@ $(TARGETS): $(OBJECTS)
 		[ -s $@ ] || $(RM) $@
 
 clean: $(SUBDIRS.clean)
-	$(RM) $(OBJECTS) $(TARGETS) $(SOURCES:%.c=%.d)
+	$(RM) $(OBJECTS) $(TARGETS) $(CLEAN_TARGETS) $(SOURCES:%.c=%.d)
 
 distclean: $(SUBDIRS.distclean)
-	$(RM) $(OBJECTS) $(TARGETS) $(SOURCES:%.c=%.d)
-	$(RM) config.cache config.log config.status
-	$(RM) Makefile make.tmpl
+	$(RM) $(OBJECTS) $(TARGETS) $(CLEAN_TARGETS) $(SOURCES:%.c=%.d) \
+	      config.cache config.log config.status \
+	      Makefile make.tmpl core
 
 ifneq ($(MAKECMDGOALS),clean)
   ifneq ($(MAKECMDGOALS),distclean)

@@ -34,13 +34,13 @@ ifeq ("@missingkernel@", "yes")
 	$(LN_S) ../../kernel/ioctl/dm-ioctl.h linux
 endif
 
-install:
-
-clean:
-
 distclean:
 	find . -maxdepth 2 -type l -exec $(RM) \{\} \;
 	$(RM) Makefile .include_symlinks .symlinks_created
 
-.PHONY: install clean distclean all
+clean:
+
+install:
+
+.PHONY: clean distclean all install
 

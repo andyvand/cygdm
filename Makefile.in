@@ -21,7 +21,9 @@ top_srcdir = @top_srcdir@
 VPATH = @srcdir@
 kernelvsn = @kernelvsn@
 
-SUBDIRS = include lib dmsetup man
+SUBDIRS = include man
+
+SUBDIRS += lib dmsetup
 
 ifeq ($(MAKECMDGOALS),distclean)
   SUBDIRS += kernel
