@@ -293,8 +293,8 @@ static int copy_kthread(void *unused)
 				down_write(&free_list_lock);
 				list_add(&work_item->list, &free_list);
 				up_write(&free_list_lock);
+			        wake_up_interruptible(&freelist_waitq);
 			}
-			wake_up_interruptible(&freelist_waitq);
 
 			/* Get the work lock again for the top of the while loop */
 			down_write(&work_list_lock);
