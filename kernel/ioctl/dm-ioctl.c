@@ -207,7 +207,11 @@ static void __info(struct mapped_device *md, struct dm_ioctl *param)
 		param->flags |= DM_READONLY_FLAG;
 
 	strncpy(param->name, md->name, sizeof(param->name));
-	param->name[sizeof(param->name) - 1] = '\0';
+
+	if (md->uuid)
+		strncpy(param->uuid, md->uuid, sizeof(param->uuid));
+	else
+		param->uuid[0] = '\0';
 
 	param->open_count = md->use_count;
 	param->dev = kdev_t_to_nr(md->dev);
@@ -317,7 +321,7 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
 		MINOR(to_kdev_t(param->dev)) : -1;
 
-	r = dm_create(param->name, minor, t);
+	r = dm_create(param->name, param->uuid, minor, t);
 	if (r) {
 		dm_table_destroy(t);
 		return r;
@@ -441,40 +445,41 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 {
 	int r;
 	struct dm_ioctl *p;
+	uint cmd = _IOC_NR(command);
 
-	if (command == DM_VERSION)
+	if (cmd == DM_VERSION_CMD)
 		return version((struct dm_ioctl *) a);
 
 	r = copy_params((struct dm_ioctl *) a, &p);
 	if (r)
 		return r;
 
-	switch (command) {
-	case DM_CREATE:
+	switch (cmd) {
+	case DM_CREATE_CMD:
 		r = create(p, (struct dm_ioctl *) a);
 		break;
 
-	case DM_REMOVE:
+	case DM_REMOVE_CMD:
 		r = remove(p);
 		break;
 
-	case DM_SUSPEND:
+	case DM_SUSPEND_CMD:
 		r = suspend(p);
 		break;
 
-	case DM_RELOAD:
+	case DM_RELOAD_CMD:
 		r = reload(p);
 		break;
 
-	case DM_INFO:
+	case DM_INFO_CMD:
 		r = info(p, (struct dm_ioctl *) a);
 		break;
 
-	case DM_DEPS:
+	case DM_DEPS_CMD:
 		r = dep(p, (struct dm_ioctl *) a);
 		break;
 
-	case DM_RENAME:
+	case DM_RENAME_CMD:
 		r = rename(p);
 		break;
 

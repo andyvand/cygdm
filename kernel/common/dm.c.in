@@ -729,7 +729,8 @@ static int any_old_dev(struct mapped_device *md)
  * Allocate and initialise a blank device.  Device is returned
  * with a write lock held.
  */
-static struct mapped_device *alloc_dev(int minor)
+static struct mapped_device *alloc_dev(const char *name, const char *uuid,
+				       int minor)
 {
 	struct mapped_device *md = kmalloc(sizeof(*md), GFP_KERNEL);
 
@@ -751,8 +752,21 @@ static struct mapped_device *alloc_dev(int minor)
 
 	_devs[minor] = md;
 	md->dev = MKDEV(_major, minor);
-	md->name[0] = '\0';
 	md->suspended = 0;
+
+	strncpy(md->name, name, sizeof(md->name) - 1);
+	md->name[sizeof(md->name) - 1] = '\0';
+
+	if (*uuid) {
+		if (!(md->uuid = kmalloc(strnlen(uuid, DM_UUID_LEN), 
+					 GFP_KERNEL))) {
+			DMWARN("unable to allocate uuid - out of memory.");
+			return NULL;
+		}
+
+		strncpy(md->uuid, uuid, DM_UUID_LEN - 1);
+		md->uuid[DM_UUID_LEN] = '\0';
+	}
 
 	init_waitqueue_head(&md->wait);
 
@@ -855,7 +869,8 @@ static int check_name(const char *name)
 /*
  * Constructor for a new device
  */
-int dm_create(const char *name, int minor, struct dm_table *table)
+int dm_create(const char *name, const char *uuid,
+	      int minor, struct dm_table *table)
 {
 	int r;
 	struct mapped_device *md;
@@ -866,15 +881,12 @@ int dm_create(const char *name, int minor, struct dm_table *table)
 		return -EINVAL;
 	}
 
-	md = alloc_dev(minor);
+	md = alloc_dev(name, uuid, minor);
 	if (!md) {
 		spin_unlock(&_create_lock);
 		return -ENXIO;
 	}
 	minor = MINOR(md->dev);
-
-	/* FIXME: move name allocation into alloc_dev */
-	strcpy(md->name, name);
 
 	r = __register_device(md);
 	if (r)
@@ -888,8 +900,11 @@ int dm_create(const char *name, int minor, struct dm_table *table)
 	spin_unlock(&_create_lock);
 	return 0;
 
-      err:
+ err:
 	_devs[minor] = NULL;
+	if (md->uuid)
+		kfree(md->uuid);
+
 	kfree(md);
 	dm_put_w(minor);
 	spin_unlock(&_create_lock);
@@ -948,6 +963,10 @@ int dm_destroy(struct mapped_device *md)
 	minor = MINOR(md->dev);
 	_devs[minor] = NULL;
 	__unbind(md);
+
+	if (md->uuid)
+		kfree(md->uuid);
+
 	kfree(md);
 
 	return 0;

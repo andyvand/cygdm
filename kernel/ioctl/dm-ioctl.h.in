@@ -33,6 +33,9 @@ struct dm_ioctl {
 	unsigned int flags;		/* in/out */
 
 	__kernel_dev_t dev;		/* in/out */
+
+	char uuid[DM_UUID_LEN];	        /* unique identifier for
+					 * the block device */
 };
 
 /*
@@ -57,7 +60,7 @@ struct dm_target_spec {
 
 
 /*
- * Used to retrieve target dependencies
+ * Used to retrieve the target dependencies.
  */
 struct dm_target_deps {
 	unsigned int count;
@@ -68,14 +71,25 @@ struct dm_target_deps {
 
 #define DM_IOCTL 0xfd
 
-#define	DM_CREATE _IOWR(DM_IOCTL, 0x00, struct dm_ioctl)
-#define	DM_REMOVE _IOW(DM_IOCTL, 0x01, struct dm_ioctl)
-#define	DM_SUSPEND _IOW(DM_IOCTL, 0x02, struct dm_ioctl)
-#define	DM_RELOAD _IOW(DM_IOCTL, 0x03, struct dm_ioctl)
-#define DM_INFO _IOWR(DM_IOCTL, 0x04, struct dm_ioctl)
-#define DM_RENAME _IOW(DM_IOCTL, 0x05, struct dm_ioctl)
-#define DM_VERSION _IOR(DM_IOCTL, 0x06, struct dm_ioctl)
-#define DM_DEPS _IOR(DM_IOCTL, 0x07, struct dm_ioctl)
+enum {
+	DM_CREATE_CMD=0,
+	DM_REMOVE_CMD,
+	DM_SUSPEND_CMD,
+	DM_RELOAD_CMD,
+	DM_INFO_CMD,
+	DM_RENAME_CMD,
+	DM_VERSION_CMD,
+	DM_DEPS_CMD
+};
+
+#define DM_CREATE	_IOWR(DM_IOCTL, DM_CREATE_CMD, struct dm_ioctl)
+#define DM_REMOVE	_IOW(DM_IOCTL, DM_REMOVE_CMD, struct dm_ioctl)
+#define DM_SUSPEND	_IOW(DM_IOCTL, DM_SUSPEND_CMD, struct dm_ioctl)
+#define DM_RELOAD	_IOW(DM_IOCTL, DM_RELOAD_CMD, struct dm_ioctl)
+#define DM_INFO		_IOWR(DM_IOCTL, DM_INFO_CMD, struct dm_ioctl)
+#define DM_RENAME	_IOW(DM_IOCTL, DM_RENAME_CMD, struct dm_ioctl)
+#define DM_VERSION	_IOR(DM_IOCTL, DM_VERSION_CMD, struct dm_ioctl)
+#define DM_DEPS		_IOR(DM_IOCTL, DM_DEPS_CMD, struct dm_ioctl)
 
 #define DM_IOCTL_VERSION @DM_IOCTL_VERSION@
 #define DM_DRIVER_VERSION @DM_DRIVER_VERSION@

@@ -85,6 +85,7 @@ struct dm_table {
 struct mapped_device {
 	kdev_t dev;
 	char name[DM_NAME_LEN];
+	char *uuid;
 
 	int use_count;
 	int suspended;
@@ -126,7 +127,8 @@ void dm_put_w(int minor);
 /*
  * Call with no lock.
  */
-int dm_create(const char *name, int minor, struct dm_table *table);
+int dm_create(const char *name, const char *uuid,
+	      int minor, struct dm_table *table);
 int dm_set_name(const char *oldname, const char *newname);
 
 /*
