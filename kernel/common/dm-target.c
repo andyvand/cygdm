@@ -225,7 +225,6 @@ static struct target_type error_target = {
 	dtr:	io_err_dtr,
 	map:	io_err_map,
 	status:	NULL,
-	wait:	NULL,
 };
 
 int dm_target_init(void)

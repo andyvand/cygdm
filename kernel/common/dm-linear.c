@@ -104,7 +104,6 @@ static struct target_type linear_target = {
 	dtr:	linear_dtr,
 	map:	linear_map,
 	status:	linear_status,
-	wait:	NULL,		/* No wait function */
 };
 
 int __init dm_linear_init(void)

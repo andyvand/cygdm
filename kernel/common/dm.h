@@ -77,6 +77,12 @@ struct dm_table {
 
 	/* a list of devices used by this table */
 	struct list_head devices;
+
+	/*
+	 * A waitqueue for processes waiting for something
+	 * interesting to happen to this table.
+	 */
+	wait_queue_head_t eventq;
 };
 
 /*
@@ -159,11 +165,6 @@ int dm_swap_table(struct mapped_device *md, struct dm_table *t);
 int dm_suspend(struct mapped_device *md);
 int dm_resume(struct mapped_device *md);
 
-/*
- * Event notification
- */
-void dm_notify(void *target);
-
 /* dm-table.c */
 int dm_table_create(struct dm_table **result);
 void dm_table_destroy(struct dm_table *t);
@@ -171,6 +172,11 @@ void dm_table_destroy(struct dm_table *t);
 int dm_table_add_target(struct dm_table *t, offset_t highs,
 			struct target_type *type, void *private);
 int dm_table_complete(struct dm_table *t);
+
+/*
+ * Event handling
+ */
+void dm_table_event(struct dm_table *t);
 
 /* Snapshots */
 int dm_snapshot_init(void);
@@ -198,6 +204,12 @@ static inline int get_child(int n, int k)
 static inline offset_t *get_node(struct dm_table *t, int l, int n)
 {
 	return t->index[l] + (n * KEYS_PER_NODE);
+}
+
+static inline int array_too_big(unsigned long fixed, unsigned long obj,
+				unsigned long num)
+{
+	return (num > (ULONG_MAX - fixed) / obj);
 }
 
 /*

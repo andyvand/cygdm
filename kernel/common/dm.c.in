@@ -273,6 +273,7 @@ static struct {
 	xx(dm_linear)
 	xx(dm_stripe)
 	xx(dm_snapshot)
+	xx(dm_mirror)
 	xx(dm_interface)
 #undef xx
 };
@@ -354,17 +355,18 @@ static int dm_blk_ioctl(struct inode *inode, struct file *file,
 		return -ENXIO;
 
 	switch (command) {
-	case BLKSSZGET:
-	case BLKBSZGET:
-	case BLKROGET:
 	case BLKROSET:
+	case BLKROGET:
 	case BLKRASET:
 	case BLKRAGET:
 	case BLKFLSBUF:
-#if 0				/* Future stacking block device */
-	case BLKELVSET:
+	case BLKSSZGET:
+		//case BLKRRPART: /* Re-read partition tables */
+		//case BLKPG:
 	case BLKELVGET:
-#endif
+	case BLKELVSET:
+	case BLKBSZGET:
+	case BLKBSZSET:
 		return blk_ioctl(inode->i_rdev, command, a);
 		break;
 
@@ -376,19 +378,19 @@ static int dm_blk_ioctl(struct inode *inode, struct file *file,
 
 	case BLKGETSIZE64:
 		size = VOLUME_SIZE(minor);
-		if (put_user((u64) size, (u64 *) a))
+		if (put_user((u64) ((u64) size) << 9, (u64 *) a))
 			return -EFAULT;
 		break;
 
 	case BLKRRPART:
-		return -EINVAL;
+		return -ENOTTY;
 
 	case LV_BMAP:
 		return dm_user_bmap(inode, (struct lv_bmap *) a);
 
 	default:
 		DMWARN("unknown block ioctl 0x%x", command);
-		return -EINVAL;
+		return -ENOTTY;
 	}
 
 	return 0;
@@ -557,12 +559,26 @@ static int request(request_queue_t * q, int rw, struct buffer_head *bh)
 {
 	struct mapped_device *md;
 	int r, minor = MINOR(bh->b_rdev);
+	unsigned int block_size = _blksize_size[minor];
 
 	md = dm_get_r(minor);
 	if (!md) {
 		buffer_IO_error(bh);
 		return 0;
 	}
+
+	/*
+	 * Sanity checks.
+	 */
+	if (bh->b_size > block_size)
+		DMERR("request is larger than block size "
+		      "b_size (%d), block size (%d)",
+		      bh->b_size, block_size);
+
+	if (bh->b_rsector & ((bh->b_size >> 9) - 1))
+		DMERR("misaligned block requested logical "
+		      "sector (%lu), b_size (%d)",
+		      bh->b_rsector, bh->b_size);
 
 	/*
 	 * If we're suspended we have to queue

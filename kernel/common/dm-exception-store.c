@@ -586,8 +586,8 @@ int dm_create_persistent(struct exception_store *store, uint32_t chunk_size)
 	 */
 	ps->callback_count = 0;
 	atomic_set(&ps->pending_count, 0);
-	ps->callbacks = vmalloc(sizeof(*ps->callbacks) *
-				ps->exceptions_per_area);
+	ps->callbacks = vcalloc(ps->exceptions_per_area,
+				sizeof(*ps->callbacks));
 
 	if (!ps->callbacks)
 		goto bad;

@@ -77,13 +77,14 @@ static int alloc_targets(struct dm_table *t, int num)
 	offset_t *n_highs;
 	struct target *n_targets;
 	int n = t->num_targets;
-	unsigned long size = (sizeof(struct target) + sizeof(offset_t)) * num;
 
-	n_highs = (offset_t *) vmalloc(size);
+	/*
+	 * Allocate both the target array and offset array at once.
+	 */
+	n_highs = (offset_t *) vcalloc(sizeof(struct target) + sizeof(offset_t),
+				       num);
 	if (!n_highs)
 		return -ENOMEM;
-
-	memset(n_highs, 0, size);
 
 	n_targets = (struct target *) (n_highs + num);
 
@@ -105,7 +106,7 @@ static int alloc_targets(struct dm_table *t, int num)
 
 int dm_table_create(struct dm_table **result)
 {
-	struct dm_table *t = kmalloc(sizeof(struct dm_table), GFP_NOIO);
+	struct dm_table *t = kmalloc(sizeof(*t), GFP_NOIO);
 
 	if (!t)
 		return -ENOMEM;
@@ -120,6 +121,7 @@ int dm_table_create(struct dm_table **result)
 		return -ENOMEM;
 	}
 
+	init_waitqueue_head(&t->eventq);
 	*result = t;
 	return 0;
 }
@@ -138,6 +140,9 @@ static void free_devices(struct list_head *devices)
 void dm_table_destroy(struct dm_table *t)
 {
 	int i;
+
+	/* destroying the table counts as an event */
+	dm_table_event(t);
 
 	/* free the indexes (see dm_table_complete) */
 	if (t->depth >= 2)
@@ -279,7 +284,7 @@ static int check_device_area(kdev_t dev, offset_t start, offset_t len)
 }
 
 /*
- * Add a device to the list, or just increment the usage count 
+ * Add a device to the list, or just increment the usage count
  * if it's already present.
  */
 int dm_table_get_device(struct dm_table *t, const char *path,
@@ -371,7 +376,7 @@ static int setup_indexes(struct dm_table *t)
 		total += t->counts[i];
 	}
 
-	indexes = (offset_t *) vmalloc((unsigned long) NODE_SIZE * total);
+	indexes = (offset_t *) vcalloc(total, (unsigned long) NODE_SIZE);
 	if (!indexes)
 		return -ENOMEM;
 
@@ -406,5 +411,11 @@ int dm_table_complete(struct dm_table *t)
 	return r;
 }
 
+void dm_table_event(struct dm_table *t)
+{
+	wake_up_interruptible(&t->eventq);
+}
+
 EXPORT_SYMBOL(dm_table_get_device);
 EXPORT_SYMBOL(dm_table_put_device);
+EXPORT_SYMBOL(dm_table_event);

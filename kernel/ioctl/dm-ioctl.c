@@ -316,43 +316,6 @@ static int __status(struct mapped_device *md, struct dm_ioctl *param,
 	return 0;
 }
 
-static int __wait(struct mapped_device *md, struct dm_ioctl *param)
-{
-	int waiting = 0;
-	int i;
-	DECLARE_WAITQUEUE(waitq, current);
-
-	/* Get all the target info */
-	for (i = 0; i < md->map->num_targets; i++) {
-		struct target_type *tt = md->map->targets[i].type;
-
-		set_task_state(current, TASK_INTERRUPTIBLE);
-
-		/* Add ourself to the target's wait queue */
-		if (tt->wait &&
-		    (!tt->wait(md->map->targets[i].private, &waitq, 1)))
-			    waiting = 1;
-	}
-
-	/* If at least one call succeeded then sleep */
-	if (waiting) {
-		schedule();
-
-		for (i = 0; i < md->map->num_targets; i++) {
-			struct target_type *tt = md->map->targets[i].type;
-
-			/* And remove ourself */
-			if (tt->wait)
-				tt->wait(md->map->targets[i].private,
-					 &waitq, 0);
-		}
-	}
-
-	set_task_state(current, TASK_RUNNING);
-
-	return 0;
-}
-
 /*
  * Return the status of a device as a text string for each
  * target.
@@ -405,6 +368,7 @@ static int get_status(struct dm_ioctl *param, struct dm_ioctl *user)
 static int wait_device_event(struct dm_ioctl *param, struct dm_ioctl *user)
 {
 	struct mapped_device *md;
+	DECLARE_WAITQUEUE(wq, current);
 
 	md = dm_get_name_r(lookup_name(param), lookup_type(param));
 	if (!md)
@@ -418,11 +382,15 @@ static int wait_device_event(struct dm_ioctl *param, struct dm_ioctl *user)
 	__info(md, param);
 
 	/*
-	 * Wait for anotification event
+	 * Wait for a notification event
 	 */
-	__wait(md, param);
+	set_current_state(TASK_INTERRUPTIBLE);
+	add_wait_queue(&md->map->eventq, &wq);
 
 	dm_put_r(md);
+
+	schedule();
+	set_current_state(TASK_RUNNING);
 
       out:
 	return results_to_user(user, param, NULL, 0);
@@ -483,6 +451,11 @@ static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
 	 * Allocate a kernel space version of the dm_target_status
 	 * struct.
 	 */
+	if (array_too_big(sizeof(*deps), sizeof(*deps->dev), count)) {
+		dm_put_r(md);
+		return -ENOMEM;
+	}
+
 	len = sizeof(*deps) + (sizeof(*deps->dev) * count);
 	deps = kmalloc(len, GFP_KERNEL);
 	if (!deps) {
@@ -705,7 +678,7 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 
 	default:
 		DMWARN("dm_ctl_ioctl: unknown command 0x%x", command);
-		r = -EINVAL;
+		r = -ENOTTY;
 	}
 
 	free_params(param);

@@ -31,8 +31,13 @@ struct stripe_c {
 
 static inline struct stripe_c *alloc_context(int stripes)
 {
-	size_t len = sizeof(struct stripe_c) +
-	    (sizeof(struct stripe) * stripes);
+	size_t len;
+
+	if (array_too_big(sizeof(struct stripe_c), sizeof(struct stripe),
+			  stripes))
+		return NULL;
+
+	len = sizeof(struct stripe_c) + (sizeof(struct stripe) * stripes);
 
 	return kmalloc(len, GFP_KERNEL);
 }
@@ -207,7 +212,6 @@ static struct target_type stripe_target = {
 	dtr:	stripe_dtr,
 	map:	stripe_map,
 	status:	stripe_status,
-	wait:	NULL,
 };
 
 int __init dm_stripe_init(void)

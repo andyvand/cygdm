@@ -14,7 +14,10 @@
 /* kcopyd priority of mirror operations */
 #define MIRROR_COPY_PRIORITY 5
 
-static kmem_cache_t *bh_cachep;
+/*
+ * The percentage increment we will wake up users at
+ */
+#define WAKE_UP_PERCENT 5
 
 /*
  * Mirror: maps a mirror range of a device.
@@ -29,74 +32,53 @@ struct mirror_c {
 	unsigned long frompos;
 	unsigned long topos;
 
+	unsigned int chunksize;
 	unsigned long got_to;
-	unsigned long size;	/* for %age calculation */
+	unsigned long size;
 	struct rw_semaphore lock;
 	struct buffer_head *bhstring;
-	wait_queue_head_t waitq;
+
+	struct dm_table *table;
+
+	int last_percent;
+
 	int error;
 };
 
 /* Called when a duplicating I/O has finished */
-static void mirror_end_io(struct buffer_head *bh, int uptodate)
+static void mirror_callback(int err, void *context)
 {
-	struct mirror_c *lc = (struct mirror_c *) bh->b_private;
+	struct mirror_c *lc = (struct mirror_c *) context;
 
 	/* Flag error if it failed */
-	if (!uptodate) {
+	if (err) {
 		DMERR("Mirror copy to %s failed", kdevname(lc->todev->dev));
 		lc->error = 1;
-		wake_up_interruptible(&lc->waitq);
+		dm_table_event(lc->table);
 	}
-	kmem_cache_free(bh_cachep, bh);
-	wake_up_interruptible(&lc->waitq);
 }
 
 static void mirror_bh(struct mirror_c *mc, struct buffer_head *bh)
 {
-	struct buffer_head *dbh = kmem_cache_alloc(bh_cachep, GFP_NOIO);
-	if (dbh) {
-		*dbh = *bh;
-		dbh->b_rdev = mc->todev->dev;
-		dbh->b_rsector = bh->b_rsector - mc->from_delta + mc->to_delta;
-		dbh->b_end_io = mirror_end_io;
-		dbh->b_private = mc;
+	struct kcopyd_region dest;
 
-		generic_make_request(WRITE, dbh);
-	} else {
-		DMERR("kmem_cache_alloc failed for mirror bh");
-		mc->error = 1;
-	}
+	dest.dev = mc->todev->dev;
+	dest.sector = bh->b_rsector - mc->from_delta + mc->to_delta;
+	dest.count = bh->b_size / 512;
+	kcopyd_write_pages(&dest, 1, &bh->b_page,
+			   ((long) bh->b_data -
+			    (long) page_address(bh->b_page)) / 512,
+			   mirror_callback, mc);
 }
 
 /* Called when the copy I/O has finished */
-static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
+static void copy_callback(int err, void *context)
 {
 	struct mirror_c *lc = (struct mirror_c *) context;
 	struct buffer_head *bh;
 
-	if (reason == COPY_CB_FAILED_READ || reason == COPY_CB_FAILED_WRITE) {
-		DMERR("Mirror block %s on %s failed, sector %ld",
-		      reason == COPY_CB_FAILED_READ ? "read" : "write",
-		      reason == COPY_CB_FAILED_READ ?
-		      kdevname(lc->fromdev->dev) :
-		      kdevname(lc->todev->dev), arg);
-		lc->error = 1;
-		return;
-	}
-
-	if (reason == COPY_CB_COMPLETE) {
-		/* Say we've finished */
-		dm_notify(lc);	/* TODO: interface ?? */
-	}
-
-	if (reason == COPY_CB_PROGRESS) {
-		dm_notify(lc);	/* TODO: interface ?? */
-	}
-
 	/* Submit, and mirror any pending BHs */
 	down_write(&lc->lock);
-	lc->got_to = arg;
 
 	bh = lc->bhstring;
 	lc->bhstring = NULL;
@@ -105,14 +87,51 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 	while (bh) {
 		struct buffer_head *nextbh = bh->b_reqnext;
 		bh->b_reqnext = NULL;
-		generic_make_request(WRITE, bh);
 		mirror_bh(lc, bh);
+		generic_make_request(WRITE, bh);
 		bh = nextbh;
+	}
+
+	if (err) {
+		DMERR("Mirror block IO failed");	/* More detail to follow... */
+		lc->error = 1;
+		return;
+	}
+	if (lc->got_to + lc->chunksize < lc->size) {
+		int pc = (lc->got_to - lc->from_delta) * 100 / lc->size;
+		struct kcopyd_region src, dest;
+
+		/* Wake up any listeners if we've reached a milestone percentage */
+		if (pc >= lc->last_percent + WAKE_UP_PERCENT) {
+			dm_table_event(lc->table);
+			lc->last_percent = pc - pc % WAKE_UP_PERCENT;
+		}
+
+		/* Do next chunk */
+		lc->got_to += lc->chunksize;
+
+		src.dev = lc->fromdev->dev;
+		src.sector = lc->frompos + lc->got_to;
+		src.count = min((unsigned long) lc->chunksize, 
+				lc->size - lc->got_to);
+
+		dest.dev = lc->todev->dev;
+		dest.sector = lc->topos + lc->got_to;
+		dest.count = src.count;
+
+		if (kcopyd_copy(&src, &dest, copy_callback, lc)) {
+			lc->error = 1;
+			return;
+		}
+	} else {
+		/* Finished */
+		dm_table_event(lc->table);
+		lc->got_to = lc->size;
 	}
 }
 
 /*
- * Construct a mirror mapping: <dev_path1> <offset> <dev_path2> <offset> <throttle> [<priority>]
+ * Construct a mirror mapping: <dev_path1> <offset> <dev_path2> <offset> <chunk-size> [<priority>]
  */
 static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 		      int argc, char **argv, void **context)
@@ -121,7 +140,7 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	unsigned long offset1, offset2;
 	char *value;
 	int priority = MIRROR_COPY_PRIORITY;
-	int throttle;
+	int chunksize;
 	struct kcopyd_region src, dest;
 
 	if (argc <= 4) {
@@ -159,9 +178,9 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad_put;
 	}
 
-	throttle = simple_strtoul(argv[4], &value, 10);
-	if (value == NULL) {
-		*context = "Invalid throttle value";
+	chunksize = simple_strtoul(argv[4], &value, 10);
+	if (value == NULL || chunksize == 16) {
+		*context = "Invalid chunk size value";
 		goto bad_put;
 	}
 
@@ -180,23 +199,29 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	lc->error = 0;
 	lc->bhstring = NULL;
 	lc->size = l - offset1;
-	init_waitqueue_head(&lc->waitq);
+	lc->last_percent = 0;
+	lc->got_to = 0;
+	lc->chunksize = chunksize;
+	lc->table = t;
 	init_rwsem(&lc->lock);
 	*context = lc;
 
 	/* Tell kcopyd to do the biz */
 	src.dev = lc->fromdev->dev;
 	src.sector = offset1;
-	src.count = l - offset1;
+	src.count = min((unsigned long) chunksize, lc->size);
 
 	dest.dev = lc->todev->dev;
 	dest.sector = offset2;
-	dest.count = l - offset1;
+	dest.count = src.count;
 
-	if (kcopyd_copy(&src, &dest, priority, 0, copy_callback, lc)) {
+	kcopyd_inc_client_count();
+
+	if (kcopyd_copy(&src, &dest, copy_callback, lc)) {
 		DMERR("block copy call failed");
 		dm_table_put_device(t, lc->fromdev);
 		dm_table_put_device(t, lc->todev);
+		kcopyd_dec_client_count();
 		goto bad;
 	}
 	return 0;
@@ -213,12 +238,10 @@ static void mirror_dtr(struct dm_table *t, void *c)
 {
 	struct mirror_c *lc = (struct mirror_c *) c;
 
-	/* Just in case anyone is still waiting... */
-	wake_up_interruptible(&lc->waitq);
-
 	dm_table_put_device(t, lc->fromdev);
 	dm_table_put_device(t, lc->todev);
 	kfree(c);
+	kcopyd_dec_client_count();
 }
 
 static int mirror_map(struct buffer_head *bh, int rw, void *context)
@@ -233,11 +256,11 @@ static int mirror_map(struct buffer_head *bh, int rw, void *context)
 
 		/*
 		 * If this area is in flight then save it until it's
-		 * commited to the mirror disk and then submit it and
+		 * committed to the mirror disk and then submit it and
 		 * its mirror.
 		 */
 		if (bh->b_rsector > lc->got_to &&
-		    bh->b_rsector <= lc->got_to + KIO_MAX_SECTORS) {
+		    bh->b_rsector <= lc->got_to + lc->chunksize) {
 			bh->b_reqnext = lc->bhstring;
 			lc->bhstring = bh;
 			up_write(&lc->lock);
@@ -249,7 +272,6 @@ static int mirror_map(struct buffer_head *bh, int rw, void *context)
 		 * it to the mirror device
 		 */
 		if (bh->b_rsector < lc->got_to) {
-			/* Schedule copy of I/O to other target */
 			mirror_bh(lc, bh);
 		}
 		up_write(&lc->lock);
@@ -257,8 +279,8 @@ static int mirror_map(struct buffer_head *bh, int rw, void *context)
 	return 1;
 }
 
-static int mirror_sts(status_type_t sts_type, char *result, int maxlen,
-		      void *context)
+static int mirror_status(status_type_t sts_type, char *result, int maxlen,
+			 void *context)
 {
 	struct mirror_c *mc = (struct mirror_c *) context;
 
@@ -275,21 +297,9 @@ static int mirror_sts(status_type_t sts_type, char *result, int maxlen,
 	case STATUSTYPE_TABLE:
 		snprintf(result, maxlen, "%s %ld %s %ld %d",
 			 kdevname(mc->fromdev->dev), mc->frompos,
-			 kdevname(mc->todev->dev), mc->topos, 0);
+			 kdevname(mc->todev->dev), mc->topos, mc->chunksize);
 		break;
 	}
-	return 0;
-}
-
-static int mirror_wait(wait_queue_t *wq, void *context)
-{
-	struct mirror_c *mc = (struct mirror_c *) context;
-
-	if (add)
-		add_wait_queue(&mc->waitq, wq);
-	else
-		remove_wait_queue(&mc->waitq, wq);
-
 	return 0;
 }
 
@@ -299,25 +309,16 @@ static struct target_type mirror_target = {
 	ctr:	mirror_ctr,
 	dtr:	mirror_dtr,
 	map:	mirror_map,
-	sts:	mirror_sts,
-	wait:	mirror_wait,
+	status:	mirror_status,
 };
 
 int __init dm_mirror_init(void)
 {
 	int r;
 
-	bh_cachep = kmem_cache_create("dm-mirror",
-				      sizeof(struct buffer_head),
-				      __alignof__(struct buffer_head),
-				      0, NULL, NULL);
-	if (!bh_cachep)
-		return -1;
-
 	r = dm_register_target(&mirror_target);
 	if (r < 0) {
 		DMERR("mirror: register failed %d", r);
-		kmem_cache_destroy(bh_cachep);
 	}
 	return r;
 }
@@ -328,8 +329,6 @@ void dm_mirror_exit(void)
 
 	if (r < 0)
 		DMERR("mirror: unregister failed %d", r);
-
-	kmem_cache_destroy(bh_cachep);
 }
 
 /*

@@ -92,18 +92,6 @@ struct origin {
 };
 
 /*
- * Useful macro for running the store functions.  Use
- * store_int_fn if you want the return value.
- */
-#define store_fn(snap, fn, args...) \
-    if ((snap)->store. ## fn) \
-        (snap)->store. ## fn ( &(snap)->store , ## args )
-
-#define store_int_fn(snap, fn, args...) \
-    (((snap)->store. ## fn) ? \
-        ((snap)->store. ## fn ( &(snap)->store , ## args )) : 0)
-
-/*
  * Size of the hash table for origin volumes. If we make this
  * the size of the minors list then it should be nearly perfect
  */
@@ -220,7 +208,7 @@ static int init_exception_table(struct exception_table *et, uint32_t size)
 	int i;
 
 	et->hash_mask = size - 1;
-	et->table = vmalloc(sizeof(struct list_head) * (size));
+	et->table = vcalloc(size, sizeof(struct list_head));
 	if (!et->table)
 		return -ENOMEM;
 
@@ -501,7 +489,6 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad_putdev;
 	}
 
-	init_waitqueue_head(&s->waitq);
 	s->chunk_size = chunk_size;
 	s->chunk_mask = chunk_size - 1;
 	s->type = *persistent;
@@ -512,6 +499,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 
 	s->valid = 1;
 	s->last_percent = 0;
+	s->table = t;
 	init_rwsem(&s->lock);
 
 	/* Allocate hash table for COW data */
@@ -560,7 +548,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	return 0;
 
       bad_free2:
-	store_fn(s, destroy);
+	s->store.destroy(&s->store);
 
       bad_free1:
 	exit_exception_table(&s->pending, pending_cache);
@@ -581,7 +569,7 @@ static void snapshot_dtr(struct dm_table *t, void *context)
 {
 	struct dm_snapshot *s = (struct dm_snapshot *) context;
 
-	wake_up_interruptible(&s->waitq);
+	dm_table_event(s->table);
 
 	unregister_snapshot(s);
 
@@ -589,7 +577,7 @@ static void snapshot_dtr(struct dm_table *t, void *context)
 	exit_exception_table(&s->complete, exception_cache);
 
 	/* Deallocate memory used */
-	store_fn(s, destroy);
+	s->store.destroy(&s->store);
 
 	dm_table_put_device(t, s->origin);
 	dm_table_put_device(t, s->cow);
@@ -651,7 +639,7 @@ static void pending_complete(struct pending_exception *pe, int success)
 		if (!e) {
 			printk("Unable to allocate exception.");
 			down_write(&s->lock);
-			store_fn(s, drop_snapshot);
+			s->store.drop_snapshot(&s->store);
 			s->valid = 0;
 			up_write(&s->lock);
 			return;
@@ -678,7 +666,7 @@ static void pending_complete(struct pending_exception *pe, int success)
 			int pc = s->store.percent_full(&s->store);
 
 			if (pc >= s->last_percent + WAKE_UP_PERCENT) {
-				wake_up_interruptible(&s->waitq);
+				dm_table_event(s->table);
 				s->last_percent = pc - pc % WAKE_UP_PERCENT;
 			}
 		}
@@ -688,14 +676,14 @@ static void pending_complete(struct pending_exception *pe, int success)
 		DMERR("Error reading/writing snapshot");
 
 		down_write(&s->lock);
-		store_fn(s, drop_snapshot);
+		s->store.drop_snapshot(&s->store);
 		s->valid = 0;
 		remove_exception(&pe->e);
 		up_write(&s->lock);
 
 		error_buffers(pe->snapshot_bhs);
 
-		wake_up_interruptible(&s->waitq);
+		dm_table_event(s->table);
 		DMDEBUG("Exception failed.");
 	}
 
@@ -788,7 +776,7 @@ static struct pending_exception *find_pending_exception(struct dm_snapshot *s,
 		pe->snap = s;
 		pe->started = 0;
 
-		if (store_int_fn(s, prepare_exception, &pe->e)) {
+		if (s->store.prepare_exception(&s->store, &pe->e)) {
 			free_pending_exception(pe);
 			s->valid = 0;
 			return NULL;
@@ -840,7 +828,7 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 			pe = find_pending_exception(s, bh);
 
 			if (!pe) {
-				store_fn(s, drop_snapshot);
+				s->store.drop_snapshot(&s->store);
 				s->valid = 0;
 			}
 
@@ -923,7 +911,7 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 		if (!e) {
 			pe = find_pending_exception(snap, bh);
 			if (!pe) {
-				store_fn(snap, drop_snapshot);
+				snap->store.drop_snapshot(&snap->store);
 				snap->valid = 0;
 
 			} else {
@@ -991,18 +979,6 @@ static int snapshot_status(status_type_t type, char *result,
 			 snap->type, snap->chunk_size);
 		break;
 	}
-
-	return 0;
-}
-
-static int snapshot_wait(void *context, wait_queue_t *wq, int add)
-{
-	struct dm_snapshot *snap = (struct dm_snapshot *) context;
-
-	if (add)
-		add_wait_queue(&snap->waitq, wq);
-	else
-		remove_wait_queue(&snap->waitq, wq);
 
 	return 0;
 }
@@ -1097,7 +1073,6 @@ static struct target_type origin_target = {
 	dtr:	origin_dtr,
 	map:	origin_map,
 	status:	origin_status,
-	wait:	NULL,
 	err:	NULL
 };
 
@@ -1108,7 +1083,6 @@ static struct target_type snapshot_target = {
 	dtr:	snapshot_dtr,
 	map:	snapshot_map,
 	status:	snapshot_status,
-	wait:	snapshot_wait,
 	err:	NULL
 };
 

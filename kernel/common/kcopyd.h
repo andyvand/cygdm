@@ -87,6 +87,10 @@ typedef void (*kcopyd_notify_fn)(int err, void *context);
 int kcopyd_copy(struct kcopyd_region *from, struct kcopyd_region *to,
 		kcopyd_notify_fn fn, void *context);
 
+int kcopyd_write_pages(struct kcopyd_region *to, int nr_pages,
+		       struct page **pages, int offset, kcopyd_notify_fn fn,
+		       void *context);
+
 /*
  * We only want kcopyd to reserve resources if someone is
  * actually using it.

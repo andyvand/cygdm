@@ -131,18 +131,13 @@ static int init_buffers(void)
 {
 	int i;
 	struct buffer_head *buffers;
-	size_t s = sizeof(struct buffer_head) * NUM_BUFFERS;
 
-	/*
-	 * FIXME: this should be a vmalloc.
-	 */
-	buffers = vmalloc(s);
+	buffers = vcalloc(NUM_BUFFERS, sizeof(struct buffer_head));
 	if (!buffers) {
 		DMWARN("Couldn't allocate buffer heads.");
 		return -ENOMEM;
 	}
 
-	memset(buffers, 0, s);
 	for (i = 0; i < NUM_BUFFERS; i++) {
 		if (i < NUM_BUFFERS - 1)
 			buffers[i].b_reqnext = &buffers[i + 1];
@@ -323,7 +318,6 @@ static void dispatch_bh(struct kcopyd_job *job,
 	/*
 	 * Add in the job offset
 	 */
-	block += job->offset >> job->block_shift;
 	bh->b_blocknr = (job->disk.sector >> job->block_shift) + block;
 
 	p = block >> job->bpp_shift;
@@ -331,8 +325,8 @@ static void dispatch_bh(struct kcopyd_job *job,
 
 	bh->b_dev = B_FREE;
 	bh->b_size = job->block_size;
-	set_bh_page(bh, job->pages[p],
-		    (block << job->block_shift) << SECTOR_SHIFT);
+	set_bh_page(bh, job->pages[p], ((block << job->block_shift) +
+					job->offset) << SECTOR_SHIFT);
 	bh->b_this_page = bh;
 
 	init_buffer(bh, end_bh, job);
@@ -391,6 +385,7 @@ static int run_pages_job(struct kcopyd_job *job)
 	job->nr_pages = (job->disk.count + job->offset) /
 	    (PAGE_SIZE / SECTOR_SIZE);
 	r = kcopyd_get_pages(job->nr_pages, job->pages);
+
 	if (!r) {
 		/* this job is ready for io */
 		push(&_io_jobs, job);
@@ -623,7 +618,24 @@ void copy_complete(struct kcopyd_job *job)
 		info->notify(job->err, info->notify_context);
 
 	free_copy_info(info);
+
 	kcopyd_free_pages(job->nr_pages, job->pages);
+
+	kcopyd_free_job(job);
+}
+
+static void page_write_complete(struct kcopyd_job *job)
+{
+	struct copy_info *info = (struct copy_info *) job->context;
+	int i;
+
+	if (info->notify)
+		info->notify(job->err, info->notify_context);
+
+	free_copy_info(info);
+	for (i = 0; i < job->nr_pages; i++)
+		put_page(job->pages[i]);
+
 	kcopyd_free_job(job);
 }
 
@@ -650,6 +662,56 @@ void copy_write(struct kcopyd_job *job)
 	 * Queue the write.
 	 */
 	kcopyd_io(job);
+}
+
+int kcopyd_write_pages(struct kcopyd_region *to, int nr_pages,
+		       struct page **pages, int offset, kcopyd_notify_fn fn,
+		       void *context)
+{
+	struct copy_info *info;
+	struct kcopyd_job *job;
+	int i;
+
+	/*
+	 * Allocate a new copy_info.
+	 */
+	info = alloc_copy_info();
+	if (!info)
+		return -ENOMEM;
+
+	job = kcopyd_alloc_job();
+	if (!job) {
+		free_copy_info(info);
+		return -ENOMEM;
+	}
+
+	/*
+	 * set up for the write.
+	 */
+	info->notify = fn;
+	info->notify_context = context;
+	memcpy(&info->to, to, sizeof(*to));
+
+	/* Get the pages */
+	job->nr_pages = nr_pages;
+	for (i = 0; i < nr_pages; i++) {
+		get_page(pages[i]);
+		job->pages[i] = pages[i];
+	}
+
+	job->rw = WRITE;
+
+	memcpy(&job->disk, &info->to, sizeof(job->disk));
+	job->offset = offset;
+	calc_block_sizes(job);
+	job->callback = page_write_complete;
+	job->context = info;
+
+	/*
+	 * Trigger job.
+	 */
+	kcopyd_io(job);
+	return 0;
 }
 
 int kcopyd_copy(struct kcopyd_region *from, struct kcopyd_region *to,

@@ -76,15 +76,13 @@ struct exception_store {
 
 struct dm_snapshot {
 	struct rw_semaphore lock;
+	struct dm_table *table;
 
 	struct dm_dev *origin;
 	struct dm_dev *cow;
 
 	/* List of snapshots per Origin */
 	struct list_head list;
-
-	/* Processes wait on this when they want to block on status changes */
-	wait_queue_head_t waitq;
 
 	/* Size of data blocks saved - must be a power of 2 */
 	chunk_t chunk_size;
