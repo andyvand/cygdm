@@ -12,7 +12,6 @@
 /* we only need this for the lv_bmap struct definition, not happy */
 #include <linux/lvm.h>
 
-#define MAX_DEVICES 64
 #define DEFAULT_READ_AHEAD 64
 
 static const char *_name = DM_NAME;
@@ -664,9 +663,10 @@ static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb)
  */
 static inline int specific_dev(int minor, struct mapped_device *md)
 {
-	if (minor > MAX_DEVICES) {
-		DMWARN("request for a mapped_device beyond MAX_DEVICES");
-		return 0;
+	if (minor >= MAX_DEVICES) {
+		DMWARN("request for a mapped_device beyond MAX_DEVICES (%d)",
+		       MAX_DEVICES);
+		return -1;
 	}
 
 	down_write(_dev_locks + minor);

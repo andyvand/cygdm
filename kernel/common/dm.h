@@ -31,6 +31,7 @@
 #define KEYS_PER_NODE (NODE_SIZE / sizeof(offset_t))
 #define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
 #define MAX_ARGS 32
+#define MAX_DEVICES 256
 
 /*
  * List of devices that a metadevice uses and should open/close.
