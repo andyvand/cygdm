@@ -131,21 +131,24 @@ enum {
 
 #define DM_VERSION_MAJOR	3
 #define DM_VERSION_MINOR	0
-#define DM_VERSION_PATCHLEVEL	2
-#define DM_VERSION_EXTRA	"-ioctl-cvs (2003-04-08)"
+#define DM_VERSION_PATCHLEVEL	3
+#define DM_VERSION_EXTRA	"-ioctl-cvs (2003-04-23)"
 
 /* Status bits */
 #define DM_READONLY_FLAG	0x00000001	/* In/Out */
 #define DM_SUSPEND_FLAG		0x00000002	/* In/Out */
-#define DM_EXISTS_FLAG		0x00000004	/*    Out */
-#define DM_PERSISTENT_DEV_FLAG	0x00000008	/* In     */
-#define DM_BUFFER_FULL_FLAG	0x00000010	/*    Out */
-#define DM_ERROR_DEFERRED_FLAG	0x00000020	/* In     */
+#define DM_PERSISTENT_DEV_FLAG	0x00000004	/* In     */
 
 /*
  * Flag passed into ioctl STATUS command to get table information
  * rather than current status.
  */
-#define DM_STATUS_TABLE_FLAG	0x00000010
+#define DM_STATUS_TABLE_FLAG	0x00000008	/* In     */
+
+#define DM_ERROR_DEFERRED_FLAG	0x00000010	/* In     */
+
+#define DM_EXISTS_FLAG		0x00000100	/*    Out */
+#define DM_BUFFER_FULL_FLAG	0x00000200	/*    Out */
+
 
 #endif				/* _LINUX_DM_IOCTL_H */
