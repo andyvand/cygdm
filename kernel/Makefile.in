@@ -120,7 +120,7 @@ install:
 clean:
 
 distclean:
-	$(RM) Makefile 
+	$(RM) Makefile common/dm.c
 
 .PHONY: install clean distclean all
 

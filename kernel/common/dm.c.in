@@ -19,7 +19,9 @@
 #define DEVICE_NAME "device-mapper"
 
 static const char *_name = DEVICE_NAME;
-static int _version[3] = { 0, 1, 0 };
+static const char *_version = @DM_VERSION@;
+static const char *_email = "lvm-devel@lists.sistina.com";
+
 static int major = 0;
 
 struct io_hook {
@@ -87,8 +89,7 @@ static int __init dm_init(void)
 
 	_dev_dir = devfs_mk_dir(0, DM_DIR, NULL);
 
-	printk(KERN_INFO "%s %d.%d.%d initialised\n", _name,
-	       _version[0], _version[1], _version[2]);
+	printk(KERN_INFO "%s %s initialised, %s\n", _name, _version, _email);
 	return 0;
 
       err_blkdev:

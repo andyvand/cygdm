@@ -138,6 +138,12 @@ then
 fi
 echo "$ac_t""$interface" 1>&6
 
+if test "-f VERSION" ; then
+  DM_VERSION="\"`cat VERSION|sed -e \"s/[[0-9.]]*/\0-$interface/\"`\""
+else
+  DM_VERSION="Unknown version ($interface)"
+fi
+
 AC_SUBST(JOBS)
 AC_SUBST(OWNER)
 AC_SUBST(GROUP)
@@ -146,6 +152,7 @@ AC_SUBST(interface)
 AC_SUBST(kerneldir)
 AC_SUBST(kernelvsn)
 AC_SUBST(tmpdir)
+AC_SUBST(DM_VERSION)
 dnl First and last lines should not contain files to generate in order to 
 dnl keep utility scripts running properly
 AC_OUTPUT( 								\
@@ -155,4 +162,5 @@ include/Makefile                                                        \
 dmsetup/Makefile							\
 lib/Makefile							 	\
 kernel/Makefile								\
+kernel/common/dm.c							\
 )

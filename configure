@@ -1952,6 +1952,13 @@ then
 fi
 echo "$ac_t""$interface" 1>&6
 
+if test "-f VERSION" ; then
+  DM_VERSION="\"`cat VERSION|sed -e \"s/[0-9.]*/\0-$interface/\"`\""
+else
+  DM_VERSION="Unknown version ($interface)"
+fi
+
+
 
 
 
@@ -2080,6 +2087,7 @@ include/Makefile                                                        \
 dmsetup/Makefile							\
 lib/Makefile							 	\
 kernel/Makefile								\
+kernel/common/dm.c							\
 " | sed "s/:[^ ]*//g"` conftest*; exit 1' 1 2 15
 EOF
 cat >> $CONFIG_STATUS <<EOF
@@ -2128,6 +2136,7 @@ s%@interface@%$interface%g
 s%@kerneldir@%$kerneldir%g
 s%@kernelvsn@%$kernelvsn%g
 s%@tmpdir@%$tmpdir%g
+s%@DM_VERSION@%$DM_VERSION%g
 
 CEOF
 EOF
@@ -2176,6 +2185,7 @@ include/Makefile                                                        \
 dmsetup/Makefile							\
 lib/Makefile							 	\
 kernel/Makefile								\
+kernel/common/dm.c							\
 "}
 EOF
 cat >> $CONFIG_STATUS <<\EOF
