@@ -4,8 +4,8 @@
  * This file is released under the GPL.
  */
 
-#ifndef _DM_IOCTL_H
-#define _DM_IOCTL_H
+#ifndef _LINUX_DM_IOCTL_H
+#define _LINUX_DM_IOCTL_H
 
 #include "device-mapper.h"
 
@@ -24,9 +24,8 @@ struct dm_target_spec {
 	unsigned long next;	/* offset in bytes to next target_spec */
 
 	/*
-	 * Parameter string starts immediately
-	 * after this object.  Be careful to add
-	 * padding after string to ensure correct
+	 * Parameter string starts immediately after this object.  
+	 * Be careful to add padding after string to ensure correct
 	 * alignment of subsequent dm_target_spec.
 	 */
 };
@@ -38,7 +37,7 @@ struct dm_ioctl {
 	int exists;		/* out */
 	int suspend;		/* in/out */
 	int open_count;		/* out */
-	int major;              /* out */
+	int major;		/* out */
 	int minor;		/* in/out */
 
 	int target_count;	/* in/out */
@@ -54,4 +53,4 @@ struct dm_ioctl {
 #define	DM_RELOAD _IOWR(DM_IOCTL, 0x03, struct dm_ioctl)
 #define DM_INFO _IOWR(DM_IOCTL, 0x04, struct dm_ioctl)
 
-#endif
+#endif /* _LINUX_DM_IOCTL_H */

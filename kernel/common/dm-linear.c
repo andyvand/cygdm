@@ -17,7 +17,7 @@
 #include "dm.h"
 
 /*
- * linear: maps a linear range of a device.
+ * Linear: maps a linear range of a device.
  */
 struct linear_c {
 	long delta;		/* FIXME: we need a signed offset type */
@@ -26,19 +26,18 @@ struct linear_c {
 
 static inline char *next_token(char **p)
 {
-        static const char *delim = " \t";
-        char *r;
+	static const char *delim = " \t";
+	char *r;
 
-        do {
-                r = strsep(p, delim);
-        } while(r && *r == 0);
+	do {
+		r = strsep(p, delim);
+	} while (r && *r == 0);
 
-        return r;
+	return r;
 }
 
 /*
- * construct a linear mapping.
- * <dev_path> <offset>
+ * Construct a linear mapping: <dev_path> <offset>
  */
 static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
 		      char *args, void **context)
@@ -75,15 +74,16 @@ static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
 	*context = lc;
 	return 0;
 
-bad_free:
+      bad_free:
 	kfree(lc);
-bad:
+      bad:
 	return r;
 }
 
 static void linear_dtr(struct dm_table *t, void *c)
 {
 	struct linear_c *lc = (struct linear_c *) c;
+
 	dm_table_put_device(t, lc->dev);
 	kfree(c);
 }
@@ -94,27 +94,17 @@ static int linear_map(struct buffer_head *bh, int rw, void *context)
 
 	bh->b_rdev = lc->dev->dev;
 	bh->b_rsector = bh->b_rsector + lc->delta;
+
 	return 1;
 }
 
-/*
- * Debugging use only.
- */
-static char *linear_print(void *context)
-{
-	struct linear_c *lc = (struct linear_c *)context;
-static char buf[256];
-	sprintf(buf, " %lu", lc->delta);
-	return buf;
-}
-
 static struct target_type linear_target = {
-	name: "linear",
-	module: THIS_MODULE,
-	ctr: linear_ctr,
-	dtr: linear_dtr,
-	map: linear_map,
-	print: linear_print,
+	name:	"linear",
+	module:	THIS_MODULE,
+	ctr:	linear_ctr,
+	dtr:	linear_dtr,
+	map:	linear_map,
+	err:	NULL
 };
 
 static int __init linear_init(void)
@@ -143,4 +133,3 @@ module_exit(linear_exit);
 MODULE_AUTHOR("Joe Thornber <thornber@uk.sistina.com>");
 MODULE_DESCRIPTION("Device Mapper: Linear mapping");
 MODULE_LICENSE("GPL");
-

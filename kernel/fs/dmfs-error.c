@@ -36,14 +36,14 @@ struct dmfs_error {
 static struct dmfs_error oom_error;
 
 static struct list_head oom_list = {
-	next: &oom_error.list,
-	prev: &oom_error.list,
+	next:	&oom_error.list,
+	prev:	&oom_error.list,
 };
 
 static struct dmfs_error oom_error = {
-	list: { next: &oom_list, prev: &oom_list },
-	len: 39,
-	msg: "Out of memory during creation of table\n",
+	list:	{next: &oom_list, prev:&oom_list},
+	len:	39,
+	msg:	"Out of memory during creation of table\n",
 };
 
 void dmfs_add_error(struct inode *inode, unsigned num, char *str)
@@ -51,6 +51,7 @@ void dmfs_add_error(struct inode *inode, unsigned num, char *str)
 	struct dmfs_i *dmi = DMFS_I(inode);
 	int len = strlen(str) + sizeof(struct dmfs_error) + 12;
 	struct dmfs_error *e = kmalloc(len, GFP_KERNEL);
+
 	if (e) {
 		e->msg = (char *)(e + 1);
 		e->len = sprintf(e->msg, "%8u: %s\n", num, str);
@@ -63,7 +64,7 @@ void dmfs_zap_errors(struct inode *inode)
 	struct dmfs_i *dmi = DMFS_I(inode);
 	struct dmfs_error *e;
 
-	while(!list_empty(&dmi->errors)) {
+	while (!list_empty(&dmi->errors)) {
 		e = list_entry(dmi->errors.next, struct dmfs_error, list);
 		list_del(&e->list);
 		kfree(e);
@@ -77,6 +78,7 @@ static void *e_start(struct seq_file *e, loff_t *pos)
 	struct dmfs_i *dmi = e->context;
 
 	down(&dmi->sem);
+
 	if (dmi->status) {
 		list_for_each(p, &oom_list)
 			if (n-- == 0)
@@ -94,9 +96,11 @@ static void *e_next(struct seq_file *e, void *v, loff_t *pos)
 {
 	struct dmfs_i *dmi = e->context;
 	struct list_head *p = ((struct dmfs_error *)v)->list.next;
+
 	(*pos)++;
-	return (p == &dmi->errors) || (p == &oom_list) ? NULL 
-				   : list_entry(p, struct dmfs_error, list);
+
+	return (p == &dmi->errors) || 
+	       (p == &oom_list) ? NULL : list_entry(p, struct dmfs_error, list);
 }
 
 static void e_stop(struct seq_file *e, void *v)
@@ -109,14 +113,13 @@ static int show_error(struct seq_file *e, void *v)
 {
 	struct dmfs_error *d = v;
 	seq_puts(e, d->msg);
+
 	return 0;
 }
 
 struct seq_operations dmfs_error_seq_ops = {
-	start: e_start,
-	next: e_next,
-	stop: e_stop,
-	show: show_error,
+	start:	e_start,
+	next:	e_next,
+	stop:	e_stop,
+	show:	show_error,
 };
-
-

@@ -38,6 +38,7 @@ static void *s_next(struct seq_file *s, void *v, loff_t *pos)
 
 static void s_stop(struct seq_file *s, void *v)
 {
+	return;
 }
 
 static int s_show(struct seq_file *s, void *v)
@@ -51,5 +52,3 @@ struct seq_operations dmfs_status_seq_ops = {
 	stop:	s_stop,
 	show:	s_show,
 };
-
-

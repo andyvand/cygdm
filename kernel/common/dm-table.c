@@ -8,22 +8,21 @@
 
 #include <linux/blkdev.h>
 
-
 /* ceiling(n / size) * size */
-static inline ulong round_up(ulong n, ulong size)
+static inline unsigned long round_up(unsigned long n, unsigned long size)
 {
-	ulong r = n % size;
+	unsigned long r = n % size;
 	return n + (r ? (size - r) : 0);
 }
 
 /* ceiling(n / size) */
-static inline ulong div_up(ulong n, ulong size)
+static inline unsigned long div_up(unsigned long n, unsigned long size)
 {
 	return round_up(n, size) / size;
 }
 
 /* similar to ceiling(log_size(n)) */
-static uint int_log(ulong n, ulong base)
+static uint int_log(unsigned long n, unsigned long base)
 {
 	int result = 0;
 
@@ -45,7 +44,7 @@ static offset_t high(struct dm_table *t, int l, int n)
 		n = get_child(n, CHILDREN_PER_NODE - 1);
 
 	if (n >= t->counts[l])
-		return (offset_t) -1;
+		return (offset_t) - 1;
 
 	return get_node(t, l, n)[KEYS_PER_NODE - 1];
 }
@@ -91,7 +90,7 @@ static int alloc_targets(struct dm_table *t, int num)
 		memcpy(n_targets, t->targets, sizeof(*n_targets) * n);
 	}
 
-	memset(n_highs + n , -1, sizeof(*n_highs) * (num - n));
+	memset(n_highs + n, -1, sizeof(*n_highs) * (num - n));
 	vfree(t->highs);
 
 	t->num_allocated = num;
@@ -154,7 +153,7 @@ void dm_table_destroy(struct dm_table *t)
 
 	/* free the device list */
 	if (t->devices.next != &t->devices) {
-		WARN("there are still devices present, someone isn't "
+		WARN("there are still devices present: someone isn't "
 		     "calling dm_table_remove_device");
 
 		free_devices(&t->devices);
@@ -175,38 +174,37 @@ static inline int check_space(struct dm_table *t)
 	return 0;
 }
 
-
 /*
  * convert a device path to a kdev_t.
  */
-int lookup_device(const char *path, kdev_t *dev)
+int lookup_device(const char *path, kdev_t * dev)
 {
-       int r;
-       struct nameidata nd;
-       struct inode *inode;
+	int r;
+	struct nameidata nd;
+	struct inode *inode;
 
-       if (!path_init(path, LOOKUP_FOLLOW, &nd))
-               return 0;
+	if (!path_init(path, LOOKUP_FOLLOW, &nd))
+		return 0;
 
-       if ((r = path_walk(path, &nd)))
-               goto bad;
+	if ((r = path_walk(path, &nd)))
+		goto bad;
 
-       inode = nd.dentry->d_inode;
-       if (!inode) {
-               r = -ENOENT;
-               goto bad;
-       }
+	inode = nd.dentry->d_inode;
+	if (!inode) {
+		r = -ENOENT;
+		goto bad;
+	}
 
-       if (!S_ISBLK(inode->i_mode)) {
-               r = -EINVAL;
-               goto bad;
-       }
+	if (!S_ISBLK(inode->i_mode)) {
+		r = -EINVAL;
+		goto bad;
+	}
 
-       *dev = inode->i_rdev;
+	*dev = inode->i_rdev;
 
- bad:
-       path_release(&nd);
-       return r;
+      bad:
+	path_release(&nd);
+	return r;
 }
 
 /*
@@ -222,7 +220,7 @@ static struct dm_dev *find_device(struct list_head *l, kdev_t dev)
 			return dd;
 	}
 
-       return NULL;
+	return NULL;
 }
 
 /*
@@ -231,18 +229,18 @@ static struct dm_dev *find_device(struct list_head *l, kdev_t dev)
  */
 static int open_dev(struct dm_dev *d)
 {
-       int err;
+	int err;
 
-       if (d->bd)
-	       BUG();
+	if (d->bd)
+		BUG();
 
-       if (!(d->bd = bdget(kdev_t_to_nr(d->dev))))
-               return -ENOMEM;
+	if (!(d->bd = bdget(kdev_t_to_nr(d->dev))))
+		return -ENOMEM;
 
-       if ((err = blkdev_get(d->bd, FMODE_READ|FMODE_WRITE, 0, BDEV_FILE)))
-               return err;
+	if ((err = blkdev_get(d->bd, FMODE_READ | FMODE_WRITE, 0, BDEV_FILE)))
+		return err;
 
-       return 0;
+	return 0;
 }
 
 /*
@@ -272,7 +270,7 @@ static int check_device_area(kdev_t dev, offset_t start, offset_t len)
 		 * so give the benefit of the doubt */
 		return 1;
 
-	 /* convert to 512-byte sectors */
+	/* convert to 512-byte sectors */
 	dev_size <<= 1;
 
 	return ((start < dev_size) && (len <= (dev_size - start)));
@@ -283,8 +281,7 @@ static int check_device_area(kdev_t dev, offset_t start, offset_t len)
  * usage count if it's already present.
  */
 int dm_table_get_device(struct dm_table *t, const char *path,
-			offset_t start, offset_t len,
-			struct dm_dev **result)
+			offset_t start, offset_t len, struct dm_dev **result)
 {
 	int r;
 	kdev_t dev;
@@ -330,11 +327,11 @@ int dm_table_get_device(struct dm_table *t, const char *path,
  */
 void dm_table_put_device(struct dm_table *t, struct dm_dev *dd)
 {
-       if (atomic_dec_and_test(&dd->count)) {
-	       close_dev(dd);
-	       list_del(&dd->list);
-               kfree(dd);
-       }
+	if (atomic_dec_and_test(&dd->count)) {
+		close_dev(dd);
+		list_del(&dd->list);
+		kfree(dd);
+	}
 }
 
 /*
@@ -355,7 +352,6 @@ int dm_table_add_target(struct dm_table *t, offset_t high,
 
 	return 0;
 }
-
 
 static int setup_indexes(struct dm_table *t)
 {
@@ -380,7 +376,6 @@ static int setup_indexes(struct dm_table *t)
 
 	return 0;
 }
-
 
 /*
  * builds the btree to index the map

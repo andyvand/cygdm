@@ -26,19 +26,22 @@
 #include "dm.h"
 #include "dmfs.h"
 
-
 static void *s_start(struct seq_file *s, loff_t *pos)
 {
 	struct dmfs_i *dmi = s->context;
+
 	if (*pos > 0)
 		return NULL;
+
 	down(&dmi->sem);
+
 	return (void *)1;
 }
 
 static void *s_next(struct seq_file *s, void *v, loff_t *pos)
 {
 	(*pos)++;
+
 	return NULL;
 }
 
@@ -52,10 +55,13 @@ static int s_show(struct seq_file *s, void *v)
 {
 	struct dmfs_i *dmi = s->context;
 	char msg[3] = "1\n";
+
 	if (dmi->md->suspended == 0) {
 		msg[0] = '0';
 	}
+
 	seq_puts(s, msg);
+
 	return 0;
 }
 
@@ -66,12 +72,13 @@ struct seq_operations dmfs_suspend_seq_ops = {
 	show:	s_show,
 };
 
-ssize_t dmfs_suspend_write(struct file *file, const char *buf, size_t count, loff_t *ppos)
+ssize_t dmfs_suspend_write(struct file *file, const char *buf, size_t count,
+			   loff_t * ppos)
 {
 	struct inode *dir = file->f_dentry->d_parent->d_inode;
 	struct dmfs_i *dmi = DMFS_I(dir);
 	int written = 0;
-	
+
 	if (count == 0)
 		goto out;
 	if (count != 1 && count != 2)
@@ -88,8 +95,6 @@ ssize_t dmfs_suspend_write(struct file *file, const char *buf, size_t count, lof
 		written = count;
 	up(&dmi->sem);
 
-out:
+      out:
 	return written;
 }
-
-

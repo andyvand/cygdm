@@ -26,36 +26,37 @@ struct stripe_c {
 	/* The size of this target / num. stripes */
 	uint32_t stripe_width;
 
-	/* eg, we stripe in 64k chunks */
+	/* stripe chunk size */
 	uint32_t chunk_shift;
 	offset_t chunk_mask;
 
 	struct stripe stripe[0];
 };
 
-
 static inline struct stripe_c *alloc_context(int stripes)
 {
 	size_t len = sizeof(struct stripe_c) +
-		(sizeof(struct stripe) * stripes);
+	    (sizeof(struct stripe) * stripes);
+
 	return kmalloc(len, GFP_KERNEL);
 }
 
 /*
- * parses a single <dev> <sector> pair.
+ * Parse a single <dev> <sector> pair
  */
 static int get_stripe(struct dm_table *t, struct stripe_c *sc,
 		      int stripe, char *args)
 {
 	int n, r;
-	char path[256];		/* FIXME: buffer overrun risk */
+	char path[4096];
 	unsigned long start;
 
-	if (sscanf(args, "%s %lu %n", path, &start, &n) != 2)
+	if (sscanf(args, "%4095s %lu %n", path, &start, &n) != 2)
 		return -EINVAL;
 
-	if ((r = dm_table_get_device(t, path, start, sc->stripe_width,
-				     &sc->stripe[stripe].dev)))
+	r = dm_table_get_device(t, path, start, sc->stripe_width,
+				&sc->stripe[stripe].dev);
+	if (r)
 		return -ENXIO;
 
 	sc->stripe[stripe].physical_start = start;
@@ -63,7 +64,7 @@ static int get_stripe(struct dm_table *t, struct stripe_c *sc,
 }
 
 /*
- * construct a striped mapping.
+ * Construct a striped mapping.
  * <number of stripes> <chunk size (2^^n)> [<dev_path> <offset>]+
  */
 static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
@@ -75,30 +76,28 @@ static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
 	int n, i;
 
 	*context = "couldn't parse <stripes> <chunk size>";
-	if (sscanf(args, "%u %u %n", &stripes, &chunk_size, &n) != 2) {
+	if (sscanf(args, "%u %u %n", &stripes, &chunk_size, &n) != 2)
 		return -EINVAL;
-	}
 
 	*context = "target length is not divisable by the number of stripes";
-	if (l % stripes) {
+	if (l % stripes)
 		return -EINVAL;
-	}
 
 	*context = "couldn't allocate memory for striped context";
-	if (!(sc = alloc_context(stripes))) {
+	sc = alloc_context(stripes);
+	if (!sc)
 		return -ENOMEM;
-	}
 
 	sc->logical_start = b;
 	sc->stripes = stripes;
 	sc->stripe_width = l / stripes;
 
 	/*
-	 * chunk_size is a power of two.  We only
-	 * that power and the mask.
+	 * chunk_size is a power of two
 	 */
-	*context = "invalid chunk size";
-	if (!chunk_size) {
+	if (!chunk_size || chunk_size & (chunk_size - 1)) {
+		*context = "invalid chunk size";
+		kfree(sc);
 		return -EINVAL;
 	}
 
@@ -114,13 +113,12 @@ static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
 		args += n;
 		n = get_stripe(t, sc, i, args);
 
-		*context = "couldn't parse stripe destination";
 		if (n < 0) {
+			*context = "couldn't parse stripe destination";
 			kfree(sc);
 			return n;
 		}
 	}
-
 
 	*context = sc;
 	return 0;
@@ -135,6 +133,7 @@ static void stripe_dtr(struct dm_table *t, void *c)
 		dm_table_put_device(t, sc->stripe[i].dev);
 
 	kfree(sc);
+	return;
 }
 
 static int stripe_map(struct buffer_head *bh, int rw, void *context)
@@ -143,29 +142,30 @@ static int stripe_map(struct buffer_head *bh, int rw, void *context)
 
 	offset_t offset = bh->b_rsector - sc->logical_start;
 	uint32_t chunk = (uint32_t) (offset >> sc->chunk_shift);
-	uint32_t stripe = chunk % sc->stripes; /* 32bit modulus */
+	uint32_t stripe = chunk % sc->stripes;	/* 32bit modulus */
 	chunk = chunk / sc->stripes;
 
 	bh->b_rdev = sc->stripe[stripe].dev->dev;
 	bh->b_rsector = sc->stripe[stripe].physical_start +
-		(chunk << sc->chunk_shift) +
-		(offset & sc->chunk_mask);
+	    (chunk << sc->chunk_shift) + (offset & sc->chunk_mask);
 	return 1;
 }
 
 static struct target_type stripe_target = {
-	name: "striped",
-	module: THIS_MODULE,
-	ctr: stripe_ctr,
-	dtr: stripe_dtr,
-	map: stripe_map,
+	name:	"striped",
+	module:	THIS_MODULE,
+	ctr:	stripe_ctr,
+	dtr:	stripe_dtr,
+	map:	stripe_map,
+	err:	NULL
 };
 
 static int __init stripe_init(void)
 {
 	int r;
 
-	if ((r = dm_register_target(&stripe_target)) < 0)
+	r = dm_register_target(&stripe_target);
+	if (r < 0)
 		WARN("linear target register failed");
 
 	return r;
@@ -175,6 +175,8 @@ static void __exit stripe_exit(void)
 {
 	if (dm_unregister_target(&stripe_target))
 		WARN("striped target unregister failed");
+
+	return;
 }
 
 module_init(stripe_init);

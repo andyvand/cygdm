@@ -10,8 +10,8 @@
 struct tt_internal {
 	struct target_type tt;
 
-        struct list_head list;
-        long use;
+	struct list_head list;
+	long use;
 };
 
 static LIST_HEAD(_targets);
@@ -21,11 +21,11 @@ static rwlock_t _lock = RW_LOCK_UNLOCKED;
 
 static inline struct tt_internal *__find_target_type(const char *name)
 {
-	struct list_head *tmp;
+	struct list_head *tih;
 	struct tt_internal *ti;
 
-	list_for_each(tmp, &_targets) {
-		ti = list_entry(tmp, struct tt_internal, list);
+	list_for_each(tih, &_targets) {
+		ti = list_entry(tih, struct tt_internal, list);
 
 		if (!strcmp(name, ti->tt.name))
 			return ti;
@@ -61,6 +61,8 @@ static void load_module(const char *name)
 
 	strcat(module_name, name);
 	request_module(module_name);
+
+	return;
 }
 
 struct target_type *dm_get_target_type(const char *name)
@@ -86,6 +88,8 @@ void dm_put_target_type(struct target_type *t)
 	if (ti->use < 0)
 		BUG();
 	read_unlock(&_lock);
+
+	return;
 }
 
 static struct tt_internal *alloc_target(struct target_type *t)
@@ -154,6 +158,7 @@ static int io_err_ctr(struct dm_table *t, offset_t b, offset_t l,
 static void io_err_dtr(struct dm_table *t, void *c)
 {
 	/* empty */
+	return;
 }
 
 static int io_err_map(struct buffer_head *bh, int rw, void *context)
@@ -163,12 +168,12 @@ static int io_err_map(struct buffer_head *bh, int rw, void *context)
 }
 
 static struct target_type error_target = {
-	name: "error",
-	ctr: io_err_ctr,
-	dtr: io_err_dtr,
-	map: io_err_map
+	name:"error",
+	ctr:io_err_ctr,
+	dtr:io_err_dtr,
+	map:io_err_map,
+	err:NULL
 };
-
 
 int dm_target_init(void)
 {
@@ -177,4 +182,3 @@ int dm_target_init(void)
 
 EXPORT_SYMBOL(dm_register_target);
 EXPORT_SYMBOL(dm_unregister_target);
-

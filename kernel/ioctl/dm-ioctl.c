@@ -56,7 +56,7 @@ static int next_target(struct dm_target_spec *last, void *end,
 		       struct dm_target_spec **spec, char **params)
 {
 	*spec = (struct dm_target_spec *)
-		(((unsigned char *) last) + last->next);
+	    (((unsigned char *) last) + last->next);
 	*params = (char *) (*spec + 1);
 
 	return valid_str(*params, end);
@@ -103,7 +103,7 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 	for (i = 0; i < args->target_count; i++) {
 
 		r = first ? first_target(args, end, &spec, &params) :
-			next_target(spec, end, &spec, &params);
+		    next_target(spec, end, &spec, &params);
 
 		if (!r)
 			PARSE_ERROR("unable to find target");
@@ -117,7 +117,7 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 
 		/* build the target */
 		if (ttype->ctr(table, spec->sector_start, spec->length, params,
-			       &context))
+			       &context)) 
 			PARSE_ERROR(context);
 
 		/* add the target to the table */
@@ -157,7 +157,7 @@ static int info(const char *name, struct dm_ioctl *user)
 	param.minor = MINOR(md->dev);
 	param.target_count = md->map->num_targets;
 
- out:
+      out:
 	return copy_to_user(user, &param, sizeof(param));
 }
 
@@ -187,7 +187,7 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 
 	return 0;
 
- bad:
+      bad:
 	dm_table_destroy(t);
 	return r;
 }
@@ -252,7 +252,6 @@ static int ctl_close(struct inode *inode, struct file *file)
 	return 0;
 }
 
-
 static int ctl_ioctl(struct inode *inode, struct file *file,
 		     uint command, ulong a)
 {
@@ -292,7 +291,6 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 	return r;
 }
 
-
 static struct file_operations _ctl_fops = {
 	open:		ctl_open,
 	release:	ctl_close,
@@ -300,20 +298,19 @@ static struct file_operations _ctl_fops = {
 	owner:		THIS_MODULE,
 };
 
-
 static devfs_handle_t _ctl_handle;
 
 int dm_interface_init(void)
 {
 	int r;
 
-	if ((r = devfs_register_chrdev(DM_CHAR_MAJOR, DM_DIR,
-				       &_ctl_fops)) < 0) {
+	r = devfs_register_chrdev(DM_CHAR_MAJOR, DM_DIR, &_ctl_fops);
+	if (r < 0) {
 		WARN("devfs_register_chrdev failed for dm control dev");
 		return -EIO;
 	}
 
-	_ctl_handle = devfs_register(0 , DM_DIR "/control", 0,
+	_ctl_handle = devfs_register(0, DM_DIR "/control", 0,
 				     DM_CHAR_MAJOR, 0,
 				     S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP,
 				     &_ctl_fops, NULL);
@@ -328,4 +325,3 @@ void dm_interface_exit(void)
 	if (devfs_unregister_chrdev(DM_CHAR_MAJOR, DM_DIR) < 0)
 		WARN("devfs_unregister_chrdev failed for dm control device");
 }
-

@@ -105,10 +105,13 @@ $(SUBDIRS.distclean):
 	$(CC) -shared $(OBJECTS) -o $@
 
 %.d: %.c
-	set -e; FILE=`echo $@ | sed 's/\\//\\\\\\//g;s/\\.d//g'`; \
-		DEPS=`echo $(DEPS) | sed -e 's/\\//\\\\\\//g'`; \
-		$(CC) -MM $(INCLUDES) $(CFLAGS) $< | \
-		sed "s/\(.*\)\.o[ :]*/$$FILE.o $$FILE.d : $$DEPS /g" > $@; \
+	set -e; \
+	FILE=`echo $@ | \
+		sed 's/\\//\\\\\\//g;s/\\.d//g'`; \
+	DEPS=`echo $(DEPS) | \
+		sed -e 's/\\//\\\\\\//g'`; \
+	$(CC) -MM $(INCLUDES) $(CFLAGS) $< | \
+	sed "s/\(.*\)\.o[ :]*/$$FILE.o $$FILE.d : $$DEPS /g" > $@; \
 		[ -s $@ ] || $(RM) $@
 
 clean: $(SUBDIRS.clean)

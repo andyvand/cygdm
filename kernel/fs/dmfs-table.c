@@ -29,9 +29,11 @@
 static offset_t start_of_next_range(struct dm_table *t)
 {
 	offset_t n = 0;
+
 	if (t->num_targets) {
 		n = t->highs[t->num_targets - 1] + 1;
 	}
+	
 	return n;
 }
 
@@ -45,12 +47,11 @@ static char *dmfs_parse_line(struct dm_table *t, char *str)
 	int pos = 0;
 	char target[33];
 
-static char *err_table[] = {
-	"Missing/Invalid start argument",
-	"Missing/Invalid size argument",
-	"Missing target type"
-};
-	/* printk("dmfs_parse_line: (%s)\n", str); */
+	static char *err_table[] = {
+		"Missing/Invalid start argument",
+		"Missing/Invalid size argument",
+		"Missing target type"
+	};
 
 	rv = sscanf(str, "%d %d %32s%n", &start, &size, target, &pos);
 	if (rv < 3) {
@@ -58,7 +59,7 @@ static char *err_table[] = {
 		goto out;
 	}
 	str += pos;
-	while(*str && isspace(*str))
+	while (*str && isspace(*str))
 		str++;
 
 	msg = "Gap in table";
@@ -72,11 +73,6 @@ static char *err_table[] = {
 		rv = ttype->ctr(t, start, size, str, &context);
 		msg = context;
 		if (rv == 0) {
-#if 0
-			printk("dmfs_parse: %u %u %s %s\n", start, size, 
-				ttype->name,
-				ttype->print ? ttype->print(context) : "-");
-#endif
 			msg = "Error adding target to table";
 			high = start + (size - 1);
 			if (dm_table_add_target(t, high, ttype, context) == 0)
@@ -85,26 +81,26 @@ static char *err_table[] = {
 		}
 		dm_put_target_type(ttype);
 	}
-out:
+
+      out:
 	return msg;
 }
-
 
 static int dmfs_copy(char *dst, int dstlen, char *src, int srclen, int *flag)
 {
 	int len = min(dstlen, srclen);
 	char *start = dst;
 
-	while(len) {
+	while (len) {
 		*dst = *src++;
 		if (*dst == '\n')
 			goto end_of_line;
 		dst++;
 		len--;
 	}
-out:
+      out:
 	return (dst - start);
-end_of_line:
+      end_of_line:
 	dst++;
 	*flag = 1;
 	goto out;
@@ -112,7 +108,7 @@ end_of_line:
 
 static int dmfs_line_is_not_comment(char *str)
 {
-	while(*str) {
+	while (*str) {
 		if (*str == '#')
 			break;
 		if (!isspace(*str))
@@ -130,18 +126,19 @@ struct dmfs_desc {
 	unsigned long lnum;
 };
 
-static int dmfs_read_actor(read_descriptor_t *desc, struct page *page, unsigned long offset, unsigned long size)
+static int dmfs_read_actor(read_descriptor_t *desc, struct page *page,
+			   unsigned long offset, unsigned long size)
 {
 	char *buf, *msg;
 	unsigned long count = desc->count, len, copied;
-	struct dmfs_desc *d = (struct dmfs_desc *)desc->buf;
-	
+	struct dmfs_desc *d = (struct dmfs_desc *) desc->buf;
+
 	if (size > count)
 		size = count;
 
 	len = size;
 	buf = kmap(page);
-	do { 
+	do {
 		int flag = 0;
 		copied = dmfs_copy(d->tmp + d->tmpl, PAGE_SIZE - d->tmpl - 1,
 				   buf + offset, len, &flag);
@@ -161,7 +158,7 @@ static int dmfs_read_actor(read_descriptor_t *desc, struct page *page, unsigned 
 			d->lnum++;
 			d->tmpl = 0;
 		}
-	} while(len > 0);
+	} while (len > 0);
 	kunmap(page);
 
 	desc->count = count - size;
@@ -169,7 +166,7 @@ static int dmfs_read_actor(read_descriptor_t *desc, struct page *page, unsigned 
 
 	return size;
 
-line_too_long:
+      line_too_long:
 	printk(KERN_INFO "dmfs_read_actor: Line %lu too long\n", d->lnum);
 	kunmap(page);
 	return 0;
@@ -193,14 +190,15 @@ static struct dm_table *dmfs_parse(struct inode *inode, struct file *filp)
 
 			desc.written = 0;
 			desc.count = inode->i_size;
-			desc.buf = (char *)&d;
+			desc.buf = (char *) &d;
 			d.table = t;
 			d.inode = inode;
-			d.tmp = (char *)page;
+			d.tmp = (char *) page;
 			d.tmpl = 0;
 			d.lnum = 1;
 
-			do_generic_file_read(filp, &pos, &desc, dmfs_read_actor);
+			do_generic_file_read(filp, &pos, &desc,
+					     dmfs_read_actor);
 			if (desc.written != inode->i_size) {
 				dm_table_destroy(t);
 				t = NULL;
@@ -208,10 +206,12 @@ static struct dm_table *dmfs_parse(struct inode *inode, struct file *filp)
 		}
 		free_page(page);
 	}
+
 	if (!list_empty(&DMFS_I(inode)->errors)) {
 		dm_table_destroy(t);
 		t = NULL;
 	}
+
 	return t;
 }
 
@@ -223,7 +223,6 @@ static int dmfs_table_release(struct inode *inode, struct file *f)
 	struct dm_table *table;
 
 	if (f->f_mode & FMODE_WRITE) {
-
 		down(&dmi->sem);
 		dmfs_zap_errors(dentry->d_parent->d_inode);
 		table = dmfs_parse(dentry->d_parent->d_inode, f);
@@ -243,7 +242,7 @@ static int dmfs_table_release(struct inode *inode, struct file *f)
 		}
 		up(&dmi->sem);
 
-                put_write_access(parent);
+		put_write_access(parent);
 	}
 
 	return 0;
@@ -257,6 +256,7 @@ static int dmfs_readpage(struct file *file, struct page *page)
 		flush_dcache_page(page);
 		SetPageUptodate(page);
 	}
+
 	UnlockPage(page);
 	return 0;
 }
@@ -265,11 +265,13 @@ static int dmfs_prepare_write(struct file *file, struct page *page,
 			      unsigned offset, unsigned to)
 {
 	void *addr = kmap(page);
+
 	if (!Page_Uptodate(page)) {
 		memset(addr, 0, PAGE_CACHE_SIZE);
 		flush_dcache_page(page);
 		SetPageUptodate(page);
 	}
+
 	SetPageDirty(page);
 	return 0;
 }
@@ -283,6 +285,7 @@ static int dmfs_commit_write(struct file *file, struct page *page,
 	kunmap(page);
 	if (pos > inode->i_size)
 		inode->i_size = pos;
+
 	return 0;
 }
 
@@ -317,7 +320,8 @@ static int dmfs_table_open(struct inode *inode, struct file *file)
 	return 0;
 }
 
-static int dmfs_table_sync(struct file *file, struct dentry *dentry, int datasync)
+static int dmfs_table_sync(struct file *file, struct dentry *dentry,
+			   int datasync)
 {
 	return 0;
 }
@@ -328,6 +332,7 @@ static int dmfs_table_revalidate(struct dentry *dentry)
 	struct inode *parent = dentry->d_parent->d_inode;
 
 	inode->i_size = parent->i_size;
+
 	return 0;
 }
 
@@ -335,20 +340,20 @@ struct address_space_operations dmfs_address_space_operations = {
 	readpage:	dmfs_readpage,
 	writepage:	fail_writepage,
 	prepare_write:	dmfs_prepare_write,
-	commit_write:	dmfs_commit_write,
+	commit_write:	dmfs_commit_write
 };
 
 static struct file_operations dmfs_table_file_operations = {
- 	llseek:		generic_file_llseek,
+	llseek:		generic_file_llseek,
 	read:		generic_file_read,
 	write:		generic_file_write,
 	open:		dmfs_table_open,
 	release:	dmfs_table_release,
-	fsync:		dmfs_table_sync,
+	fsync:		dmfs_table_sync
 };
 
 static struct inode_operations dmfs_table_inode_operations = {
-	revalidate:	dmfs_table_revalidate,
+	revalidate:	dmfs_table_revalidate
 };
 
 struct inode *dmfs_create_table(struct inode *dir, int mode)
@@ -364,4 +369,3 @@ struct inode *dmfs_create_table(struct inode *dir, int mode)
 
 	return inode;
 }
-

@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Fri Dec  7 20:42:52 2001
++++ linux/drivers/md/Config.in	Mon Dec 10 17:43:12 2001
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Fri Dec  7 20:42:52 2001
++++ linux/drivers/md/Makefile	Mon Dec 10 17:43:12 2001
 @@ -4,9 +4,11 @@
  
  O_TARGET	:= mddev.o
@@ -39,8 +39,8 @@ diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 +	$(LD) -r -o $@ $(dm-mod-objs)
 diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper.h
 --- linux-2.4.16/drivers/md/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/device-mapper.h	Fri Dec  7 13:16:25 2001
-@@ -0,0 +1,64 @@
++++ linux/drivers/md/device-mapper.h	Mon Dec 10 15:43:56 2001
+@@ -0,0 +1,57 @@
 +/*
 + * device-mapper.h
 + *
@@ -49,8 +49,8 @@ diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 + * This file is released under the LGPL.
 + */
 +
-+#ifndef DEVICE_MAPPER_H
-+#define DEVICE_MAPPER_H
++#ifndef _LINUX_DEVICE_MAPPER_H
++#define _LINUX_DEVICE_MAPPER_H
 +
 +#define DM_DIR "device-mapper"
 +#define DM_MAX_TYPE_NAME 16
@@ -62,53 +62,46 @@ diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +struct dm_dev;
 +typedef unsigned int offset_t;
 +
-+typedef void (*dm_error_fn)(const char *message, void *private);
-+
 +/*
-+ * constructor, destructor and map fn types
++ * Prototypes for functions of a target
 + */
-+typedef int (*dm_ctr_fn)(struct dm_table *t, offset_t b, offset_t l,
-+			 char *args, void **context);
++typedef int (*dm_ctr_fn) (struct dm_table * t, offset_t b, offset_t l,
++			  char *args, void **context);
++typedef void (*dm_dtr_fn) (struct dm_table * t, void *c);
++typedef int (*dm_map_fn) (struct buffer_head * bh, int rw, void *context);
++typedef int (*dm_err_fn) (struct buffer_head *bh, int rw, void *context);
 +
-+typedef void (*dm_dtr_fn)(struct dm_table *t, void *c);
-+typedef int (*dm_map_fn)(struct buffer_head *bh, int rw, void *context);
-+typedef int (*dm_err_fn)(struct buffer_head *bh, int rw, void *context);
-+typedef char *(*dm_print_fn)(void *context);
 +
 +/*
-+ * Contructors should call this to make sure any
-+ * destination devices are handled correctly
-+ * (ie. opened/closed).
++ * Contructors should call these functions to ensure destination devices 
++ * are opened/closed correctly 
 + */
 +int dm_table_get_device(struct dm_table *t, const char *path,
-+			offset_t start, offset_t len,
-+			struct dm_dev **result);
++			offset_t start, offset_t len, struct dm_dev **result);
 +void dm_table_put_device(struct dm_table *table, struct dm_dev *d);
 +
 +/*
-+ * information about a target type
++ * Information about a target type
 + */
 +struct target_type {
-+        const char *name;
-+        struct module *module;
-+        dm_ctr_fn ctr;
-+        dm_dtr_fn dtr;
-+        dm_map_fn map;
++	const char *name;
++	struct module *module;
++	dm_ctr_fn ctr;
++	dm_dtr_fn dtr;
++	dm_map_fn map;
 +	dm_err_fn err;
-+	dm_print_fn print;
 +};
 +
 +int dm_register_target(struct target_type *t);
 +int dm_unregister_target(struct target_type *t);
 +
-+#endif /* __KERNEL__ */
++#endif				/* __KERNEL__ */
 +
-+#endif /* DEVICE_MAPPER_H */
-+
++#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 --- linux-2.4.16/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Wed Dec  5 22:00:51 2001
-@@ -0,0 +1,331 @@
++++ linux/drivers/md/dm-ioctl.c	Mon Dec 10 17:38:20 2001
+@@ -0,0 +1,327 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -167,7 +160,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		       struct dm_target_spec **spec, char **params)
 +{
 +	*spec = (struct dm_target_spec *)
-+		(((unsigned char *) last) + last->next);
++	    (((unsigned char *) last) + last->next);
 +	*params = (char *) (*spec + 1);
 +
 +	return valid_str(*params, end);
@@ -214,7 +207,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	for (i = 0; i < args->target_count; i++) {
 +
 +		r = first ? first_target(args, end, &spec, &params) :
-+			next_target(spec, end, &spec, &params);
++		    next_target(spec, end, &spec, &params);
 +
 +		if (!r)
 +			PARSE_ERROR("unable to find target");
@@ -228,7 +221,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +		/* build the target */
 +		if (ttype->ctr(table, spec->sector_start, spec->length, params,
-+			       &context))
++			       &context)) 
 +			PARSE_ERROR(context);
 +
 +		/* add the target to the table */
@@ -268,7 +261,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	param.minor = MINOR(md->dev);
 +	param.target_count = md->map->num_targets;
 +
-+ out:
++      out:
 +	return copy_to_user(user, &param, sizeof(param));
 +}
 +
@@ -298,7 +291,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +	return 0;
 +
-+ bad:
++      bad:
 +	dm_table_destroy(t);
 +	return r;
 +}
@@ -363,7 +356,6 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	return 0;
 +}
 +
-+
 +static int ctl_ioctl(struct inode *inode, struct file *file,
 +		     uint command, ulong a)
 +{
@@ -403,7 +395,6 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	return r;
 +}
 +
-+
 +static struct file_operations _ctl_fops = {
 +	open:		ctl_open,
 +	release:	ctl_close,
@@ -411,20 +402,19 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	owner:		THIS_MODULE,
 +};
 +
-+
 +static devfs_handle_t _ctl_handle;
 +
 +int dm_interface_init(void)
 +{
 +	int r;
 +
-+	if ((r = devfs_register_chrdev(DM_CHAR_MAJOR, DM_DIR,
-+				       &_ctl_fops)) < 0) {
++	r = devfs_register_chrdev(DM_CHAR_MAJOR, DM_DIR, &_ctl_fops);
++	if (r < 0) {
 +		WARN("devfs_register_chrdev failed for dm control dev");
 +		return -EIO;
 +	}
 +
-+	_ctl_handle = devfs_register(0 , DM_DIR "/control", 0,
++	_ctl_handle = devfs_register(0, DM_DIR "/control", 0,
 +				     DM_CHAR_MAJOR, 0,
 +				     S_IFCHR | S_IRUSR | S_IWUSR | S_IRGRP,
 +				     &_ctl_fops, NULL);
@@ -439,11 +429,10 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	if (devfs_unregister_chrdev(DM_CHAR_MAJOR, DM_DIR) < 0)
 +		WARN("devfs_unregister_chrdev failed for dm control device");
 +}
-+
 diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 --- linux-2.4.16/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Wed Dec  5 22:01:06 2001
-@@ -0,0 +1,146 @@
++++ linux/drivers/md/dm-linear.c	Mon Dec 10 16:31:04 2001
+@@ -0,0 +1,135 @@
 +/*
 + * dm-linear.c
 + *
@@ -463,7 +452,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +#include "dm.h"
 +
 +/*
-+ * linear: maps a linear range of a device.
++ * Linear: maps a linear range of a device.
 + */
 +struct linear_c {
 +	long delta;		/* FIXME: we need a signed offset type */
@@ -472,19 +461,18 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +
 +static inline char *next_token(char **p)
 +{
-+        static const char *delim = " \t";
-+        char *r;
++	static const char *delim = " \t";
++	char *r;
 +
-+        do {
-+                r = strsep(p, delim);
-+        } while(r && *r == 0);
++	do {
++		r = strsep(p, delim);
++	} while (r && *r == 0);
 +
-+        return r;
++	return r;
 +}
 +
 +/*
-+ * construct a linear mapping.
-+ * <dev_path> <offset>
++ * Construct a linear mapping: <dev_path> <offset>
 + */
 +static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
 +		      char *args, void **context)
@@ -521,15 +509,16 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +	*context = lc;
 +	return 0;
 +
-+bad_free:
++      bad_free:
 +	kfree(lc);
-+bad:
++      bad:
 +	return r;
 +}
 +
 +static void linear_dtr(struct dm_table *t, void *c)
 +{
 +	struct linear_c *lc = (struct linear_c *) c;
++
 +	dm_table_put_device(t, lc->dev);
 +	kfree(c);
 +}
@@ -540,27 +529,17 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +
 +	bh->b_rdev = lc->dev->dev;
 +	bh->b_rsector = bh->b_rsector + lc->delta;
++
 +	return 1;
 +}
 +
-+/*
-+ * Debugging use only.
-+ */
-+static char *linear_print(void *context)
-+{
-+	struct linear_c *lc = (struct linear_c *)context;
-+static char buf[256];
-+	sprintf(buf, " %lu", lc->delta);
-+	return buf;
-+}
-+
 +static struct target_type linear_target = {
-+	name: "linear",
-+	module: THIS_MODULE,
-+	ctr: linear_ctr,
-+	dtr: linear_dtr,
-+	map: linear_map,
-+	print: linear_print,
++	name:	"linear",
++	module:	THIS_MODULE,
++	ctr:	linear_ctr,
++	dtr:	linear_dtr,
++	map:	linear_map,
++	err:	NULL
 +};
 +
 +static int __init linear_init(void)
@@ -589,11 +568,10 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +MODULE_AUTHOR("Joe Thornber <thornber@uk.sistina.com>");
 +MODULE_DESCRIPTION("Device Mapper: Linear mapping");
 +MODULE_LICENSE("GPL");
-+
 diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 --- linux-2.4.16/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Wed Dec  5 22:01:06 2001
-@@ -0,0 +1,185 @@
++++ linux/drivers/md/dm-stripe.c	Mon Dec 10 16:30:25 2001
+@@ -0,0 +1,187 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -622,36 +600,37 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +	/* The size of this target / num. stripes */
 +	uint32_t stripe_width;
 +
-+	/* eg, we stripe in 64k chunks */
++	/* stripe chunk size */
 +	uint32_t chunk_shift;
 +	offset_t chunk_mask;
 +
 +	struct stripe stripe[0];
 +};
 +
-+
 +static inline struct stripe_c *alloc_context(int stripes)
 +{
 +	size_t len = sizeof(struct stripe_c) +
-+		(sizeof(struct stripe) * stripes);
++	    (sizeof(struct stripe) * stripes);
++
 +	return kmalloc(len, GFP_KERNEL);
 +}
 +
 +/*
-+ * parses a single <dev> <sector> pair.
++ * Parse a single <dev> <sector> pair
 + */
 +static int get_stripe(struct dm_table *t, struct stripe_c *sc,
 +		      int stripe, char *args)
 +{
 +	int n, r;
-+	char path[256];		/* FIXME: buffer overrun risk */
++	char path[4096];
 +	unsigned long start;
 +
-+	if (sscanf(args, "%s %lu %n", path, &start, &n) != 2)
++	if (sscanf(args, "%4095s %lu %n", path, &start, &n) != 2)
 +		return -EINVAL;
 +
-+	if ((r = dm_table_get_device(t, path, start, sc->stripe_width,
-+				     &sc->stripe[stripe].dev)))
++	r = dm_table_get_device(t, path, start, sc->stripe_width,
++				&sc->stripe[stripe].dev);
++	if (r)
 +		return -ENXIO;
 +
 +	sc->stripe[stripe].physical_start = start;
@@ -659,7 +638,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +}
 +
 +/*
-+ * construct a striped mapping.
++ * Construct a striped mapping.
 + * <number of stripes> <chunk size (2^^n)> [<dev_path> <offset>]+
 + */
 +static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
@@ -671,30 +650,28 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +	int n, i;
 +
 +	*context = "couldn't parse <stripes> <chunk size>";
-+	if (sscanf(args, "%u %u %n", &stripes, &chunk_size, &n) != 2) {
++	if (sscanf(args, "%u %u %n", &stripes, &chunk_size, &n) != 2)
 +		return -EINVAL;
-+	}
 +
 +	*context = "target length is not divisable by the number of stripes";
-+	if (l % stripes) {
++	if (l % stripes)
 +		return -EINVAL;
-+	}
 +
 +	*context = "couldn't allocate memory for striped context";
-+	if (!(sc = alloc_context(stripes))) {
++	sc = alloc_context(stripes);
++	if (!sc)
 +		return -ENOMEM;
-+	}
 +
 +	sc->logical_start = b;
 +	sc->stripes = stripes;
 +	sc->stripe_width = l / stripes;
 +
 +	/*
-+	 * chunk_size is a power of two.  We only
-+	 * that power and the mask.
++	 * chunk_size is a power of two
 +	 */
-+	*context = "invalid chunk size";
-+	if (!chunk_size) {
++	if (!chunk_size || chunk_size & (chunk_size - 1)) {
++		*context = "invalid chunk size";
++		kfree(sc);
 +		return -EINVAL;
 +	}
 +
@@ -710,13 +687,12 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +		args += n;
 +		n = get_stripe(t, sc, i, args);
 +
-+		*context = "couldn't parse stripe destination";
 +		if (n < 0) {
++			*context = "couldn't parse stripe destination";
 +			kfree(sc);
 +			return n;
 +		}
 +	}
-+
 +
 +	*context = sc;
 +	return 0;
@@ -731,6 +707,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +		dm_table_put_device(t, sc->stripe[i].dev);
 +
 +	kfree(sc);
++	return;
 +}
 +
 +static int stripe_map(struct buffer_head *bh, int rw, void *context)
@@ -739,29 +716,30 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +
 +	offset_t offset = bh->b_rsector - sc->logical_start;
 +	uint32_t chunk = (uint32_t) (offset >> sc->chunk_shift);
-+	uint32_t stripe = chunk % sc->stripes; /* 32bit modulus */
++	uint32_t stripe = chunk % sc->stripes;	/* 32bit modulus */
 +	chunk = chunk / sc->stripes;
 +
 +	bh->b_rdev = sc->stripe[stripe].dev->dev;
 +	bh->b_rsector = sc->stripe[stripe].physical_start +
-+		(chunk << sc->chunk_shift) +
-+		(offset & sc->chunk_mask);
++	    (chunk << sc->chunk_shift) + (offset & sc->chunk_mask);
 +	return 1;
 +}
 +
 +static struct target_type stripe_target = {
-+	name: "striped",
-+	module: THIS_MODULE,
-+	ctr: stripe_ctr,
-+	dtr: stripe_dtr,
-+	map: stripe_map,
++	name:	"striped",
++	module:	THIS_MODULE,
++	ctr:	stripe_ctr,
++	dtr:	stripe_dtr,
++	map:	stripe_map,
++	err:	NULL
 +};
 +
 +static int __init stripe_init(void)
 +{
 +	int r;
 +
-+	if ((r = dm_register_target(&stripe_target)) < 0)
++	r = dm_register_target(&stripe_target);
++	if (r < 0)
 +		WARN("linear target register failed");
 +
 +	return r;
@@ -771,6 +749,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +{
 +	if (dm_unregister_target(&stripe_target))
 +		WARN("striped target unregister failed");
++
++	return;
 +}
 +
 +module_init(stripe_init);
@@ -781,8 +761,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +MODULE_LICENSE("GPL");
 diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 --- linux-2.4.16/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-table.c	Wed Dec  5 22:01:06 2001
-@@ -0,0 +1,407 @@
++++ linux/drivers/md/dm-table.c	Mon Dec 10 16:23:04 2001
+@@ -0,0 +1,402 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -793,22 +773,21 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +
 +#include <linux/blkdev.h>
 +
-+
 +/* ceiling(n / size) * size */
-+static inline ulong round_up(ulong n, ulong size)
++static inline unsigned long round_up(unsigned long n, unsigned long size)
 +{
-+	ulong r = n % size;
++	unsigned long r = n % size;
 +	return n + (r ? (size - r) : 0);
 +}
 +
 +/* ceiling(n / size) */
-+static inline ulong div_up(ulong n, ulong size)
++static inline unsigned long div_up(unsigned long n, unsigned long size)
 +{
 +	return round_up(n, size) / size;
 +}
 +
 +/* similar to ceiling(log_size(n)) */
-+static uint int_log(ulong n, ulong base)
++static uint int_log(unsigned long n, unsigned long base)
 +{
 +	int result = 0;
 +
@@ -830,7 +809,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +		n = get_child(n, CHILDREN_PER_NODE - 1);
 +
 +	if (n >= t->counts[l])
-+		return (offset_t) -1;
++		return (offset_t) - 1;
 +
 +	return get_node(t, l, n)[KEYS_PER_NODE - 1];
 +}
@@ -876,7 +855,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +		memcpy(n_targets, t->targets, sizeof(*n_targets) * n);
 +	}
 +
-+	memset(n_highs + n , -1, sizeof(*n_highs) * (num - n));
++	memset(n_highs + n, -1, sizeof(*n_highs) * (num - n));
 +	vfree(t->highs);
 +
 +	t->num_allocated = num;
@@ -939,7 +918,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +
 +	/* free the device list */
 +	if (t->devices.next != &t->devices) {
-+		WARN("there are still devices present, someone isn't "
++		WARN("there are still devices present: someone isn't "
 +		     "calling dm_table_remove_device");
 +
 +		free_devices(&t->devices);
@@ -960,38 +939,37 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +	return 0;
 +}
 +
-+
 +/*
 + * convert a device path to a kdev_t.
 + */
-+int lookup_device(const char *path, kdev_t *dev)
++int lookup_device(const char *path, kdev_t * dev)
 +{
-+       int r;
-+       struct nameidata nd;
-+       struct inode *inode;
++	int r;
++	struct nameidata nd;
++	struct inode *inode;
 +
-+       if (!path_init(path, LOOKUP_FOLLOW, &nd))
-+               return 0;
++	if (!path_init(path, LOOKUP_FOLLOW, &nd))
++		return 0;
 +
-+       if ((r = path_walk(path, &nd)))
-+               goto bad;
++	if ((r = path_walk(path, &nd)))
++		goto bad;
 +
-+       inode = nd.dentry->d_inode;
-+       if (!inode) {
-+               r = -ENOENT;
-+               goto bad;
-+       }
++	inode = nd.dentry->d_inode;
++	if (!inode) {
++		r = -ENOENT;
++		goto bad;
++	}
 +
-+       if (!S_ISBLK(inode->i_mode)) {
-+               r = -EINVAL;
-+               goto bad;
-+       }
++	if (!S_ISBLK(inode->i_mode)) {
++		r = -EINVAL;
++		goto bad;
++	}
 +
-+       *dev = inode->i_rdev;
++	*dev = inode->i_rdev;
 +
-+ bad:
-+       path_release(&nd);
-+       return r;
++      bad:
++	path_release(&nd);
++	return r;
 +}
 +
 +/*
@@ -1007,7 +985,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +			return dd;
 +	}
 +
-+       return NULL;
++	return NULL;
 +}
 +
 +/*
@@ -1016,18 +994,18 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 + */
 +static int open_dev(struct dm_dev *d)
 +{
-+       int err;
++	int err;
 +
-+       if (d->bd)
-+	       BUG();
++	if (d->bd)
++		BUG();
 +
-+       if (!(d->bd = bdget(kdev_t_to_nr(d->dev))))
-+               return -ENOMEM;
++	if (!(d->bd = bdget(kdev_t_to_nr(d->dev))))
++		return -ENOMEM;
 +
-+       if ((err = blkdev_get(d->bd, FMODE_READ|FMODE_WRITE, 0, BDEV_FILE)))
-+               return err;
++	if ((err = blkdev_get(d->bd, FMODE_READ | FMODE_WRITE, 0, BDEV_FILE)))
++		return err;
 +
-+       return 0;
++	return 0;
 +}
 +
 +/*
@@ -1057,7 +1035,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +		 * so give the benefit of the doubt */
 +		return 1;
 +
-+	 /* convert to 512-byte sectors */
++	/* convert to 512-byte sectors */
 +	dev_size <<= 1;
 +
 +	return ((start < dev_size) && (len <= (dev_size - start)));
@@ -1068,8 +1046,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 + * usage count if it's already present.
 + */
 +int dm_table_get_device(struct dm_table *t, const char *path,
-+			offset_t start, offset_t len,
-+			struct dm_dev **result)
++			offset_t start, offset_t len, struct dm_dev **result)
 +{
 +	int r;
 +	kdev_t dev;
@@ -1115,11 +1092,11 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 + */
 +void dm_table_put_device(struct dm_table *t, struct dm_dev *dd)
 +{
-+       if (atomic_dec_and_test(&dd->count)) {
-+	       close_dev(dd);
-+	       list_del(&dd->list);
-+               kfree(dd);
-+       }
++	if (atomic_dec_and_test(&dd->count)) {
++		close_dev(dd);
++		list_del(&dd->list);
++		kfree(dd);
++	}
 +}
 +
 +/*
@@ -1140,7 +1117,6 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +
 +	return 0;
 +}
-+
 +
 +static int setup_indexes(struct dm_table *t)
 +{
@@ -1165,7 +1141,6 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +
 +	return 0;
 +}
-+
 +
 +/*
 + * builds the btree to index the map
@@ -1192,8 +1167,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +EXPORT_SYMBOL(dm_table_put_device);
 diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 --- linux-2.4.16/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-target.c	Wed Dec  5 22:01:06 2001
-@@ -0,0 +1,180 @@
++++ linux/drivers/md/dm-target.c	Mon Dec 10 16:23:04 2001
+@@ -0,0 +1,184 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
 + *
@@ -1206,8 +1181,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +struct tt_internal {
 +	struct target_type tt;
 +
-+        struct list_head list;
-+        long use;
++	struct list_head list;
++	long use;
 +};
 +
 +static LIST_HEAD(_targets);
@@ -1217,11 +1192,11 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +
 +static inline struct tt_internal *__find_target_type(const char *name)
 +{
-+	struct list_head *tmp;
++	struct list_head *tih;
 +	struct tt_internal *ti;
 +
-+	list_for_each(tmp, &_targets) {
-+		ti = list_entry(tmp, struct tt_internal, list);
++	list_for_each(tih, &_targets) {
++		ti = list_entry(tih, struct tt_internal, list);
 +
 +		if (!strcmp(name, ti->tt.name))
 +			return ti;
@@ -1257,6 +1232,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +
 +	strcat(module_name, name);
 +	request_module(module_name);
++
++	return;
 +}
 +
 +struct target_type *dm_get_target_type(const char *name)
@@ -1282,6 +1259,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +	if (ti->use < 0)
 +		BUG();
 +	read_unlock(&_lock);
++
++	return;
 +}
 +
 +static struct tt_internal *alloc_target(struct target_type *t)
@@ -1350,6 +1329,7 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +static void io_err_dtr(struct dm_table *t, void *c)
 +{
 +	/* empty */
++	return;
 +}
 +
 +static int io_err_map(struct buffer_head *bh, int rw, void *context)
@@ -1359,12 +1339,12 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +}
 +
 +static struct target_type error_target = {
-+	name: "error",
-+	ctr: io_err_ctr,
-+	dtr: io_err_dtr,
-+	map: io_err_map
++	name:"error",
++	ctr:io_err_ctr,
++	dtr:io_err_dtr,
++	map:io_err_map,
++	err:NULL
 +};
-+
 +
 +int dm_target_init(void)
 +{
@@ -1373,11 +1353,10 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
-+
 diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.16/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Wed Dec  5 23:12:36 2001
-@@ -0,0 +1,900 @@
++++ linux/drivers/md/dm.c	Mon Dec 10 16:31:57 2001
+@@ -0,0 +1,892 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
 + *
@@ -1399,7 +1378,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +#define DEVICE_NAME "device-mapper"
 +
 +static const char *_name = DEVICE_NAME;
-+static int _version[3] = {0, 1, 0};
++static int _version[3] = { 0, 1, 0 };
 +static int major = 0;
 +
 +struct io_hook {
@@ -1407,16 +1386,11 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	struct target *target;
 +	int rw;
 +
-+	void (*end_io)(struct buffer_head * bh, int uptodate);
++	void (*end_io)(struct buffer_head *bh, int uptodate);
 +	void *context;
 +};
 +
 +static kmem_cache_t *_io_hook_cache;
-+
-+#define rl down_read(&_dev_lock)
-+#define ru up_read(&_dev_lock)
-+#define wl down_write(&_dev_lock)
-+#define wu up_write(&_dev_lock)
 +
 +static struct rw_semaphore _dev_lock;
 +static struct mapped_device *_devs[MAX_DEVICES];
@@ -1476,12 +1450,12 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	       _version[0], _version[1], _version[2]);
 +	return 0;
 +
-+err_blkdev:
++      err_blkdev:
 +	printk(KERN_ERR "%s -- register_blkdev failed\n", _name);
 +	dm_interface_exit();
-+err_cache_free:
++      err_cache_free:
 +	kmem_cache_destroy(_io_hook_cache);
-+err:
++      err:
 +	return ret;
 +}
 +
@@ -1517,16 +1491,16 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	if (minor >= MAX_DEVICES)
 +		return -ENXIO;
 +
-+	wl;
++	down_write(&_dev_lock);
 +	md = _devs[minor];
 +
 +	if (!md) {
-+		wu;
++		up_write(&_dev_lock);
 +		return -ENXIO;
 +	}
 +
 +	md->use_count++;
-+	wu;
++	up_write(&_dev_lock);
 +
 +	return 0;
 +}
@@ -1539,16 +1513,16 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	if (minor >= MAX_DEVICES)
 +		return -ENXIO;
 +
-+	wl;
++	down_write(&_dev_lock);
 +	md = _devs[minor];
 +	if (!md || md->use_count < 1) {
 +		WARN("reference count in mapped_device incorrect");
-+		wu;
++		up_write(&_dev_lock);
 +		return -ENXIO;
 +	}
 +
 +	md->use_count--;
-+	wu;
++	up_write(&_dev_lock);
 +
 +	return 0;
 +}
@@ -1557,7 +1531,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +#define VOLUME_SIZE(minor) (_block_size[(minor)] << 1)
 +
 +static int dm_blk_ioctl(struct inode *inode, struct file *file,
-+			uint command, ulong a)
++			uint command, unsigned long a)
 +{
 +	int minor = MINOR(inode->i_rdev);
 +	long size;
@@ -1573,7 +1547,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	case BLKRASET:
 +	case BLKRAGET:
 +	case BLKFLSBUF:
-+#if 0
++#if 0   /* Future stacking block device */
 +	case BLKELVSET:
 +	case BLKELVGET:
 +#endif
@@ -1582,7 +1556,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +
 +	case BLKGETSIZE:
 +		size = VOLUME_SIZE(minor);
-+		if (copy_to_user((void *) a, &size, sizeof (long)))
++		if (copy_to_user((void *)a, &size, sizeof(long)))
 +			return -EFAULT;
 +		break;
 +
@@ -1677,9 +1651,9 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	if (!di)
 +		return -ENOMEM;
 +
-+	wl;
++	down_write(&_dev_lock);
 +	if (!md->suspended) {
-+		wu;
++		up_write(&_dev_lock);
 +		return 0;
 +	}
 +
@@ -1687,7 +1661,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	di->rw = rw;
 +	di->next = md->deferred;
 +	md->deferred = di;
-+	wu;
++	up_write(&_dev_lock);
 +
 +	return 1;
 +}
@@ -1766,7 +1740,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	if (minor >= MAX_DEVICES)
 +		goto bad_no_lock;
 +
-+	rl;
++	down_read(&_dev_lock);
 +	md = _devs[minor];
 +
 +	if (!md)
@@ -1777,7 +1751,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	 * this io for later.
 +	 */
 +	while (md->suspended) {
-+		ru;
++		up_read(&_dev_lock);
 +
 +		if (rw == READA)
 +			goto bad_no_lock;
@@ -1788,7 +1762,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +			goto bad_no_lock;
 +
 +		else if (r > 0)
-+			return 0; /* deferred successfully */
++			return 0;	/* deferred successfully */
 +
 +		/*
 +		 * We're in a while loop, because
@@ -1796,19 +1770,19 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +		 * get to the following read
 +		 * lock
 +		 */
-+		rl;
++		down_read(&_dev_lock);
 +	}
 +
 +	if (!__map_buffer(md, bh, rw, __find_node(md->map, bh)))
 +		goto bad;
 +
-+	ru;
++	up_read(&_dev_lock);
 +	return 1;
 +
-+ bad:
-+	ru;
++      bad:
++	up_read(&_dev_lock);
 +
-+ bad_no_lock:
++      bad_no_lock:
 +	buffer_IO_error(bh);
 +	return 0;
 +}
@@ -1826,14 +1800,14 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 + * creates a dummy buffer head and maps it (for lilo).
 + */
 +static int do_bmap(kdev_t dev, unsigned long block,
-+		   kdev_t *r_dev, unsigned long *r_block)
++		   kdev_t * r_dev, unsigned long *r_block)
 +{
 +	struct mapped_device *md;
 +	struct buffer_head bh;
 +	int minor = MINOR(dev), r;
 +	struct target *t;
 +
-+	rl;
++	down_read(&_dev_lock);
 +	if ((minor >= MAX_DEVICES) || !(md = _devs[minor]) || md->suspended) {
 +		r = -ENXIO;
 +		goto out;
@@ -1860,8 +1834,8 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	*r_dev = bh.b_rdev;
 +	*r_block = bh.b_rsector / (bh.b_size >> 9);
 +
-+ out:
-+	ru;
++      out:
++	up_read(&_dev_lock);
 +	return r;
 +}
 +
@@ -1882,7 +1856,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +		return r;
 +
 +	if (put_user(kdev_t_to_nr(r_dev), &lvb->lv_dev) ||
-+	    put_user(r_block, &lvb->lv_block))
++	    put_user(r_block, &lvb->lv_block)) 
 +		return -EFAULT;
 +
 +	return 0;
@@ -1929,14 +1903,14 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	if (!md)
 +		return 0;
 +
-+	memset(md, 0, sizeof (*md));
++	memset(md, 0, sizeof(*md));
 +
-+	wl;
++	down_write(&_dev_lock);
 +	minor = (minor < 0) ? __any_old_dev() : __specific_dev(minor);
 +
 +	if (minor < 0) {
 +		WARN("no free devices available");
-+		wu;
++		up_write(&_dev_lock);
 +		kfree(md);
 +		return 0;
 +	}
@@ -1948,7 +1922,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	init_waitqueue_head(&md->wait);
 +
 +	_devs[minor] = md;
-+	wu;
++	up_write(&_dev_lock);
 +
 +	return md;
 +}
@@ -1961,10 +1935,10 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +static int register_device(struct mapped_device *md)
 +{
 +	md->devfs_entry =
-+		devfs_register(_dev_dir, md->name, DEVFS_FL_CURRENT_OWNER,
-+			       MAJOR(md->dev), MINOR(md->dev),
-+			       S_IFBLK | S_IRUSR | S_IWUSR | S_IRGRP,
-+			       &dm_blk_dops, NULL);
++	    devfs_register(_dev_dir, md->name, DEVFS_FL_CURRENT_OWNER,
++			   MAJOR(md->dev), MINOR(md->dev),
++			   S_IFBLK | S_IRUSR | S_IWUSR | S_IRGRP,
++			   &dm_blk_dops, NULL);
 +
 +	return 0;
 +}
@@ -2032,7 +2006,6 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	_hardsect_size[minor] = 0;
 +}
 +
-+
 +static struct mapped_device *__get_by_name(const char *name)
 +{
 +	int i;
@@ -2063,9 +2036,9 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 + * constructor for a new device
 + */
 +struct mapped_device *dm_create(const char *name, int minor,
-+	      struct dm_table *table)
++				struct dm_table *table)
 +{
-+	int r;
++	int r = -EINVAL;
 +	struct mapped_device *md;
 +
 +	if (minor >= MAX_DEVICES)
@@ -2074,29 +2047,30 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	if (!(md = alloc_dev(minor)))
 +		return ERR_PTR(-ENXIO);
 +
-+	wl;
-+	if (!check_name(name)) {
-+		wu;
-+		free_dev(md);
-+		return ERR_PTR(-EINVAL);
-+	}
++	down_write(&_dev_lock);
++
++	if (!check_name(name))
++		goto err;
 +
 +	strcpy(md->name, name);
 +	_devs[minor] = md;
-+	if ((r = register_device(md))) {
-+		wu;
-+		free_dev(md);
-+		return ERR_PTR(r);
-+	}
 +
-+	if ((r = __bind(md, table))) {
-+		wu;
-+		free_dev(md);
-+		return ERR_PTR(r);
-+	}
-+	wu;
++	r = register_device(md);
++	if (r)
++		goto err;
++
++	r = __bind(md, table);
++	if (r)
++		goto err;
++
++	up_write(&_dev_lock);
 +
 +	return md;
++
++      err:
++	up_write(&_dev_lock);
++	free_dev(md);
++	return ERR_PTR(r);
 +}
 +
 +/*
@@ -2107,23 +2081,23 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +{
 +	int minor, r;
 +
-+	rl;
++	down_read(&_dev_lock);
 +	if (md->suspended || md->use_count) {
-+		ru;
++		up_read(&_dev_lock);
 +		return -EPERM;
 +	}
 +
 +	fsync_dev(md->dev);
-+	ru;
++	up_read(&_dev_lock);
 +
-+	wl;
++	down_write(&_dev_lock);
 +	if (md->use_count) {
-+		wu;
++		up_write(&_dev_lock);
 +		return -EPERM;
 +	}
 +
 +	if ((r = unregister_device(md))) {
-+		wu;
++		up_write(&_dev_lock);
 +		return r;
 +	}
 +
@@ -2131,13 +2105,12 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	_devs[minor] = 0;
 +	__unbind(md);
 +
-+	wu;
++	up_write(&_dev_lock);
 +
 +	free_dev(md);
 +
 +	return 0;
 +}
-+
 +
 +/*
 + * requeue the deferred buffer_heads by calling
@@ -2162,26 +2135,25 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +{
 +	int r;
 +
-+	wl;
++	down_write(&_dev_lock);
 +
 +	/* device must be suspended */
 +	if (!md->suspended) {
-+		wu;
++		up_write(&_dev_lock);
 +		return -EPERM;
 +	}
 +
 +	__unbind(md);
 +
 +	if ((r = __bind(md, table))) {
-+		wu;
++		up_write(&_dev_lock);
 +		return r;
 +	}
 +
-+	wu;
++	up_write(&_dev_lock);
 +
 +	return 0;
 +}
-+
 +
 +/*
 + * We need to be able to change a mapping table
@@ -2196,31 +2168,31 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +{
 +	DECLARE_WAITQUEUE(wait, current);
 +
-+	wl;
++	down_write(&_dev_lock);
 +	if (md->suspended) {
-+		wu;
++		up_write(&_dev_lock);
 +		return -EINVAL;
 +	}
 +
 +	md->suspended = 1;
-+	wu;
++	up_write(&_dev_lock);
 +
 +	/* wait for all the pending io to flush */
 +	add_wait_queue(&md->wait, &wait);
 +	current->state = TASK_UNINTERRUPTIBLE;
 +	do {
-+		wl;
++		down_write(&_dev_lock);
 +		if (!atomic_read(&md->pending))
 +			break;
 +
-+		wu;
++		up_write(&_dev_lock);
 +		schedule();
 +
 +	} while (1);
 +
 +	current->state = TASK_RUNNING;
 +	remove_wait_queue(&md->wait, &wait);
-+	wu;
++	up_write(&_dev_lock);
 +
 +	return 0;
 +}
@@ -2229,16 +2201,16 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +{
 +	struct deferred_io *def;
 +
-+	wl;
++	down_write(&_dev_lock);
 +	if (!md->suspended) {
-+		wu;
++		up_write(&_dev_lock);
 +		return -EINVAL;
 +	}
 +
 +	md->suspended = 0;
 +	def = md->deferred;
 +	md->deferred = NULL;
-+	wu;
++	up_write(&_dev_lock);
 +
 +	flush_deferred_io(def);
 +
@@ -2252,18 +2224,18 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +{
 +	struct mapped_device *md;
 +
-+	rl;
++	down_read(&_dev_lock);
 +	md = __get_by_name(name);
-+	ru;
++	up_read(&_dev_lock);
 +
 +	return md;
 +}
 +
 +struct block_device_operations dm_blk_dops = {
-+	open:	  dm_blk_open,
-+	release:  dm_blk_close,
-+	ioctl:	  dm_blk_ioctl,
-+	owner:    THIS_MODULE,
++	open:		dm_blk_open,
++	release:	dm_blk_close,
++	ioctl:		dm_blk_ioctl,
++	owner:		THIS_MODULE
 +};
 +
 +/*
@@ -2277,114 +2249,19 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +MODULE_DESCRIPTION("device-mapper driver");
 +MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 +MODULE_LICENSE("GPL");
-+
 diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 --- linux-2.4.16/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Fri Dec  7 13:16:42 2001
-@@ -0,0 +1,242 @@
++++ linux/drivers/md/dm.h	Mon Dec 10 16:23:04 2001
+@@ -0,0 +1,145 @@
 +/*
 + * dm.h
 + *
-+ * Copyright (C) 2001 Sistina Software
-+ *
-+ * This file is released under the GPL.
-+ */
-+
-+/*
 + * Internal header file for device mapper
 + *
-+ * Changelog
++ * Copyright (C) 2001 Sistina Software
 + *
-+ *     16/08/2001 - First version [Joe Thornber]
++ * This file is released under the LGPL.
 + */
-+
-+/*
-+ * This driver attempts to provide a generic way of specifying logical
-+ * devices which are mapped onto other devices.
-+ *
-+ * It does this by mapping sections of the logical device onto 'targets'.
-+ *
-+ * When the logical device is accessed the make_request function looks up
-+ * the correct target for the given sector, and then asks this target
-+ * to do the remapping.
-+ *
-+ * (dm-table.c) A btree like structure is used to hold the sector
-+ * range -> target mapping.  Because we know all the entries in the
-+ * btree in advance we can make a very compact tree, omitting pointers
-+ * to child nodes, (child nodes locations can be calculated). Each
-+ * node of the btree is 1 level cache line in size, this gives a small
-+ * performance boost.
-+ *
-+ * A userland test program for the btree gave the following results on a
-+ * 1 Gigahertz Athlon machine:
-+ *
-+ * entries in btree               lookups per second
-+ * ----------------               ------------------
-+ * 5                              25,000,000
-+ * 1000                           7,700,000
-+ * 10,000,000                     3,800,000
-+ *
-+ * Of course these results should be taken with a pinch of salt; the
-+ * lookups were sequential and there were no other applications (other
-+ * than X + emacs) running to give any pressure on the level 1 cache.
-+ *
-+ * Typical LVM users would find they have very few targets for each
-+ * LV (probably less than 10).
-+ *
-+ * (dm-target.c) Target types are not hard coded, instead the
-+ * register_mapping_type function should be called.  A target type is
-+ * specified using three functions (see the header):
-+ *
-+ * dm_ctr_fn - takes a string and contructs a target specific piece of
-+ *             context data.
-+ * dm_dtr_fn - destroy contexts.
-+ * dm_map_fn - function that takes a buffer_head and some previously
-+ *             constructed context and performs the remapping.
-+ *
-+ * Currently there are two two trivial mappers, which are
-+ * automatically registered: 'linear', and 'io_error'.  Linear alone
-+ * is enough to implement most LVM features (omitting striped volumes
-+ * and snapshots).
-+ *
-+ * (dm-fs.c) The driver is controlled through a /proc interface:
-+ * /proc/device-mapper/control allows you to create and remove devices
-+ * by 'cat'ing a line of the following format:
-+ *
-+ * create <device name> [minor no]
-+ * remove <device name>
-+ *
-+ * /proc/device-mapper/<device name> accepts the mapping table:
-+ *
-+ * begin
-+ * <sector start> <length> <target name> <target args>...
-+ * ...
-+ * end
-+ *
-+ * The begin/end lines are nasty, they should be handled by open/close
-+ * for the file.
-+ *
-+ * At the moment the table assumes 32 bit keys (sectors), the move to
-+ * 64 bits will involve no interface changes, since the tables will be
-+ * read in as ascii data.  A different table implementation can
-+ * therefor be provided at another time.  Either just by changing offset_t
-+ * to 64 bits, or maybe implementing a structure which looks up the keys in
-+ * stages (ie, 32 bits at a time).
-+ *
-+ * More interesting targets:
-+ *
-+ * striped mapping; given a stripe size and a number of device regions
-+ * this would stripe data across the regions.  Especially useful, since
-+ * we could limit each striped region to a 32 bit area and then avoid
-+ * nasty 64 bit %'s.
-+ *
-+ * mirror mapping (reflector ?); would set off a kernel thread slowly
-+ * copying data from one region to another, ensuring that any new
-+ * writes got copied to both destinations correctly.  Great for
-+ * implementing pvmove.  Not sure how userland would be notified that
-+ * the copying process had completed.  Possibly by reading a /proc entry
-+ * for the LV.  Could also use poll() for this kind of thing.
-+ */
-+
 +
 +#ifndef DM_INTERNAL_H
 +#define DM_INTERNAL_H
@@ -2409,8 +2286,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +#define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
 +
 +/*
-+ * list of devices that a metadevice uses
-+ * and hence should open/close.
++ * List of devices that a metadevice uses and should open/close.
 + */
 +struct dm_dev {
 +	atomic_t count;
@@ -2421,8 +2297,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +};
 +
 +/*
-+ * io that had to be deferred while we were
-+ * suspended
++ * I/O that had to be deferred while we were suspended
 + */
 +struct deferred_io {
 +	int rw;
@@ -2431,7 +2306,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +};
 +
 +/*
-+ * btree leaf, these do the actual mapping
++ * Btree leaf - this does the actual mapping
 + */
 +struct target {
 +	struct target_type *type;
@@ -2439,7 +2314,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +};
 +
 +/*
-+ * the btree
++ * The btree
 + */
 +struct dm_table {
 +	/* btree table */
@@ -2457,7 +2332,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +};
 +
 +/*
-+ * the actual device struct
++ * The actual device struct
 + */
 +struct mapped_device {
 +	kdev_t dev;
@@ -2479,7 +2354,6 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +
 +extern struct block_device_operations dm_blk_dops;
 +
-+
 +/* dm-target.c */
 +int dm_target_init(void);
 +struct target_type *dm_get_target_type(const char *name);
@@ -2488,7 +2362,8 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +/* dm.c */
 +struct mapped_device *dm_find_by_minor(int minor);
 +struct mapped_device *dm_get(const char *name);
-+struct mapped_device *dm_create(const char *name, int minor, struct dm_table *);int dm_destroy(struct mapped_device *md);
++struct mapped_device *dm_create(const char *name, int minor, struct dm_table *);
++int dm_destroy(struct mapped_device *md);
 +int dm_swap_table(struct mapped_device *md, struct dm_table *t);
 +int dm_suspend(struct mapped_device *md);
 +int dm_resume(struct mapped_device *md);
@@ -2504,8 +2379,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +#define WARN(f, x...) printk(KERN_WARNING "device-mapper: " f "\n" , ## x)
 +
 +/*
-+ * calculate the index of the child node of the
-+ * n'th node k'th key.
++ * Calculate the index of the child node of the n'th node k'th key.
 + */
 +static inline int get_child(int n, int k)
 +{
@@ -2513,7 +2387,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +}
 +
 +/*
-+ * returns the n'th node of level l from table t.
++ * Return the n'th node of level l from table t.
 + */
 +static inline offset_t *get_node(struct dm_table *t, int l, int n)
 +{
@@ -2526,8 +2400,8 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +#endif
 diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-mapper.h
 --- linux-2.4.16/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Fri Dec  7 13:16:25 2001
-@@ -0,0 +1,64 @@
++++ linux/include/linux/device-mapper.h	Mon Dec 10 15:43:56 2001
+@@ -0,0 +1,57 @@
 +/*
 + * device-mapper.h
 + *
@@ -2536,8 +2410,8 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 + * This file is released under the LGPL.
 + */
 +
-+#ifndef DEVICE_MAPPER_H
-+#define DEVICE_MAPPER_H
++#ifndef _LINUX_DEVICE_MAPPER_H
++#define _LINUX_DEVICE_MAPPER_H
 +
 +#define DM_DIR "device-mapper"
 +#define DM_MAX_TYPE_NAME 16
@@ -2549,61 +2423,54 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +struct dm_dev;
 +typedef unsigned int offset_t;
 +
-+typedef void (*dm_error_fn)(const char *message, void *private);
-+
 +/*
-+ * constructor, destructor and map fn types
++ * Prototypes for functions of a target
 + */
-+typedef int (*dm_ctr_fn)(struct dm_table *t, offset_t b, offset_t l,
-+			 char *args, void **context);
++typedef int (*dm_ctr_fn) (struct dm_table * t, offset_t b, offset_t l,
++			  char *args, void **context);
++typedef void (*dm_dtr_fn) (struct dm_table * t, void *c);
++typedef int (*dm_map_fn) (struct buffer_head * bh, int rw, void *context);
++typedef int (*dm_err_fn) (struct buffer_head *bh, int rw, void *context);
 +
-+typedef void (*dm_dtr_fn)(struct dm_table *t, void *c);
-+typedef int (*dm_map_fn)(struct buffer_head *bh, int rw, void *context);
-+typedef int (*dm_err_fn)(struct buffer_head *bh, int rw, void *context);
-+typedef char *(*dm_print_fn)(void *context);
 +
 +/*
-+ * Contructors should call this to make sure any
-+ * destination devices are handled correctly
-+ * (ie. opened/closed).
++ * Contructors should call these functions to ensure destination devices 
++ * are opened/closed correctly 
 + */
 +int dm_table_get_device(struct dm_table *t, const char *path,
-+			offset_t start, offset_t len,
-+			struct dm_dev **result);
++			offset_t start, offset_t len, struct dm_dev **result);
 +void dm_table_put_device(struct dm_table *table, struct dm_dev *d);
 +
 +/*
-+ * information about a target type
++ * Information about a target type
 + */
 +struct target_type {
-+        const char *name;
-+        struct module *module;
-+        dm_ctr_fn ctr;
-+        dm_dtr_fn dtr;
-+        dm_map_fn map;
++	const char *name;
++	struct module *module;
++	dm_ctr_fn ctr;
++	dm_dtr_fn dtr;
++	dm_map_fn map;
 +	dm_err_fn err;
-+	dm_print_fn print;
 +};
 +
 +int dm_register_target(struct target_type *t);
 +int dm_unregister_target(struct target_type *t);
 +
-+#endif /* __KERNEL__ */
++#endif				/* __KERNEL__ */
 +
-+#endif /* DEVICE_MAPPER_H */
-+
++#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 --- linux-2.4.16/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Wed Dec  5 22:00:51 2001
-@@ -0,0 +1,57 @@
++++ linux/include/linux/dm-ioctl.h	Mon Dec 10 17:30:36 2001
+@@ -0,0 +1,56 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
 + * This file is released under the GPL.
 + */
 +
-+#ifndef _DM_IOCTL_H
-+#define _DM_IOCTL_H
++#ifndef _LINUX_DM_IOCTL_H
++#define _LINUX_DM_IOCTL_H
 +
 +#include "device-mapper.h"
 +
@@ -2622,9 +2489,8 @@ diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +	unsigned long next;	/* offset in bytes to next target_spec */
 +
 +	/*
-+	 * Parameter string starts immediately
-+	 * after this object.  Be careful to add
-+	 * padding after string to ensure correct
++	 * Parameter string starts immediately after this object.  
++	 * Be careful to add padding after string to ensure correct
 +	 * alignment of subsequent dm_target_spec.
 +	 */
 +};
@@ -2636,7 +2502,7 @@ diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +	int exists;		/* out */
 +	int suspend;		/* in/out */
 +	int open_count;		/* out */
-+	int major;              /* out */
++	int major;		/* out */
 +	int minor;		/* in/out */
 +
 +	int target_count;	/* in/out */
@@ -2652,4 +2518,4 @@ diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +#define	DM_RELOAD _IOWR(DM_IOCTL, 0x03, struct dm_ioctl)
 +#define DM_INFO _IOWR(DM_IOCTL, 0x04, struct dm_ioctl)
 +
-+#endif
++#endif /* _LINUX_DM_IOCTL_H */

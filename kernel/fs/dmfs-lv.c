@@ -30,22 +30,26 @@
 
 struct dmfs_inode_info {
 	const char *name;
-	struct inode *(*create)(struct inode *, int, struct seq_operations *, int);
+	struct inode *(*create)(struct inode *, int, struct seq_operations *,
+				int);
 	struct seq_operations *seq_ops;
 	int type;
 };
 
 #define DMFS_SEQ(inode) ((struct seq_operations *)(inode)->u.generic_ip)
 
-extern struct inode *dmfs_create_table(struct inode *, int, struct seq_operations *, int);
+extern struct inode *dmfs_create_table(struct inode *, int,
+				       struct seq_operations *, int);
 extern struct seq_operations dmfs_error_seq_ops;
 extern struct seq_operations dmfs_status_seq_ops;
 extern struct seq_operations dmfs_suspend_seq_ops;
-extern ssize_t dmfs_suspend_write(struct file *file, const char *buf, size_t size, loff_t *ppos);
+extern ssize_t dmfs_suspend_write(struct file *file, const char *buf,
+				  size_t size, loff_t * ppos);
 
 static int dmfs_seq_open(struct inode *inode, struct file *file)
 {
 	int ret = seq_open(file, DMFS_SEQ(inode));
+
 	if (ret >= 0) {
 		struct seq_file *seq = file->private_data;
 		seq->context = DMFS_I(file->f_dentry->d_parent->d_inode);
@@ -78,7 +82,8 @@ static struct file_operations dmfs_seq_ro_file_operations = {
 	fsync:		dmfs_no_fsync,
 };
 
-static struct inode *dmfs_create_seq_ro(struct inode *dir, int mode, struct seq_operations *seq_ops, int dev)
+static struct inode *dmfs_create_seq_ro(struct inode *dir, int mode,
+					struct seq_operations *seq_ops, int dev)
 {
 	struct inode *inode = dmfs_new_inode(dir->i_sb, mode | S_IFREG);
 	if (inode) {
@@ -89,7 +94,8 @@ static struct inode *dmfs_create_seq_ro(struct inode *dir, int mode, struct seq_
 	return inode;
 }
 
-static struct inode *dmfs_create_device(struct inode *dir, int mode, struct seq_operations *seq_ops, int dev)
+static struct inode *dmfs_create_device(struct inode *dir, int mode,
+					struct seq_operations *seq_ops, int dev)
 {
 	struct inode *inode = dmfs_new_inode(dir->i_sb, mode | S_IFBLK);
 	if (inode) {
@@ -98,7 +104,9 @@ static struct inode *dmfs_create_device(struct inode *dir, int mode, struct seq_
 	return inode;
 }
 
-static struct inode *dmfs_create_suspend(struct inode *dir, int mode, struct seq_operations *seq_ops, int dev)
+static struct inode *dmfs_create_suspend(struct inode *dir, int mode,
+					 struct seq_operations *seq_ops,
+					 int dev)
 {
 	struct inode *inode = dmfs_create_seq_ro(dir, mode, seq_ops, dev);
 	if (inode) {
@@ -117,13 +125,13 @@ static int dmfs_lv_unlink(struct inode *dir, struct dentry *dentry)
 }
 
 static struct dmfs_inode_info dmfs_ii[] = {
-	{ ".", NULL, NULL, DT_DIR },
-	{ "..", NULL, NULL, DT_DIR },
-	{ "table", dmfs_create_table, NULL, DT_REG },
-	{ "error", dmfs_create_seq_ro, &dmfs_error_seq_ops, DT_REG },
-	{ "status", dmfs_create_seq_ro, &dmfs_status_seq_ops, DT_REG },
-	{ "device", dmfs_create_device, NULL, DT_BLK },
-	{ "suspend", dmfs_create_suspend, &dmfs_suspend_seq_ops, DT_REG },
+	{".", NULL, NULL, DT_DIR},
+	{"..", NULL, NULL, DT_DIR},
+	{"table", dmfs_create_table, NULL, DT_REG},
+	{"error", dmfs_create_seq_ro, &dmfs_error_seq_ops, DT_REG},
+	{"status", dmfs_create_seq_ro, &dmfs_status_seq_ops, DT_REG},
+	{"device", dmfs_create_device, NULL, DT_BLK},
+	{"suspend", dmfs_create_suspend, &dmfs_suspend_seq_ops, DT_REG},
 };
 
 #define NR_DMFS_II (sizeof(dmfs_ii)/sizeof(struct dmfs_inode_info))
@@ -132,7 +140,7 @@ static struct dmfs_inode_info *dmfs_find_by_name(const char *n, int len)
 {
 	int i;
 
-	for(i = 2; i < NR_DMFS_II; i++) {
+	for (i = 2; i < NR_DMFS_II; i++) {
 		if (strlen(dmfs_ii[i].name) != len)
 			continue;
 		if (memcmp(dmfs_ii[i].name, n, len) == 0)
@@ -174,14 +182,13 @@ static int dmfs_lv_readdir(struct file *filp, void *dirent, filldir_t filldir)
 	while (filp->f_pos < NR_DMFS_II) {
 		ii = &dmfs_ii[filp->f_pos];
 		if (filldir(dirent, ii->name, strlen(ii->name), filp->f_pos,
-				dmfs_inum(filp->f_pos, dentry), ii->type) < 0)
+			    dmfs_inum(filp->f_pos, dentry), ii->type) < 0)
 			break;
 		filp->f_pos++;
 	}
 
 	return 0;
 }
-
 
 static int dmfs_lv_sync(struct file *file, struct dentry *dentry, int datasync)
 {
@@ -199,7 +206,8 @@ static struct inode_operations dmfs_lv_inode_operations = {
 	unlink:		dmfs_lv_unlink,
 };
 
-struct inode *dmfs_create_lv(struct super_block *sb, int mode, struct dentry *dentry)
+struct inode *dmfs_create_lv(struct super_block *sb, int mode,
+			     struct dentry *dentry)
 {
 	struct inode *inode = dmfs_new_private_inode(sb, mode | S_IFDIR);
 	struct mapped_device *md;
@@ -213,7 +221,7 @@ struct inode *dmfs_create_lv(struct super_block *sb, int mode, struct dentry *de
 		ret = PTR_ERR(table);
 		if (!IS_ERR(table)) {
 			ret = dm_table_complete(table);
-			if (ret == 0) {
+			if (!ret) {
 				inode->i_fop = &dmfs_lv_file_operations;
 				inode->i_op = &dmfs_lv_inode_operations;
 				memcpy(tmp_name, name, dentry->d_name.len);
@@ -232,5 +240,3 @@ struct inode *dmfs_create_lv(struct super_block *sb, int mode, struct dentry *de
 
 	return ERR_PTR(ret);
 }
-
-

@@ -28,11 +28,12 @@
 #include "dm.h"
 #include "dmfs.h"
 
-extern struct inode *dmfs_create_lv(struct super_block *sb, int mode, struct dentry *dentry);
+extern struct inode *dmfs_create_lv(struct super_block *sb, int mode,
+				    struct dentry *dentry);
 
 static int is_identifier(const char *str, int len)
 {
-	while(len--) {
+	while (len--) {
 		if (!isalnum(*str) && *str != '_')
 			return 0;
 		str++;
@@ -43,7 +44,6 @@ static int is_identifier(const char *str, int len)
 static int dmfs_root_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 {
 	struct inode *inode;
-	int rv = -ENOSPC;
 
 	if (dentry->d_name.len >= DM_NAME_LEN)
 		return -EINVAL;
@@ -60,6 +60,7 @@ static int dmfs_root_mkdir(struct inode *dir, struct dentry *dentry, int mode)
 		dget(dentry);
 		return 0;
 	}
+
 	return PTR_ERR(inode);
 }
 
@@ -80,7 +81,7 @@ static int empty(struct dentry *dentry)
 	spin_lock(&dcache_lock);
 	list = dentry->d_subdirs.next;
 
-	while(list != &dentry->d_subdirs) {
+	while (list != &dentry->d_subdirs) {
 		struct dentry *de = list_entry(list, struct dentry, d_child);
 
 		if (positive(de)) {
@@ -90,6 +91,7 @@ static int empty(struct dentry *dentry)
 		list = list->next;
 	}
 	spin_unlock(&dcache_lock);
+
 	return 1;
 }
 
@@ -117,16 +119,17 @@ static struct dentry *dmfs_root_lookup(struct inode *dir, struct dentry *dentry)
 }
 
 static int dmfs_root_rename(struct inode *old_dir, struct dentry *old_dentry,
-			struct inode *new_dir, struct dentry *new_dentry)
+			    struct inode *new_dir, struct dentry *new_dentry)
 {
 	/* Can only rename - not move between directories! */
 	if (old_dir != new_dir)
 		return -EPERM;
 
-	return -EINVAL; /* FIXME: a change of LV name here */
+	return -EINVAL;		/* FIXME: a change of LV name here */
 }
 
-static int dmfs_root_sync(struct file *file, struct dentry *dentry, int datasync)
+static int dmfs_root_sync(struct file *file, struct dentry *dentry,
+			  int datasync)
 {
 	return 0;
 }
@@ -155,5 +158,4 @@ struct inode *dmfs_create_root(struct super_block *sb, int mode)
 
 	return inode;
 }
-
 
