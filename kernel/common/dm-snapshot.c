@@ -252,7 +252,7 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 
 	/* Read/write error - snapshot is unusable */
 	if (reason == COPY_CB_FAILED_WRITE || reason == COPY_CB_FAILED_READ) {
-		DMERR("Error reading/writing snapshot\n");
+		DMERR("Error reading/writing snapshot");
 		ex->snap->full = 1;
 	}
 }
@@ -494,12 +494,12 @@ static int read_metadata(struct snapshot_c *lc)
 	/* Allocate our own iovec for this operation 'cos the others
 	   are way too small */
 	if (alloc_kiovec(1, &read_iobuf)) {
-		DMERR("Error allocating iobuf for %s\n", kdevname(lc->cow_dev->dev));
+		DMERR("Error allocating iobuf for %s", kdevname(lc->cow_dev->dev));
 		return -1;
 	}
 
 	if (alloc_iobuf_pages(read_iobuf, lc->extent_size)) {
-		DMERR("Error allocating iobuf space for %s\n", kdevname(lc->cow_dev->dev));
+		DMERR("Error allocating iobuf space for %s", kdevname(lc->cow_dev->dev));
 		free_kiovec(1, &read_iobuf);
 		return -1;
 	}
@@ -509,7 +509,7 @@ static int read_metadata(struct snapshot_c *lc)
 	{
 		/* Make sure the chain does not go off the end of the device, or backwards */
 		if (cur_sector > devsize || cur_sector < first_free_sector) {
-			DMERR("COW table chain pointers are inconsistent, can't activate snapshot\n");
+			DMERR("COW table chain pointers are inconsistent, can't activate snapshot");
 			err = -1;
 			goto ret_free;
 		}
@@ -545,7 +545,7 @@ static int read_metadata(struct snapshot_c *lc)
 			}
 		}
 		else {
-			DMERR("Error reading COW metadata for %s\n", kdevname(lc->cow_dev->dev));
+			DMERR("Error reading COW metadata for %s", kdevname(lc->cow_dev->dev));
 			err = -1;
 			goto ret_free;
 		}
@@ -586,7 +586,7 @@ static int read_header(struct snapshot_c *lc)
 	/* Get it */
 	status = read_blocks(lc->cow_iobuf, lc->cow_dev->dev, 0L, blocksize/SECTOR_SIZE);
 	if (status != 0) {
-		DMERR("Snapshot dev %s error reading header\n", kdevname(lc->cow_dev->dev));
+		DMERR("Snapshot dev %s error reading header", kdevname(lc->cow_dev->dev));
 		return -1;
 	}
 
@@ -600,21 +600,21 @@ static int read_header(struct snapshot_c *lc)
 
 	/* Check the version matches */
 	if (le32_to_cpu(header->version) != SNAPSHOT_DISK_VERSION) {
-		DMWARN("Snapshot dev %s version mismatch. Stored: %d, driver: %d\n",
+		DMWARN("Snapshot dev %s version mismatch. Stored: %d, driver: %d",
 		       kdevname(lc->cow_dev->dev), le32_to_cpu(header->version), SNAPSHOT_DISK_VERSION);
 		return -1;
 	}
 
 	/* Check the chunk sizes match */
 	if (le32_to_cpu(header->chunk_size) != lc->chunk_size) {
-		DMWARN("Snapshot dev %s chunk size mismatch. Stored: %d, requested: %d\n",
+		DMWARN("Snapshot dev %s chunk size mismatch. Stored: %d, requested: %d",
 		       kdevname(lc->cow_dev->dev), le32_to_cpu(header->chunk_size), lc->chunk_size);
 		return -1;
 	}
 
 	/* Check the extent sizes match */
 	if (le32_to_cpu(header->extent_size) != lc->extent_size) {
-		DMWARN("Snapshot dev %s extent size mismatch. Stored: %d, requested: %ld\n",
+		DMWARN("Snapshot dev %s extent size mismatch. Stored: %d, requested: %ld",
 		       kdevname(lc->cow_dev->dev), le32_to_cpu(header->extent_size), lc->extent_size);
 		return -1;
 	}
@@ -622,7 +622,7 @@ static int read_header(struct snapshot_c *lc)
 	/* Get the rest of the data */
 	lc->start_of_exceptions = le64_to_cpu(header->start_of_exceptions);
 	if (header->full) {
-		DMWARN("Snapshot dev %s is full. It cannot be used\n", kdevname(lc->cow_dev->dev));
+		DMWARN("Snapshot dev %s is full. It cannot be used", kdevname(lc->cow_dev->dev));
 		lc->full = 1;
 		return -1;
 	}
@@ -630,7 +630,7 @@ static int read_header(struct snapshot_c *lc)
 	/* Validate against the size of the volume */
 	devsize = get_dev_size(lc->cow_dev->dev);
 	if (lc->start_of_exceptions > devsize) {
-		DMWARN("Snapshot metadata error on %s. start exceptions > device size (%ld > %ld)\n",
+		DMWARN("Snapshot metadata error on %s. start exceptions > device size (%ld > %ld)",
 		       kdevname(lc->cow_dev->dev), lc->start_of_exceptions, devsize);
 		return -1;
 	}
@@ -651,12 +651,12 @@ static int write_header(struct snapshot_c *lc)
 	/* Allocate our own iobuf for this so we don't corrupt any
 	   of the other writes that may be going on */
 	if (alloc_kiovec(1, &head_iobuf)) {
-		DMERR("Error allocating iobuf for header on %s\n", kdevname(lc->cow_dev->dev));
+		DMERR("Error allocating iobuf for header on %s", kdevname(lc->cow_dev->dev));
 		return -1;
 	}
 
 	if (alloc_iobuf_pages(head_iobuf, PAGE_SIZE/SECTOR_SIZE)) {
-		DMERR("Error allocating iobuf space for header on %s\n", kdevname(lc->cow_dev->dev));
+		DMERR("Error allocating iobuf space for header on %s", kdevname(lc->cow_dev->dev));
 		free_kiovec(1, &head_iobuf);
 		return -1;
 	}
@@ -687,7 +687,7 @@ static int write_metadata(struct snapshot_c *lc)
 	int writesize = blocksize/SECTOR_SIZE;
 
 	if (write_blocks(lc->cow_iobuf, lc->cow_dev->dev, lc->current_metadata_sector, writesize) != 0) {
-		DMERR("Error writing COW block\n");
+		DMERR("Error writing COW block");
 		return -1;
 	}
 
@@ -735,14 +735,14 @@ static int setup_persistent_snapshot(struct snapshot_c *lc, int blocksize, void 
 
 		*context = "Unable to write snapshot header";
 		if (write_header(lc) != 0) {
-			DMERR("Error writing header to snapshot volume %s\n",
+			DMERR("Error writing header to snapshot volume %s",
 			      kdevname(lc->cow_dev->dev));
 			goto free_ret;
 		}
 
 		/* Write a blank metadata block to the device */
 		if (write_metadata(lc) != 0) {
-			DMERR("Error writing initial COW table to snapshot volume %s\n",
+			DMERR("Error writing initial COW table to snapshot volume %s",
 			      kdevname(lc->cow_dev->dev));
 			goto free_ret;
 		}
@@ -980,7 +980,7 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 
 			/* Check there is enough space */
 			if (lc->next_free_sector + lc->chunk_size >= devsize) {
-				DMWARN("Snapshot %s is full\n", kdevname(lc->cow_dev->dev));
+				DMWARN("Snapshot %s is full", kdevname(lc->cow_dev->dev));
 				lc->full = 1;
 				write_header(lc);
 				up_write(&lc->origin->lock);
@@ -992,7 +992,7 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 			lc->next_free_sector += lc->chunk_size;
 			ex = add_exception(lc, read_start, reloc_sector);
 			if (!ex) {
-				DMERR("Snapshot %s error adding new exception entry\n", kdevname(lc->cow_dev->dev));
+				DMERR("Snapshot %s error adding new exception entry", kdevname(lc->cow_dev->dev));
 				/* Error here - treat it as full */
 				lc->full = 1;
 				write_header(lc);
@@ -1075,7 +1075,7 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 				dev_size = get_dev_size(snap->cow_dev->dev);
 				if (snap->next_free_sector + snap->chunk_size >= dev_size) {
 					        /* Snapshot is full, we can't use it */
-						DMWARN("Snapshot %s is full (sec=%ld, size=%ld)\n",
+						DMWARN("Snapshot %s is full (sec=%ld, size=%ld)",
 						       kdevname(snap->cow_dev->dev), snap->next_free_sector + snap->chunk_size, dev_size);
 						snap->full = 1;
 						/* Mark it full on the device */
@@ -1091,7 +1091,7 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 					snap->next_free_sector += snap->chunk_size;
 					ex = add_exception(snap, read_start, reloc_sector);
 					if (!ex) {
-						DMERR("Snapshot %s error adding new exception entry\n",
+						DMERR("Snapshot %s error adding new exception entry",
 						      kdevname(snap->cow_dev->dev));
 						/* Error here - treat it as full */
 						snap->full = 1;
@@ -1134,11 +1134,11 @@ static int __init snapshot_init(void)
 	int r = dm_register_target(&snapshot_target);
 
 	if (r < 0)
-		DMERR("Device mapper: Snapshot: register failed %d\n", r);
+		DMERR("Device mapper: Snapshot: register failed %d", r);
 	else {
 		snapshot_origins = kmalloc(ORIGIN_HASH_SIZE * sizeof(struct list_head), GFP_KERNEL);
 		if (snapshot_origins == NULL) {
-			DMERR("Device mapper: Snapshot: unable to allocate memory\n");
+			DMERR("Device mapper: Snapshot: unable to allocate memory");
 			r = -1;
 		}
 		else {
@@ -1158,8 +1158,7 @@ static void snapshot_exit(void)
 	int r = dm_unregister_target(&snapshot_target);
 
 	if (r < 0)
-		DMERR(
-		       "Device mapper: Snapshot: unregister failed %d\n", r);
+		DMERR("Device mapper: Snapshot: unregister failed %d", r);
 
 	if (snapshot_origins)
 		kfree(snapshot_origins);

@@ -38,7 +38,7 @@ static void mirror_end_io(struct buffer_head *bh, int uptodate)
 
 	/* Flag error if it failed */
 	if (!uptodate) {
-		DMERR("Mirror copy to %s failed\n", kdevname(lc->todev->dev));
+		DMERR("Mirror copy to %s failed", kdevname(lc->todev->dev));
 		lc->error = 1;
 		dm_notify(lc); /* TODO: interface ?? */
 	}
@@ -51,7 +51,6 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 {
 	struct mirror_c *lc = (struct mirror_c *) context;
 
-	printk("PJC: callback: reason %d, block = %ld\n", reason, arg);
 	if (reason == COPY_CB_PROGRESS) {
 		lc->got_to = arg;
 		return;
@@ -59,7 +58,7 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 
 	if (reason == COPY_CB_FAILED_READ ||
 	    reason == COPY_CB_FAILED_WRITE) {
-		DMERR("Mirror block %s on %s failed, sector %ld\n", reason==COPY_CB_FAILED_READ?"read":"write",
+		DMERR("Mirror block %s on %s failed, sector %ld", reason==COPY_CB_FAILED_READ?"read":"write",
 		      reason==COPY_CB_FAILED_READ?kdevname(lc->fromdev->dev):kdevname(lc->todev->dev), arg);
 		lc->error = 1;
 	}
@@ -71,7 +70,7 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 }
 
 /*
- * Construct a mirror mapping: <dev_path1> <offset> <dev_path2> <offset>
+ * Construct a mirror mapping: <dev_path1> <offset> <dev_path2> <offset> <throttle> [<priority>]
  */
 static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 		      int argc, char **argv, void **context)
@@ -79,8 +78,10 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	struct mirror_c *lc;
 	unsigned long offset1, offset2;
 	char *value;
+	int priority = MIRROR_COPY_PRIORITY;
+	int throttle;
 
-	if (argc != 4) {
+	if (argc <= 4) {
 		*context = "dm-mirror: Not enough arguments";
 		return -EINVAL;
 	}
@@ -99,18 +100,34 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	offset1 = simple_strtoul(argv[1], &value, 10);
 	if (value == NULL) {
 		*context = "Invalid offset for dev1";
+		dm_table_put_device(t, lc->fromdev);
 		goto bad;
 	}
 
 	if (dm_table_get_device(t, argv[2], 0, l, &lc->todev)) {
 		*context = "dm-mirror: Device lookup failed";
+		dm_table_put_device(t, lc->fromdev);
 		goto bad;
 	}
 
 	offset2 = simple_strtoul(argv[3], &value, 10);
 	if (value == NULL) {
 		*context = "Invalid offset for dev2";
-		goto bad;
+		goto bad_put;
+	}
+
+	throttle = simple_strtoul(argv[4], &value, 10);
+	if (value == NULL) {
+		*context = "Invalid throttle value";
+		goto bad_put;
+	}
+
+	if (argc > 4) {
+		priority = simple_strtoul(argv[5], &value, 10);
+		if (value == NULL) {
+			*context = "Invalid priority value";
+			goto bad_put;
+		}
 	}
 
 	lc->from_delta = (int) offset1 - (int) b;
@@ -121,17 +138,21 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	init_rwsem(&lc->lock);
 	*context = lc;
 
+	/* Tell kcopyd to do the biz */
 	if (dm_blockcopy(offset1, offset2,
 			 l - offset1,
 			 lc->fromdev->dev, lc->todev->dev,
-			 MIRROR_COPY_PRIORITY, 0, copy_callback, lc)) {
-		DMERR("block copy call failed\n");
+			 priority, 0, copy_callback, lc)) {
+		DMERR("block copy call failed");
 		dm_table_put_device(t, lc->fromdev);
 		dm_table_put_device(t, lc->todev);
 		goto bad;
 	}
 	return 0;
 
+ bad_put:
+	dm_table_put_device(t, lc->fromdev);
+	dm_table_put_device(t, lc->todev);
  bad:
 	kfree(lc);
 	return -EINVAL;
@@ -171,7 +192,7 @@ static int mirror_map(struct buffer_head *bh, int rw, void *context)
 			generic_make_request(WRITE, dbh);
 		}
 		else {
-			DMERR("kmalloc failed for mirror bh\n");
+			DMERR("kmalloc failed for mirror bh");
 			lc->error = 1;
 		}
 	}

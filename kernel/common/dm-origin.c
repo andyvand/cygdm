@@ -124,7 +124,7 @@ module_exit(origin_exit);
 
 MODULE_AUTHOR("Patrick Caulfield <caulfield@sistina.com>");
 MODULE_DESCRIPTION("Device Mapper: Snapshot origin driver");
-MODULE_LICENSE("GPL")
+MODULE_LICENSE("GPL");
 
 /*
  * Overrides for Emacs so that we follow Linus's tabbing style.
@@ -136,3 +136,4 @@ MODULE_LICENSE("GPL")
 * c-file-style: "linux"
 * End:
 */
+

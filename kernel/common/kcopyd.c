@@ -232,7 +232,7 @@ static int copy_kthread(void *unused)
 				/* Read original blocks */
 				if (read_blocks(iobuf, work_item->fromdev, work_item->fromsec + work_item->done_sectors,
 						nr_sectors)) {
-					DMERR("Read blocks from device %s failed\n", kdevname(work_item->fromdev));
+					DMERR("Read blocks from device %s failed", kdevname(work_item->fromdev));
 
 					/* Callback error */
 					callback_reason = COPY_CB_FAILED_READ;
@@ -242,7 +242,7 @@ static int copy_kthread(void *unused)
 				/* Write them out again */
 				if (write_blocks(iobuf, work_item->todev, work_item->tosec + work_item->done_sectors,
 						 nr_sectors)) {
-					DMERR("Write blocks to %s failed\n", kdevname(work_item->todev));
+					DMERR("Write blocks to %s failed", kdevname(work_item->todev));
 
 					/* Callback error */
 					callback_reason = COPY_CB_FAILED_WRITE;
@@ -344,7 +344,7 @@ int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_se
 			DECLARE_WAITQUEUE(wq, current);
 			struct task_struct *tsk = current;
 
-			DMINFO("Started kcopyd thread\n");
+			DMINFO("Started kcopyd thread");
 
 			/* Wait for it to complete it's startup initialisation */
 			set_task_state(tsk, TASK_INTERRUPTIBLE);
@@ -356,7 +356,7 @@ int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_se
 			remove_wait_queue(&start_waitq, &wq);
 		}
 		else {
-			DMERR("Failed to start kcopyd thread\n");
+			DMERR("Failed to start kcopyd thread");
 			up(&start_lock);
 			return -EAGAIN;
 		}
@@ -409,12 +409,12 @@ static int __init kcopyd_init(void)
 	init_MUTEX(&run_lock);
 
 	if (alloc_kiovec(1, &iobuf)) {
-		DMERR("Unable to allocate kiobuf for kcopyd\n");
+		DMERR("Unable to allocate kiobuf for kcopyd");
 		return -1;
 	}
 
 	if (alloc_iobuf_pages(iobuf, KIO_MAX_SECTORS)) {
-		DMERR("Unable to allocate pages for kcopyd\n");
+		DMERR("Unable to allocate pages for kcopyd");
 		free_kiovec(1, &iobuf);
 		return -1;
 	}
@@ -426,7 +426,7 @@ static int __init kcopyd_init(void)
 	if (!entry_cachep) {
 		unmap_kiobuf(iobuf);
 		free_kiovec(1, &iobuf);
-		DMERR("Unable to allocate slab cache for kcopyd\n");
+		DMERR("Unable to allocate slab cache for kcopyd");
 		return -1;
 	}
 
@@ -434,7 +434,7 @@ static int __init kcopyd_init(void)
 		unmap_kiobuf(iobuf);
 		free_kiovec(1, &iobuf);
 		kmem_cache_destroy(entry_cachep);
-		DMERR("Unable to allocate any work structures for the free list\n");
+		DMERR("Unable to allocate any work structures for the free list");
 		return -1;
 	}
 
