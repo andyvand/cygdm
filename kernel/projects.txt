@@ -14,8 +14,6 @@
  o Investigate char device number allocation for dm-ioctl.c (maybe use misc
    device ?)
 
- o dm-table.c:dm_table_get_device() reference counting
-
  o Investigate overhead of vmalloc()ed tables and if required look at ways
    of using "normal" kernel memory instead.
 
