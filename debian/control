@@ -1,5 +1,5 @@
 Source: devmapper
-Section: devel
+Section: admin
 Priority: optional
 Maintainer: Andres Salomon <dilinger@mp3revolution.net>
 Build-Depends: debhelper (>> 3.0.0), dh-kpatches, kernel-source-2.4.16 | kernel-source-2.4.17, tar (>> 1.13.18-1), bzip2, patch
@@ -9,7 +9,7 @@ Package: kernel-patch-device-mapper
 Section: devel
 Architecture: any
 Depends: patch
-Suggests: libdevmapper, kernel-source-2.4.16 | kernel-source-2.4.17
+Suggests: libdevmapper0, kernel-source-2.4.16 | kernel-source-2.4.17
 Description: The Linux Kernel Device Mapper header files
  The Linux Kernel Device Mapper is the LVM (Linux Logical Volume Management)
  Team's implementation of a minimalistic kernel-space driver that handles
@@ -22,7 +22,7 @@ Description: The Linux Kernel Device Mapper header files
 Package: libdevmapper-dev
 Section: devel
 Architecture: any
-Depends: libdevmapper (= ${Source-Version}), libc6-dev
+Depends: libdevmapper0 (= ${Source-Version}), libc6-dev
 Description: The Linux Kernel Device Mapper header files
  The Linux Kernel Device Mapper is the LVM (Linux Logical Volume Management)
  Team's implementation of a minimalistic kernel-space driver that handles
@@ -34,10 +34,11 @@ Description: The Linux Kernel Device Mapper header files
  device-mapper; it allow usage of the device-mapper through a clean,
  consistent interface (as opposed to through kernel ioctls).
 
-Package: libdevmapper
+Package: libdevmapper0
 Section: libs
 Architecture: any
 Depends: ${shlibs:Depends}
+Provides: libdevmapper
 Description: The Linux Kernel Device Mapper userspace library
  The Linux Kernel Device Mapper is the LVM (Linux Logical Volume Management)
  Team's implementation of a minimalistic kernel-space driver that handles
