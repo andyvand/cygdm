@@ -972,7 +972,7 @@ int dm_destroy(struct mapped_device *md)
 }
 
 /*
- * Destroy all devices - except suspended ones...
+ * Destroy all devices - except open ones
  */
 void dm_destroy_all(void)
 {
