@@ -46,7 +46,7 @@ is useful for defining gaps in the new logical device.
 The 'snapshot' target supports asynchronous snapshots.
 See http://people.sistina.com/~thornber/snap_performance.html.
 
-The 'mirror' target will be used to implement a new pvmove.
+The 'mirror' target is used to implement pvmove.
 
 In normal scenarios the mapping tables will remain small.
 A btree structure is used to hold the sector range -> target mapping.
@@ -59,5 +59,5 @@ than current LVM.
 
 
 Sistina UK
-Revised 26/06/2002
+Updated 30/04/2003
 
