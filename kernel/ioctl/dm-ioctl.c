@@ -183,6 +183,8 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 	if ((r = dm_create(param->name, param->minor, t, &md)))
 		goto bad;
 
+	dm_set_ro(md, param->read_only);
+
 	if ((r = info(param->name, user))) {
 		dm_destroy(md);
 		goto bad;
@@ -238,6 +240,8 @@ static int reload(struct dm_ioctl *param)
 		return r;
 	}
 
+	dm_set_ro(md, param->read_only);
+
 	return 0;
 }
 
@@ -267,6 +271,12 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 	if ((r = copy_params((struct dm_ioctl *) a, &p)))
 		return r;
 
+	if (strcmp(DM_IOCTL_VERSION, p->version)) {
+		WARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
+		r = -EINVAL;
+		goto out;
+	}
+
 	switch (command) {
 	case DM_CREATE:
 		r = create(p, (struct dm_ioctl *) a);
@@ -293,6 +303,7 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 		r = -EINVAL;
 	}
 
+      out:
 	free_params(p);
 	return r;
 }

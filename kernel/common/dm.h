@@ -84,6 +84,7 @@ struct mapped_device {
 
 	int use_count;
 	int suspended;
+	int read_only;
 
 	/* a list of io's that arrived while we were suspended */
 	atomic_t pending;
@@ -112,9 +113,10 @@ int split_args(int max, int *argc, char **argv, char *input);
 
 /* dm.c */
 struct mapped_device *dm_get(const char *name);
-int dm_create(const char *name, int minor, struct dm_table *table, 
+int dm_create(const char *name, int minor, struct dm_table *table,
 	      struct mapped_device **result);
 int dm_destroy(struct mapped_device *md);
+void dm_set_ro(struct mapped_device *md, int ro);
 
 /*
  * The device must be suspended before calling this method.

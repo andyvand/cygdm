@@ -23,7 +23,7 @@ struct dm_target_spec {
 	unsigned long next;	/* offset in bytes to next target_spec */
 
 	/*
-	 * Parameter string starts immediately after this object.  
+	 * Parameter string starts immediately after this object.
 	 * Be careful to add padding after string to ensure correct
 	 * alignment of subsequent dm_target_spec.
 	 */
@@ -31,6 +31,7 @@ struct dm_target_spec {
 
 struct dm_ioctl {
 	unsigned long data_size;	/* the size of this structure */
+	char version[16];
 	char name[DM_NAME_LEN];
 
 	int exists;		/* out */
@@ -38,6 +39,7 @@ struct dm_ioctl {
 	int open_count;		/* out */
 	int major;		/* out */
 	int minor;		/* in/out */
+	int read_only;		/* in/out */
 
 	int target_count;	/* in/out */
 };
@@ -51,5 +53,7 @@ struct dm_ioctl {
 #define	DM_SUSPEND _IOW(DM_IOCTL, 0x02, struct dm_ioctl)
 #define	DM_RELOAD _IOWR(DM_IOCTL, 0x03, struct dm_ioctl)
 #define DM_INFO _IOWR(DM_IOCTL, 0x04, struct dm_ioctl)
+
+#define DM_IOCTL_VERSION @DM_IOCTL_VERSION@
 
 #endif /* _LINUX_DM_IOCTL_H */

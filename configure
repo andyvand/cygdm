@@ -1954,9 +1954,12 @@ echo "$ac_t""$interface" 1>&6
 
 if test "-f VERSION" ; then
   DM_VERSION="\"`cat VERSION|sed -e \"s/[0-9.]*/\0-$interface/\"`\""
+  DM_IOCTL_VERSION="\"`cat VERSION| awk -F '.' '{printf \"%s.%s\",\$1,\$2}'`\""
 else
   DM_VERSION="Unknown version ($interface)"
+  DM_IOCTL_VERSION="Unknown"
 fi
+
 
 
 
@@ -2088,6 +2091,7 @@ dmsetup/Makefile							\
 lib/Makefile							 	\
 kernel/Makefile								\
 kernel/common/dm.c							\
+kernel/ioctl/dm-ioctl.h							\
 man/Makefile								\
 " | sed "s/:[^ ]*//g"` conftest*; exit 1' 1 2 15
 EOF
@@ -2138,6 +2142,7 @@ s%@kerneldir@%$kerneldir%g
 s%@kernelvsn@%$kernelvsn%g
 s%@tmpdir@%$tmpdir%g
 s%@DM_VERSION@%$DM_VERSION%g
+s%@DM_IOCTL_VERSION@%$DM_IOCTL_VERSION%g
 
 CEOF
 EOF
@@ -2187,6 +2192,7 @@ dmsetup/Makefile							\
 lib/Makefile							 	\
 kernel/Makefile								\
 kernel/common/dm.c							\
+kernel/ioctl/dm-ioctl.h							\
 man/Makefile								\
 "}
 EOF

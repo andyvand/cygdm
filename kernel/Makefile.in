@@ -120,7 +120,7 @@ install:
 clean:
 
 distclean:
-	$(RM) Makefile common/dm.c
+	$(RM) Makefile common/dm.c ioctl/dm-ioctl.h
 
 .PHONY: install clean distclean all
 
