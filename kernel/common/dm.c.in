@@ -118,8 +118,7 @@ static void __exit dm_exit(void)
 	blksize_size[major] = NULL;
 	hardsect_size[major] = NULL;
 
-	printk(KERN_INFO "%s %d.%d.%d cleaned up\n", _name,
-	       _version[0], _version[1], _version[2]);
+	printk(KERN_INFO "%s %s cleaned up\n", _name, _version);
 }
 
 /*

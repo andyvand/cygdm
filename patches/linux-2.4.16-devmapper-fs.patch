@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Fri Dec 14 13:22:40 2001
++++ linux/drivers/md/Config.in	Fri Dec 14 13:39:00 2001
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Fri Dec 14 13:22:40 2001
++++ linux/drivers/md/Makefile	Fri Dec 14 13:39:00 2001
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -1026,8 +1026,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +EXPORT_SYMBOL(dm_unregister_target);
 diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.16/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Fri Dec 14 13:22:10 2001
-@@ -0,0 +1,893 @@
++++ linux/drivers/md/dm.c	Fri Dec 14 13:38:25 2001
+@@ -0,0 +1,892 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
 + *
@@ -1049,7 +1049,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +#define DEVICE_NAME "device-mapper"
 +
 +static const char *_name = DEVICE_NAME;
-+static const char *_version = "0.90.02-fs (2001-12-12)";
++static const char *_version = "0.90.02-fs (2001-12-14)";
 +static const char *_email = "lvm-devel@lists.sistina.com";
 +
 +static int major = 0;
@@ -1148,8 +1148,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +	blksize_size[major] = NULL;
 +	hardsect_size[major] = NULL;
 +
-+	printk(KERN_INFO "%s %d.%d.%d cleaned up\n", _name,
-+	       _version[0], _version[1], _version[2]);
++	printk(KERN_INFO "%s %s cleaned up\n", _name, _version);
 +}
 +
 +/*
@@ -3336,7 +3335,7 @@ diff -ruN linux-2.4.16/drivers/md/dmfs.h linux/drivers/md/dmfs.h
 +#endif				/* LINUX_DMFS_H */
 diff -ruN linux-2.4.16/fs/namespace.c linux/fs/namespace.c
 --- linux-2.4.16/fs/namespace.c	Thu Dec  6 15:57:56 2001
-+++ linux/fs/namespace.c	Fri Dec 14 13:22:40 2001
++++ linux/fs/namespace.c	Fri Dec 14 13:39:00 2001
 @@ -332,7 +332,7 @@
  	}
  }
@@ -3409,7 +3408,7 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
 --- linux-2.4.16/include/linux/fs.h	Thu Dec  6 15:57:58 2001
-+++ linux/include/linux/fs.h	Fri Dec 14 13:22:40 2001
++++ linux/include/linux/fs.h	Fri Dec 14 13:39:00 2001
 @@ -980,6 +980,7 @@
  extern struct vfsmount *kern_mount(struct file_system_type *);
  extern int may_umount(struct vfsmount *);
@@ -3420,7 +3419,7 @@ diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
  
 diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
 --- linux-2.4.16/include/linux/seq_file.h	Thu Dec  6 15:57:56 2001
-+++ linux/include/linux/seq_file.h	Fri Dec 14 13:22:40 2001
++++ linux/include/linux/seq_file.h	Fri Dec 14 13:39:00 2001
 @@ -12,6 +12,7 @@
  	loff_t index;
  	struct semaphore sem;
@@ -3431,7 +3430,7 @@ diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
  struct seq_operations {
 diff -ruN linux-2.4.16/kernel/ksyms.c linux/kernel/ksyms.c
 --- linux-2.4.16/kernel/ksyms.c	Thu Dec  6 15:57:56 2001
-+++ linux/kernel/ksyms.c	Fri Dec 14 13:22:40 2001
++++ linux/kernel/ksyms.c	Fri Dec 14 13:39:00 2001
 @@ -46,6 +46,7 @@
  #include <linux/tty.h>
  #include <linux/in6.h>
