@@ -77,8 +77,7 @@ int dm_task_get_info(struct dm_task *dmt, struct dm_info *info)
 }
 
 struct target *create_target(uint64_t start,
-				     uint64_t len,
-				     const char *type, const char *params)
+			     uint64_t len, const char *type, const char *params)
 {
 	struct target *t;
 	int size = strlen(params) + strlen(type);
@@ -96,7 +95,7 @@ struct target *create_target(uint64_t start,
 	memset(t, 0, size + sizeof(struct target));
 	t->str = (char *) (t + 1);
 
-	ret = sprintf(t->str, "%"PRIu64" %"PRIu64" %s %s\n", start, len, 
+	ret = sprintf(t->str, "%" PRIu64 " %" PRIu64 " %s %s\n", start, len,
 		      type, params);
 	if (ret > size) {
 		/* This should be impossible, but check anyway */
@@ -140,8 +139,13 @@ static int do_newold(char *mnt, char *name, do_newold_t create)
 		return 0;
 
 	if (create == DIR_CREATE) {
-		if ((ret = mkdir(path, 0750)) < 0)
+		if ((ret = mkdir(path, 0750)) < 0) {
+			struct stat st;
+			if (errno == EEXIST && !stat(path, &st) &&
+			    S_ISDIR(st.st_mode)) 
+				ret = 1;
 			log("%s: mkdir failed: %s", path, strerror(errno));
+		}
 	} else if ((ret = rmdir(path)) < 0)
 		log("%s: rmdir failed: %s", path, strerror(errno));
 
@@ -336,7 +340,7 @@ int dm_task_run(struct dm_task *dmt)
 		    !do_info(mnt, dmt->dev_name, &dmt->info))
 			return 0;
 		add_dev_node(dmt->dev_name,
-			      MKDEV(dmt->info.major, dmt->info.minor));
+			     MKDEV(dmt->info.major, dmt->info.minor));
 		break;
 
 	case DM_DEVICE_RELOAD:
@@ -373,4 +377,3 @@ int dm_task_run(struct dm_task *dmt)
 
 	return 1;
 }
-
