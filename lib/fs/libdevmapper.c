@@ -43,7 +43,7 @@ static char *mkpath(int n, ...)
 	va_end(va);
 
 	if (!(r = str = malloc(len))) {
-		log("mkpath: malloc(%d) failed", len);
+		log_error("mkpath: malloc(%d) failed", len);
 		return NULL;
 	}
 
@@ -78,19 +78,19 @@ int dm_task_get_info(struct dm_task *dmt, struct dm_info *info)
 
 int dm_task_set_ro(struct dm_task *dmt)
 {
-	log("Read-only attribute ignored by filesystem interface");
+	log_error("Read-only attribute ignored by filesystem interface");
 	return 1;
 }
 
 int dm_task_set_newname(struct dm_task *dmt, const char *newname)
 {
-	log("Renaming is not yet supported by the filesystem interface");
+	log_error("Renaming is not yet supported by the filesystem interface");
 	return 0;
 }
 
 int dm_task_get_driver_version(struct dm_task *dmt, char *version, size_t size)
 {
-	log("The filesystem interface cannot return its version yet");
+	log_error("The filesystem interface cannot return its version yet");
 	return 0;
 }
 
@@ -105,7 +105,7 @@ struct target *create_target(uint64_t start,
 
 	t = malloc(size + sizeof(struct target));
 	if (!t) {
-		log("create_target: malloc(%d) failed",
+		log_error("create_target: malloc(%d) failed",
 		    size + sizeof(struct target));
 		return NULL;
 	}
@@ -117,7 +117,7 @@ struct target *create_target(uint64_t start,
 		      type, params);
 	if (ret > size) {
 		/* This should be impossible, but check anyway */
-		log("create_target internal error: Ran out of buffer space");
+		log_error("create_target internal error: Ran out of buffer space");
 		free(t);
 		return NULL;
 	}
@@ -140,10 +140,10 @@ static int do_suspend(char *mnt, char *name, int on)
 		if (fputc(c, fp) == (int)c)
 			ret = 1;
 		else
-			log("%s: fputc failed: %s", path, strerror(errno));
+			log_error("%s: fputc failed: %s", path, strerror(errno));
 		fclose(fp);
 	} else
-		log("%s: fopen failed: %s", path, strerror(errno));
+		log_error("%s: fopen failed: %s", path, strerror(errno));
 
 	free(path);
 
@@ -164,10 +164,10 @@ static int do_newold(char *mnt, char *name, do_newold_t create)
 			if (errno == EEXIST && !stat(path, &st) &&
 			    S_ISDIR(st.st_mode)) 
 				ret = 1;
-			log("%s: mkdir failed: %s", path, strerror(errno));
+			log_error("%s: mkdir failed: %s", path, strerror(errno));
 		}
 	} else if ((ret = rmdir(path)) < 0)
-		log("%s: rmdir failed: %s", path, strerror(errno));
+		log_error("%s: rmdir failed: %s", path, strerror(errno));
 
 	free(path);
 
@@ -206,10 +206,10 @@ static int do_suspend_state(char *mnt, char *name, struct dm_info *info)
 		if (fscanf(fp, "%d", &info->suspended) == 1)
 			ret = 1;
 		else
-			log("%s fscanf failed: %s", path, strerror(errno));
+			log_error("%s fscanf failed: %s", path, strerror(errno));
 		fclose(fp);
 	} else
-		log("%s: fopen failed: %s", path, strerror(errno));
+		log_error("%s: fopen failed: %s", path, strerror(errno));
 
 	free(path);
 
@@ -278,7 +278,7 @@ static int do_load(char *mnt, char *name, struct dm_task *dmt)
 
 	if ((fd = open(path, O_RDWR)) != -1) {
 		if (!(ret = write_data(fd, dmt)))
-			log("%s: write failed: %s", path, strerror(errno));
+			log_error("%s: write failed: %s", path, strerror(errno));
 		close(fd);
 	}
 
@@ -305,14 +305,14 @@ static int do_error_check(char *mnt, char *name)
 		return 0;
 
 	if (!(fp = fopen(path, "r"))) {
-		log("%s: fopen failed: %s", path, strerror(errno));
+		log_error("%s: fopen failed: %s", path, strerror(errno));
 		free(path);
 		return 0;
 	}
 
 	while (fgets(buf, sizeof(buf), fp)) {
 		strip_nl(buf);
-		log(buf);
+		log_error(buf);
 		ret = 0;
 	}
 
@@ -328,7 +328,7 @@ static char *find_mount_point(void)
 	char fstype[30];
 
 	if (!(fp = fopen("/proc/mounts", "r"))) {
-		log("/proc/mounts: fopen failed: %s", strerror(errno));
+		log_error("/proc/mounts: fopen failed: %s", strerror(errno));
 		return NULL;
 	}
 
@@ -348,12 +348,12 @@ int dm_task_run(struct dm_task *dmt)
 
 	if (mnt == NULL) {
 		/* FIXME Mount it temporarily if not mounted */
-		log("Cannot find mount point for dmfs or dmfs not mounted");
+		log_error("Cannot find mount point for dmfs or dmfs not mounted");
 		return 0;
 	}
 
 	if (!dmt->dev_name || !*dmt->dev_name) {
-		log("dm_task_run: Device name not supplied");
+		log_error("dm_task_run: Device name not supplied");
 		return 0;
 	}
 
@@ -397,7 +397,7 @@ int dm_task_run(struct dm_task *dmt)
 		break;
 
 	default:
-		log("Internal error: unknown device-mapper task %d", dmt->type);
+		log_error("Internal error: unknown device-mapper task %d", dmt->type);
 		return 0;
 	}
 
