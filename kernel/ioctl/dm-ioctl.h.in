@@ -13,22 +13,10 @@
  * Implements a traditional ioctl interface to the device mapper.
  */
 
-struct dm_target_spec {
-	int32_t status;		/* used when reading from kernel only */
-	unsigned long long sector_start;
-	unsigned long long length;
-
-	char target_type[DM_MAX_TYPE_NAME];
-
-	unsigned long next;	/* offset in bytes to next target_spec */
-
-	/*
-	 * Parameter string starts immediately after this object.
-	 * Be careful to add padding after string to ensure correct
-	 * alignment of subsequent dm_target_spec.
-	 */
-};
-
+/*
+ * All ioctl arguments consist of a single chunk of memory, with
+ * this structure at the start.
+ */
 struct dm_ioctl {
 	char version[16];
 
@@ -47,6 +35,37 @@ struct dm_ioctl {
 	__kernel_dev_t dev;		/* in/out */
 };
 
+/*
+ * Used to specify tables.  These structures appear after the
+ * dm_ioctl.
+ */
+struct dm_target_spec {
+	int32_t status;		/* used when reading from kernel only */
+	unsigned long long sector_start;
+	unsigned long long length;
+
+	char target_type[DM_MAX_TYPE_NAME];
+
+	unsigned long next;	/* offset in bytes to next target_spec */
+
+	/*
+	 * Parameter string starts immediately after this object.
+	 * Be careful to add padding after string to ensure correct
+	 * alignment of subsequent dm_target_spec.
+	 */
+};
+
+
+/*
+ * Used to retrieve target dependencies
+ */
+struct dm_target_deps {
+	unsigned int count;
+
+	__kernel_dev_t dev[0];		/* out */
+};
+
+
 #define DM_IOCTL 0xfd
 
 #define	DM_CREATE _IOWR(DM_IOCTL, 0x00, struct dm_ioctl)
@@ -56,6 +75,7 @@ struct dm_ioctl {
 #define DM_INFO _IOWR(DM_IOCTL, 0x04, struct dm_ioctl)
 #define DM_RENAME _IOW(DM_IOCTL, 0x05, struct dm_ioctl)
 #define DM_VERSION _IOR(DM_IOCTL, 0x06, struct dm_ioctl)
+#define DM_DEPS _IOR(DM_IOCTL, 0x07, struct dm_ioctl)
 
 #define DM_IOCTL_VERSION @DM_IOCTL_VERSION@
 #define DM_DRIVER_VERSION @DM_DRIVER_VERSION@

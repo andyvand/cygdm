@@ -75,11 +75,6 @@ static int next_target(struct dm_target_spec *last, unsigned long next,
 	return valid_str(*params, begin, end);
 }
 
-void dm_error(const char *message)
-{
-	DMWARN("%s", message);
-}
-
 /*
  * Checks to see if there's a gap in the table.
  * Returns true iff there is a gap.
@@ -112,7 +107,7 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 	begin = (void *) args;
 	end = begin + args->data_size;
 
-#define PARSE_ERROR(msg) {dm_error(msg); return -EINVAL;}
+#define PARSE_ERROR(msg) {DMWARN(msg); return -EINVAL;}
 
 	for (i = 0; i < args->target_count; i++) {
 
@@ -139,9 +134,10 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 
 		/* Build the target */
 		if (ttype->ctr(table, spec->sector_start, spec->length,
-			       argc, argv, &context))  {
-			dm_error(context);
-			PARSE_ERROR("target constructor failed");
+			       argc, argv, &context)) {
+			DMWARN("%s: target constructor failed", 
+			       (char *)context);
+			return -EINVAL;
 		}
 
 		/* Add the target to the table */
@@ -159,41 +155,146 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 }
 
 /*
+ * Round up the ptr to the next 'align' boundary.  Obviously
+ * 'align' must be a power of 2.
+ */
+static inline void *align_ptr(void *ptr, unsigned int align)
+{
+	align--;
+	return (void *) (((unsigned long) (ptr + align)) & ~align);
+}
+
+/*
+ * Copies a dm_ioctl and an optional additional payload to
+ * userland.
+ */
+static int results_to_user(struct dm_ioctl *user, struct dm_ioctl *param,
+			   void *data, unsigned long len)
+{
+	int r;
+	void *ptr = NULL;
+
+	strncpy(param->version, DM_IOCTL_VERSION, sizeof(param->version));
+
+	if (data) {
+		ptr = align_ptr(user + 1, sizeof(unsigned long));
+		param->data_start = ptr - (void *) user;
+	}
+
+	r = copy_to_user(user, param, sizeof(*param));
+	if (r)
+		return r;
+
+	if (data) {
+		if (param->data_start + len > param->data_size)
+			return -ENOSPC;
+		r = copy_to_user(ptr, data, len);
+	}
+
+	return r;
+}
+
+/*
+ * Fills in a dm_ioctl structure, ready for sending back to
+ * userland.
+ */
+static void __info(struct mapped_device *md, struct dm_ioctl *param)
+{
+	param->flags = DM_EXISTS_FLAG;
+	if (md->suspended)
+		param->flags |= DM_SUSPEND_FLAG;
+	if (md->read_only)
+		param->flags |= DM_READONLY_FLAG;
+
+	strncpy(param->name, md->name, sizeof(param->name));
+	param->name[sizeof(param->name) - 1] = '\0';
+
+	param->open_count = md->use_count;
+	param->dev = kdev_t_to_nr(md->dev);
+	param->target_count = md->map->num_targets;
+}
+
+/*
  * Copies device info back to user space, used by
  * the create and info ioctls.
  */
-static int info(const char *name, struct dm_ioctl *user)
+static int info(struct dm_ioctl *param, struct dm_ioctl *user)
 {
 	int minor;
-	struct dm_ioctl param;
 	struct mapped_device *md;
 
-	param.flags = 0;
-	strncpy(param.version, DM_IOCTL_VERSION, sizeof(param.version));
+	param->flags = 0;
 
-	md  = dm_get_name_r(name);
+	md = dm_get_name_r(param->name);
+	if (!md)
+		/*
+		 * Device not found - returns cleared exists flag.
+		 */
+		goto out;
+
+	minor = MINOR(md->dev);
+	__info(md, param);
+	dm_put_r(minor);
+
+ out:
+	return results_to_user(user, param, NULL, 0);
+}
+
+/*
+ * Retrieves a list of devices used by a particular dm device.
+ */
+static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
+{
+	int minor, count, r;
+	struct mapped_device *md;
+	struct list_head *tmp;
+	size_t len = 0;
+	struct dm_target_deps *deps = NULL;
+
+	md = dm_get_name_r(param->name);
 	if (!md)
 		goto out;
 	minor = MINOR(md->dev);
 
-	param.flags |= DM_EXISTS_FLAG;
-	if (md->suspended)
-		param.flags |= DM_SUSPEND_FLAG;
-	if (md->read_only)
-		param.flags |= DM_READONLY_FLAG;
+	/*
+	 * Setup the basic dm_ioctl structure.
+	 */
+	__info(md, param);
 
-	param.data_size = 0;
-	strncpy(param.name, md->name, sizeof(param.name));
-	param.name[sizeof(param.name) - 1] = '\0';
+	/*
+	 * Count the devices.
+	 */
+	count = 0;
+	list_for_each(tmp, &md->map->devices)
+		count++;
 
-	param.open_count = md->use_count;
-	param.dev = kdev_t_to_nr(md->dev);
-	param.target_count = md->map->num_targets;
+	/*
+	 * Allocate a kernel space version of the dm_target_status
+	 * struct.
+	 */
+	len = sizeof(*deps) + (sizeof(*deps->dev) * count);
+	deps = kmalloc(len, GFP_KERNEL);
+	if (!deps) {
+		dm_put_r(minor);
+		return -ENOMEM;
+	}
 
+	/*
+	 * Fill in the devices.
+	 */
+	deps->count = count;
+	count = 0;
+	list_for_each (tmp, &md->map->devices) {
+		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
+		deps->dev[count++] = kdev_t_to_nr(dd->dev);
+	}
 	dm_put_r(minor);
 
  out:
-	return copy_to_user(user, &param, sizeof(param));
+	r = results_to_user(user, param, deps, len);
+
+	kfree(deps);
+	return r;
 }
 
 static int create(struct dm_ioctl *param, struct dm_ioctl *user)
@@ -231,7 +332,7 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
 	dm_put_w(minor);
 
-	r = info(param->name, user);
+	r = info(param, user);
 	return r;
 }
 
@@ -311,7 +412,7 @@ static int rename(struct dm_ioctl *param)
 	if (valid_str(newname, (void *) param,
 		      (void *) param + param->data_size) ||
 	    dm_set_name(param->name, newname)) {
-		dm_error("Invalid new logical volume name supplied.");
+		DMWARN("Invalid new logical volume name supplied.");
 		return -EINVAL;
 	}
 
@@ -366,7 +467,11 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 		break;
 
 	case DM_INFO:
-		r = info(p->name, (struct dm_ioctl *) a);
+		r = info(p, (struct dm_ioctl *) a);
+		break;
+
+	case DM_DEPS:
+		r = dep(p, (struct dm_ioctl *) a);
 		break;
 
 	case DM_RENAME:
