@@ -7,6 +7,7 @@
  */
 
 #include <linux/config.h>
+#include <linux/ctype.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/slab.h>
@@ -398,7 +399,7 @@ static int snapshot_ctr(struct dm_target *ti, int argc, char **argv)
 	struct dm_snapshot *s;
 	unsigned long chunk_size;
 	int r = -EINVAL;
-	char *persistent;
+	char persistent;
 	char *origin_path;
 	char *cow_path;
 	char *value;
@@ -412,9 +413,9 @@ static int snapshot_ctr(struct dm_target *ti, int argc, char **argv)
 
 	origin_path = argv[0];
 	cow_path = argv[1];
-	persistent = argv[2];
+	persistent = toupper(*argv[2]);
 
-	if ((*persistent & 0x5f) != 'P' && (*persistent & 0x5f) != 'N') {
+	if (persistent != 'P' && persistent != 'N') {
 		ti->error = "Persistent flag is not P or N";
 		r = -EINVAL;
 		goto bad;
@@ -430,7 +431,7 @@ static int snapshot_ctr(struct dm_target *ti, int argc, char **argv)
 	s = kmalloc(sizeof(*s), GFP_KERNEL);
 	if (s == NULL) {
 		ti->error = "Cannot allocate snapshot context private "
-			    "structure";
+		    "structure";
 		r = -ENOMEM;
 		goto bad;
 	}
@@ -480,7 +481,7 @@ static int snapshot_ctr(struct dm_target *ti, int argc, char **argv)
 
 	s->chunk_size = chunk_size;
 	s->chunk_mask = chunk_size - 1;
-	s->type = *persistent;
+	s->type = persistent;
 	for (s->chunk_shift = 0; chunk_size;
 	     s->chunk_shift++, chunk_size >>= 1)
 		;
@@ -504,7 +505,7 @@ static int snapshot_ctr(struct dm_target *ti, int argc, char **argv)
 	 */
 	s->store.snap = s;
 
-	if ((*persistent & 0x5f) == 'P')
+	if (persistent == 'P')
 		r = dm_create_persistent(&s->store, s->chunk_size);
 	else
 		r = dm_create_transient(&s->store, s, blocksize);
@@ -785,7 +786,8 @@ static inline void remap_exception(struct dm_snapshot *s, struct exception *e,
 	    (bh->b_rsector & s->chunk_mask);
 }
 
-static int snapshot_map(struct dm_target *ti, struct buffer_head *bh, int rw)
+static int snapshot_map(struct dm_target *ti, struct buffer_head *bh, int rw,
+			void **map_context)
 {
 	struct exception *e;
 	struct dm_snapshot *s = (struct dm_snapshot *) ti->private;
@@ -1028,7 +1030,8 @@ static void origin_dtr(struct dm_target *ti)
 	dm_put_device(ti, dev);
 }
 
-static int origin_map(struct dm_target *ti, struct buffer_head *bh, int rw)
+static int origin_map(struct dm_target *ti, struct buffer_head *bh, int rw,
+		      void **map_context)
 {
 	struct dm_dev *dev = (struct dm_dev *) ti->private;
 	bh->b_rdev = dev->dev;

@@ -7,8 +7,6 @@
 #ifndef _LINUX_DEVICE_MAPPER_H
 #define _LINUX_DEVICE_MAPPER_H
 
-#ifdef __KERNEL__
-
 typedef unsigned long sector_t;
 
 struct dm_target;
@@ -21,13 +19,13 @@ typedef enum { STATUSTYPE_INFO, STATUSTYPE_TABLE } status_type_t;
  * In the constructor the target parameter will already have the
  * table, type, begin and len fields filled in.
  */
-typedef int (*dm_ctr_fn) (struct dm_target *target, int argc, char **argv);
+typedef int (*dm_ctr_fn) (struct dm_target * target, int argc, char **argv);
 
 /*
  * The destructor doesn't need to free the dm_target, just
  * anything hidden ti->private.
  */
-typedef void (*dm_dtr_fn) (struct dm_target *ti);
+typedef void (*dm_dtr_fn) (struct dm_target * ti);
 
 /*
  * The map function must return:
@@ -35,8 +33,19 @@ typedef void (*dm_dtr_fn) (struct dm_target *ti);
  * = 0: The target will handle the io by resubmitting it later
  * > 0: simple remap complete
  */
-typedef int (*dm_map_fn) (struct dm_target *ti, struct buffer_head *bh, int rw);
-typedef int (*dm_status_fn) (struct dm_target *ti, status_type_t status_type,
+typedef int (*dm_map_fn) (struct dm_target * ti, struct buffer_head * bh,
+			  int rw, void **map_context);
+
+/*
+ * Returns:
+ * < 0 : error (currently ignored)
+ * 0   : ended successfully
+ * 1   : for some reason the io has still not completed (eg,
+ *       multipath target might want to requeue a failed io).
+ */
+typedef int (*dm_endio_fn) (struct dm_target * ti, struct buffer_head * bh,
+			    int rw, int error, void *map_context);
+typedef int (*dm_status_fn) (struct dm_target * ti, status_type_t status_type,
 			     char *result, int maxlen);
 
 void dm_error(const char *message);
@@ -59,6 +68,7 @@ struct target_type {
 	dm_ctr_fn ctr;
 	dm_dtr_fn dtr;
 	dm_map_fn map;
+	dm_endio_fn end_io;
 	dm_status_fn status;
 };
 
@@ -79,7 +89,5 @@ struct dm_target {
 
 int dm_register_target(struct target_type *t);
 int dm_unregister_target(struct target_type *t);
-
-#endif				/* __KERNEL__ */
 
 #endif				/* _LINUX_DEVICE_MAPPER_H */

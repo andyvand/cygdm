@@ -65,8 +65,10 @@ static int init_pages(void)
 	return 0;
 
       bad:
-	while (i--)
+	while (i--) {
+		UnlockPage(_pages_array[i]);
 		__free_page(_pages_array[i]);
+	}
 	return -ENOMEM;
 }
 
@@ -334,7 +336,6 @@ static void dispatch_bh(struct kcopyd_job *job,
 	p = block >> job->bpp_shift;
 	block &= job->bpp_mask;
 
-	bh->b_dev = B_FREE;
 	bh->b_size = job->block_size;
 	set_bh_page(bh, job->pages[p], ((block << job->block_shift) +
 					job->offset) << SECTOR_SHIFT);
@@ -343,9 +344,11 @@ static void dispatch_bh(struct kcopyd_job *job,
 	init_buffer(bh, end_bh, job);
 
 	bh->b_dev = job->disk.dev;
-	bh->b_state = ((1 << BH_Mapped) | (1 << BH_Lock) | (1 << BH_Req));
+	atomic_set(&bh->b_count, 1);
 
-	set_bit(BH_Uptodate, &bh->b_state);
+	bh->b_state = ((1 << BH_Uptodate) | (1 << BH_Mapped) |
+		       (1 << BH_Lock) | (1 << BH_Req));
+
 	if (job->rw == WRITE)
 		clear_bit(BH_Dirty, &bh->b_state);
 
@@ -404,7 +407,7 @@ static int run_pages_job(struct kcopyd_job *job)
 	}
 
 	if (r == -ENOMEM)
-		/* can complete now */
+		/* can't complete now */
 		return 1;
 
 	return r;
@@ -657,8 +660,10 @@ void copy_write(struct kcopyd_job *job)
 {
 	struct copy_info *info = (struct copy_info *) job->context;
 
-	if (job->err && info->notify) {
-		info->notify(job->err, job->context);
+	if (job->err) {
+		if (info->notify)
+			info->notify(job->err, job->context);
+
 		kcopyd_free_job(job);
 		free_copy_info(info);
 		return;
@@ -667,7 +672,6 @@ void copy_write(struct kcopyd_job *job)
 	job->rw = WRITE;
 	memcpy(&job->disk, &info->to, sizeof(job->disk));
 	job->callback = copy_complete;
-	job->context = info;
 
 	/*
 	 * Queue the write.
@@ -714,7 +718,6 @@ int kcopyd_write_pages(struct kcopyd_region *to, int nr_pages,
 
 	memcpy(&job->disk, &info->to, sizeof(job->disk));
 	job->offset = offset;
-	calc_block_sizes(job);
 	job->callback = page_write_complete;
 	job->context = info;
 
@@ -755,7 +758,6 @@ int kcopyd_copy(struct kcopyd_region *from, struct kcopyd_region *to,
 	memcpy(&job->disk, from, sizeof(*from));
 
 	job->offset = 0;
-	calc_block_sizes(job);
 	job->callback = copy_write;
 	job->context = info;
 

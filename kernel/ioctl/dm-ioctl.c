@@ -14,6 +14,7 @@
 #include <linux/wait.h>
 #include <linux/blk.h>
 #include <linux/slab.h>
+
 #include <asm/uaccess.h>
 
 #define DM_DRIVER_EMAIL "dm@uk.sistina.com"
@@ -314,7 +315,6 @@ int dm_hash_rename(const char *old, const char *new)
 	return 0;
 }
 
-
 /*-----------------------------------------------------------------
  * Implementation of the ioctl commands
  *---------------------------------------------------------------*/
@@ -323,7 +323,7 @@ int dm_hash_rename(const char *old, const char *new)
  * All the ioctl commands get dispatched to functions with this
  * prototype.
  */
-typedef int (*ioctl_fn)(struct dm_ioctl *param, struct dm_ioctl *user);
+typedef int (*ioctl_fn) (struct dm_ioctl * param, struct dm_ioctl * user);
 
 /*
  * Check a string doesn't overrun the chunk of
@@ -817,6 +817,24 @@ static int remove(struct dm_ioctl *param, struct dm_ioctl *user)
 		return -EINVAL;
 	}
 
+	/*
+	 * You may ask the interface to drop its reference to an
+	 * in use device.  This is no different to unlinking a
+	 * file that someone still has open.  The device will not
+	 * actually be destroyed until the last opener closes it.
+	 * The name and uuid of the device (both are interface
+	 * properties) will be available for reuse immediately.
+	 *
+	 * You don't want to drop a _suspended_ device from the
+	 * interface, since that will leave you with no way of
+	 * resuming it.
+	 */
+	if (dm_suspended(hc->md)) {
+		DMWARN("refusing to remove a suspended device.");
+		up_write(&_hash_lock);
+		return -EPERM;
+	}
+
 	__hash_remove(hc);
 	up_write(&_hash_lock);
 	return 0;
@@ -875,6 +893,7 @@ static int reload(struct dm_ioctl *param, struct dm_ioctl *user)
 		dm_table_put(t);
 		return r;
 	}
+	dm_table_put(t);	/* md will have taken its own reference */
 
 	dev = dm_kdev(md);
 	set_device_ro(dev, (param->flags & DM_READONLY_FLAG));
@@ -901,7 +920,6 @@ static int rename(struct dm_ioctl *param, struct dm_ioctl *user)
 
 	return dm_hash_rename(param->name, new_name);
 }
-
 
 /*-----------------------------------------------------------------
  * Implementation of open/close/ioctl on the special char
@@ -1069,8 +1087,8 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 }
 
 static struct file_operations _ctl_fops = {
-	.ioctl = ctl_ioctl,
-	.owner = THIS_MODULE,
+	.ioctl	 = ctl_ioctl,
+	.owner	 = THIS_MODULE,
 };
 
 static devfs_handle_t _ctl_handle;
@@ -1125,15 +1143,15 @@ int __init dm_interface_init(void)
 	return 0;
 
       failed:
-	dm_hash_exit();
 	misc_deregister(&_dm_misc);
+	dm_hash_exit();
 	return r;
 }
 
 void dm_interface_exit(void)
 {
-	dm_hash_exit();
-
 	if (misc_deregister(&_dm_misc) < 0)
 		DMERR("misc_deregister failed for control device");
+
+	dm_hash_exit();
 }

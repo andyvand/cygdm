@@ -66,7 +66,7 @@ struct kcopyd_job {
 	 * Set this to ensure you are notified when the job has
 	 * completed.  'context' is for callback to use.
 	 */
-	void (*callback) (struct kcopyd_job *job);
+	void (*callback) (struct kcopyd_job * job);
 	void *context;
 };
 

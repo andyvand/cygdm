@@ -18,7 +18,7 @@ struct tt_internal {
 };
 
 static LIST_HEAD(_targets);
-static rwlock_t _lock = RW_LOCK_UNLOCKED;
+static DECLARE_RWSEM(_lock);
 
 #define DM_MOD_NAME_SIZE 32
 
@@ -41,7 +41,7 @@ static struct tt_internal *get_target_type(const char *name)
 {
 	struct tt_internal *ti;
 
-	read_lock(&_lock);
+	down_read(&_lock);
 	ti = __find_target_type(name);
 
 	if (ti) {
@@ -49,7 +49,7 @@ static struct tt_internal *get_target_type(const char *name)
 			__MOD_INC_USE_COUNT(ti->tt.module);
 		ti->use++;
 	}
-	read_unlock(&_lock);
+	up_read(&_lock);
 
 	return ti;
 }
@@ -64,8 +64,6 @@ static void load_module(const char *name)
 
 	strcat(module_name, name);
 	request_module(module_name);
-
-	return;
 }
 
 struct target_type *dm_get_target_type(const char *name)
@@ -84,13 +82,13 @@ void dm_put_target_type(struct target_type *t)
 {
 	struct tt_internal *ti = (struct tt_internal *) t;
 
-	read_lock(&_lock);
+	down_read(&_lock);
 	if (--ti->use == 0 && ti->tt.module)
 		__MOD_DEC_USE_COUNT(ti->tt.module);
 
 	if (ti->use < 0)
 		BUG();
-	read_unlock(&_lock);
+	up_read(&_lock);
 
 	return;
 }
@@ -115,13 +113,13 @@ int dm_register_target(struct target_type *t)
 	if (!ti)
 		return -ENOMEM;
 
-	write_lock(&_lock);
+	down_write(&_lock);
 	if (__find_target_type(t->name))
 		rv = -EEXIST;
 	else
 		list_add(&ti->list, &_targets);
 
-	write_unlock(&_lock);
+	up_write(&_lock);
 	return rv;
 }
 
@@ -129,21 +127,21 @@ int dm_unregister_target(struct target_type *t)
 {
 	struct tt_internal *ti;
 
-	write_lock(&_lock);
+	down_write(&_lock);
 	if (!(ti = __find_target_type(t->name))) {
-		write_unlock(&_lock);
+		up_write(&_lock);
 		return -EINVAL;
 	}
 
 	if (ti->use) {
-		write_unlock(&_lock);
+		up_write(&_lock);
 		return -ETXTBSY;
 	}
 
 	list_del(&ti->list);
 	kfree(ti);
 
-	write_unlock(&_lock);
+	up_write(&_lock);
 	return 0;
 }
 
@@ -159,13 +157,12 @@ static int io_err_ctr(struct dm_target *ti, int argc, char **args)
 static void io_err_dtr(struct dm_target *ti)
 {
 	/* empty */
-	return;
 }
 
-static int io_err_map(struct dm_target *ti, struct buffer_head *bh, int rw)
+static int io_err_map(struct dm_target *ti, struct buffer_head *bh, int rw,
+		      void **map_context)
 {
-	buffer_IO_error(bh);
-	return 0;
+	return -EIO;
 }
 
 static struct target_type error_target = {

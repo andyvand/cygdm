@@ -116,30 +116,37 @@ static int stripe_ctr(struct dm_target *ti, int argc, char **argv)
 		return -EINVAL;
 	}
 
+	/*
+	 * chunk_size is a power of two
+	 */
+	if (!chunk_size || (chunk_size & (chunk_size - 1))) {
+		ti->error = "dm-stripe: Invalid chunk size";
+		return -EINVAL;
+	}
+
 	if (!multiple(ti->len, stripes, &width)) {
 		ti->error = "dm-stripe: Target length not divisable by "
 		    "number of stripes";
 		return -EINVAL;
 	}
 
+	/*
+	 * Do we have enough arguments for that many stripes ?
+	 */
+	if (argc != (2 + 2 * stripes)) {
+		ti->error = "dm-stripe: Not enough destinations specified";
+		return -EINVAL;
+	}
+
 	sc = alloc_context(stripes);
 	if (!sc) {
 		ti->error = "dm-stripe: Memory allocation for striped context "
-			    "failed";
+		    "failed";
 		return -ENOMEM;
 	}
 
 	sc->stripes = stripes;
 	sc->stripe_width = width;
-
-	/*
-	 * chunk_size is a power of two
-	 */
-	if (!chunk_size || (chunk_size & (chunk_size - 1))) {
-		ti->error = "dm-stripe: Invalid chunk size";
-		kfree(sc);
-		return -EINVAL;
-	}
 
 	sc->chunk_mask = ((sector_t) chunk_size) - 1;
 	for (sc->chunk_shift = 0; chunk_size; sc->chunk_shift++)
@@ -150,19 +157,12 @@ static int stripe_ctr(struct dm_target *ti, int argc, char **argv)
 	 * Get the stripe destinations.
 	 */
 	for (i = 0; i < stripes; i++) {
-		if (argc < 2) {
-			ti->error = "dm-stripe: Not enough destinations "
-				    "specified";
-			kfree(sc);
-			return -EINVAL;
-		}
-
 		argv += 2;
 
 		r = get_stripe(ti, sc, i, argv);
 		if (r < 0) {
 			ti->error = "dm-stripe: Couldn't parse stripe "
-				    "destination";
+			    "destination";
 			while (i--)
 				dm_put_device(ti, sc->stripe[i].dev);
 			kfree(sc);
@@ -185,7 +185,8 @@ static void stripe_dtr(struct dm_target *ti)
 	kfree(sc);
 }
 
-static int stripe_map(struct dm_target *ti, struct buffer_head *bh, int rw)
+static int stripe_map(struct dm_target *ti, struct buffer_head *bh, int rw,
+		      void **context)
 {
 	struct stripe_c *sc = (struct stripe_c *) ti->private;
 
@@ -216,11 +217,11 @@ static int stripe_status(struct dm_target *ti,
 		offset = snprintf(result, maxlen, "%d " SECTOR_FORMAT,
 				  sc->stripes, sc->chunk_mask + 1);
 		for (i = 0; i < sc->stripes; i++) {
-			offset += snprintf(result + offset, maxlen - offset,
-					   " %s " SECTOR_FORMAT,
-		       			   kdevname(to_kdev_t
-					     (sc->stripe[i].dev->bdev->bd_dev)),
-					   sc->stripe[i].physical_start);
+			offset +=
+			    snprintf(result + offset, maxlen - offset,
+				     " %s " SECTOR_FORMAT,
+		       kdevname(to_kdev_t(sc->stripe[i].dev->bdev->bd_dev)),
+				     sc->stripe[i].physical_start);
 		}
 		break;
 	}

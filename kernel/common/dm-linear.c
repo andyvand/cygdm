@@ -64,7 +64,8 @@ static void linear_dtr(struct dm_target *ti)
 	kfree(lc);
 }
 
-static int linear_map(struct dm_target *ti, struct buffer_head *bh, int rw)
+static int linear_map(struct dm_target *ti, struct buffer_head *bh, int rw,
+		      void **map_context)
 {
 	struct linear_c *lc = (struct linear_c *) ti->private;
 
