@@ -7,7 +7,7 @@
 #ifndef _LINUX_DEVICE_MAPPER_H
 #define _LINUX_DEVICE_MAPPER_H
 
-#define DM_DIR "device-mapper"	/* Slashes not supported */
+#define DM_DIR "mapper"	/* Slashes not supported */
 #define DM_MAX_TYPE_NAME 16
 #define DM_NAME_LEN 128
 #define DM_UUID_LEN 129

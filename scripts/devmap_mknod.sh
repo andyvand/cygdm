@@ -5,7 +5,7 @@
 # Non-zero exit status indicates failure.
 
 # These must correspond to the definitions in device-mapper.h and dm.h
-DM_DIR="device-mapper"
+DM_DIR="mapper"
 DM_NAME="device-mapper"
 
 set -e
