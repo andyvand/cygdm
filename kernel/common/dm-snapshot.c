@@ -88,6 +88,9 @@ struct exception {
 	struct list_head list; /* List of exceptions in this bucket */
 	uint32_t rsector_org;
 	uint32_t rsector_new;
+	atomic_t ondisk;            /* Flag set when this COW block has actually hit the disk */
+	struct   buffer_head *bh;   /* Chain of WRITE buffer heads to submit when this COW has completed */
+	struct   snapshot_c  *snap; /* Pointer back to snapshot context */
 };
 
 /* An array of these is held in each disk block. LE format */
@@ -158,6 +161,96 @@ static struct origin_list *__lookup_snapshot_list(kdev_t origin)
 		}
 	}
 	return NULL;
+}
+
+
+/* Add a new exception entry to the on-disk metadata */
+static int update_metadata_block(struct snapshot_c *sc, unsigned long org, unsigned long new)
+{
+	int i = sc->current_metadata_entry++;
+	unsigned long next_md_block = sc->current_metadata_sector;
+
+	sc->current_metadata_number++;
+
+	/* Update copy of disk COW */
+	sc->disk_cow[i].rsector_org = cpu_to_le64(org);
+	sc->disk_cow[i].rsector_new = cpu_to_le64(new);
+
+	/* Have we filled this extent ? */
+	if (sc->current_metadata_number >= sc->highest_metadata_entry) {
+		/* Fill in pointer to next metadata extent */
+		i++;
+		sc->current_metadata_entry++;
+
+		next_md_block = sc->next_free_sector;
+		sc->next_free_sector += sc->extent_size;
+
+		sc->disk_cow[i].rsector_org = cpu_to_le64(next_md_block);
+		sc->disk_cow[i].rsector_new = 0;
+	}
+
+	/* Commit to disk */
+	if (write_metadata(sc)) {
+		sc->full = 1; /* Failed. don't try again */
+		return -1;
+	}
+
+	/* Write a new (empty) metadata block if we are at the end of an existing
+	   block so that read_metadata finds a terminating zero entry */
+	if (sc->current_metadata_entry == sc->md_entries_per_block) {
+		memset(sc->disk_cow, 0, PAGE_SIZE);
+		sc->current_metadata_sector = next_md_block;
+
+		/* If this is also the end of an extent then go back to the start */
+		if (sc->current_metadata_number >= sc->highest_metadata_entry) {
+			sc->current_metadata_number = 0;
+		}
+		else {
+			int blocksize = get_hardsect_size(sc->cow_dev->dev);
+			sc->current_metadata_sector += blocksize/SECTOR_SIZE;
+		}
+
+		sc->current_metadata_entry = 0;
+		if (write_metadata(sc) != 0) {
+			sc->full = 1;
+			return -1;
+		}
+	}
+	return 0;
+}
+
+
+/* Called when the copy I/O has finished */
+static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
+{
+	struct exception *ex = (struct exception *) context;
+	struct buffer_head *bh;
+
+	if (reason == COPY_CB_COMPLETE) {
+		/* Update the metadata if we are persistent */
+		if (ex->snap->persistent)
+			update_metadata_block(ex->snap, ex->rsector_org, ex->rsector_new);
+
+		atomic_set(&ex->ondisk, 1);
+
+		/* Submit any pending write BHs */
+		down_write(&ex->snap->origin->lock);
+		bh = ex->bh;
+		while (bh) {
+			struct buffer_head *nextbh = bh->b_reqnext;
+			bh->b_reqnext = NULL;
+			generic_make_request(WRITE, bh);
+			bh = nextbh;
+		}
+		ex->bh = NULL;
+		up_write(&ex->snap->origin->lock);
+	}
+
+	/* Read/write error - snapshot is unusable */
+	if (reason == COPY_CB_FAILED_WRITE || reason == COPY_CB_FAILED_READ) {
+		DMERR("Error reading/writing snapshot\n");
+		ex->snap->full = 1;
+	}
 }
 
 /* Make a note of the snapshot and its origin so we can look it up when
@@ -356,75 +449,24 @@ static void free_exception_table(struct snapshot_c *lc)
 }
 
 /* Add a new exception to the list */
-static int add_exception(struct snapshot_c *sc, unsigned long org, unsigned long new)
+static struct exception *add_exception(struct snapshot_c *sc, unsigned long org, unsigned long new)
 {
 	struct list_head *l = &sc->hash_table[EX_HASH_FN(org, sc)];
 	struct exception *new_ex;
 
 	new_ex = kmalloc(sizeof(struct exception), GFP_KERNEL);
-	if (!new_ex) return -1;
+	if (!new_ex) return NULL;
 
 	new_ex->rsector_org = org;
 	new_ex->rsector_new = new;
+	new_ex->bh = 0;
+	atomic_set(&new_ex->ondisk, 0);
+	new_ex->snap = sc;
 
 	list_add(&new_ex->list, l);
 
-	/* Add to the on-disk metadata */
-	if (sc->persistent) {
-		int i = sc->current_metadata_entry++;
-		unsigned long next_md_block = sc->current_metadata_sector;
-
-		sc->current_metadata_number++;
-
-		/* Update copy of disk COW */
-		sc->disk_cow[i].rsector_org = cpu_to_le64(org);
-		sc->disk_cow[i].rsector_new = cpu_to_le64(new);
-
-		/* Have we filled this extent ? */
-		if (sc->current_metadata_number >= sc->highest_metadata_entry) {
-			/* Fill in pointer to next metadata extent */
-			i++;
-			sc->current_metadata_entry++;
-
-			next_md_block = sc->next_free_sector;
-			sc->next_free_sector += sc->extent_size;
-
-			sc->disk_cow[i].rsector_org = cpu_to_le64(next_md_block);
-			sc->disk_cow[i].rsector_new = 0;
-		}
-
-		/* Commit to disk */
-		if (write_metadata(sc)) {
-			sc->full = 1; /* Failed. don't try again */
-			return -1;
-		}
-
-		/* Write a new (empty) metadata block if we are at the end of an existing
-		   block so that read_metadata finds a terminating zero entry */
-		if (sc->current_metadata_entry == sc->md_entries_per_block) {
-			memset(sc->disk_cow, 0, PAGE_SIZE);
-			sc->current_metadata_sector = next_md_block;
-
-			/* If this is also the end of an extent then go back to the start */
-			if (sc->current_metadata_number >= sc->highest_metadata_entry) {
-				sc->current_metadata_number = 0;
-			}
-			else {
-				int blocksize = get_hardsect_size(sc->cow_dev->dev);
-				sc->current_metadata_sector += blocksize/SECTOR_SIZE;
-			}
-
-			sc->current_metadata_entry = 0;
-			if (write_metadata(sc) != 0) {
-				sc->full = 1;
-				return -1;
-			}
-		}
-	}
-
-	return 0;
+	return new_ex;
 }
-
 
 /* Read on-disk COW metadata and populate the hash table */
 static int read_metadata(struct snapshot_c *lc)
@@ -456,10 +498,6 @@ static int read_metadata(struct snapshot_c *lc)
 		return -1;
 	}
 	cow_block = page_address(read_iobuf->maplist[0]);
-
-	/* Temporarily clear the persistent flag so that add_exception() doesn't
-	   try to rewrite the on-disk table while we are populating it. */
-	lc->persistent = 0;
 
 	do
 	{
@@ -899,8 +937,9 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 {
 	struct exception *ex;
 	struct snapshot_c *lc = (struct snapshot_c *) context;
+	int ret = 1;
 
-	/* Full snapshots are not usable */
+        /* Full snapshots are not usable */
 	if (lc->full)
 		return -1;
 
@@ -913,8 +952,17 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 		/* If the block is already remapped - use that, else remap it */
 		ex = find_exception(context, bh->b_rsector);
 		if (ex) {
-			bh->b_rdev = lc->cow_dev->dev;
-			bh->b_rsector = ex->rsector_new + (bh->b_rsector & lc->chunk_size_mask);
+			if (atomic_read(&ex->ondisk)) {
+				bh->b_rdev = lc->cow_dev->dev;
+				bh->b_rsector = ex->rsector_new + (bh->b_rsector & lc->chunk_size_mask);
+			}
+			else {
+				/* Exception has not been committed to disk - save this bh */
+				bh->b_reqnext = ex->bh;
+				ex->bh = bh;
+				up_write(&lc->origin->lock);
+				return 0;
+			}
 		}
 		else {
 			unsigned long read_start = bh->b_rsector - (bh->b_rsector & lc->chunk_size_mask);
@@ -930,24 +978,11 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 				return -1;
 			}
 
-			/* Read original block */
-			if (read_blocks(lc->iobuf, lc->origin_dev->dev, read_start, lc->chunk_size)) {
-				DMERR("Read blocks from device %s failed\n", kdevname(lc->origin_dev->dev));
-				up_write(&lc->origin->lock);
-				return -1;
-			}
-
-			/* Write it to the COW volume */
-			if (write_blocks(lc->iobuf, lc->cow_dev->dev, lc->next_free_sector, lc->chunk_size)) {
-				DMERR("Write blocks to %s failed\n", kdevname(lc->cow_dev->dev));
-				up_write(&lc->origin->lock);
-				return -1;
-			}
-
 			/* Update the exception table */
 			reloc_sector = lc->next_free_sector;
 			lc->next_free_sector += lc->chunk_size;
-			if (add_exception(lc, read_start, reloc_sector)) {
+			ex = add_exception(lc, read_start, reloc_sector);
+			if (!ex) {
 				DMERR("Snapshot %s error adding new exception entry\n", kdevname(lc->cow_dev->dev));
 				/* Error here - treat it as full */
 				lc->full = 1;
@@ -956,10 +991,23 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 				return -1;
 			}
 
-			/* Update the bh bits to the write goes to the newly remapped volume */
+			/* Get kcopyd to do the work */
+			dm_blockcopy(read_start, reloc_sector, lc->chunk_size,
+				     lc->origin_dev->dev, lc->cow_dev->dev, 0,
+				     copy_callback, ex);
+
+			/* Update the bh bits so the write goes to the newly remapped volume...
+			   after the COW has completed */
 			bh->b_rdev = lc->cow_dev->dev;
-			bh->b_rsector = lc->next_free_sector + bh->b_rsector%lc->chunk_size;
+			bh->b_rsector = lc->next_free_sector + (bh->b_rsector & lc->chunk_size_mask);
+
+			bh->b_reqnext = ex->bh;
+			ex->bh = bh;
+
+			/* Tell the upper layers we have control of the BH now */
+			ret = 0;
 		}
+
 		up_write(&lc->origin->lock);
 	}
 	else {
@@ -971,14 +1019,15 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 
 		/* Unless it has been remapped */
 		ex = find_exception(context, bh->b_rsector);
-		if (ex) {
+		if (ex && atomic_read(&ex->ondisk)) {
+
 			bh->b_rdev = lc->cow_dev->dev;
 			bh->b_rsector = ex->rsector_new + (bh->b_rsector & lc->chunk_size_mask);
 		}
 		up_read(&lc->origin->lock);
-
 	}
-	return 1;
+
+	return ret;
 }
 
 /* Called on a write from the origin driver */
@@ -986,8 +1035,7 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 {
 	struct list_head *snap_list;
 	struct origin_list *ol;
-	unsigned int max_chunksize = 0;
-	int need_cow = 0;
+	int ret = 1;
 
 	down_read(&origin_hash_lock);
 	ol = __lookup_snapshot_list(origin->dev);
@@ -996,11 +1044,6 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 	if (ol) {
 		struct list_head *origin_snaps = &ol->snap_list;
 		struct snapshot_c *lock_snap;
-		int max_blksize;
-		int min_blksize;
-
-		max_blksize = get_hardsect_size(origin->dev);
-		min_blksize = get_hardsect_size(origin->dev);
 
 		/* Lock the metadata */
 		lock_snap = list_entry(origin_snaps->next, struct snapshot_c, list);
@@ -1022,11 +1065,6 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 			if (!ex) {
 				offset_t dev_size;
 
-				/* Get maxima/minima */
-				max_chunksize = max(max_chunksize, snap->chunk_size);
-				max_blksize = max(max_blksize, get_hardsect_size(snap->cow_dev->dev));
-				min_blksize = min(min_blksize, get_hardsect_size(snap->cow_dev->dev));
-
                                 /* Check for full snapshot. Doing the size calculation here means that
 				   the COW device can be resized without us being told */
 				dev_size = get_dev_size(snap->cow_dev->dev);
@@ -1037,84 +1075,42 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 						snap->full = 1;
 						/* Mark it full on the device */
 						write_header(snap);
-				}
-				else {
-					snap->need_cow = 1;
-					need_cow++;
-				}
-			}
-		}
-
-		/* At least one snapshot needs a COW */
-		if (need_cow) {
-			unsigned long read_start;
-			unsigned int  nr_sectors;
-			unsigned int  max_sectors;
-			struct snapshot_c *read_snap = NULL;
-
-			/* Read the original block(s) from origin device */
-			read_start = bh->b_rsector - (bh->b_rsector & (max_chunksize-1));
-			max_sectors = KIO_MAX_SECTORS * (min_blksize>>9);
-			nr_sectors = min(max_chunksize, max_sectors);
-
-			/* We need a snapshot_c for this, and it needs to be the largest one
-			   so we can get everyone's chunks in it. */
-			list_for_each(snap_list, origin_snaps) {
-				struct snapshot_c *snap;
-				snap = list_entry(snap_list, struct snapshot_c, list);
-				if (!read_snap) {
-					read_snap = snap;
-				}
-				else {
-					if (snap->chunk_size > read_snap->chunk_size)
-						read_snap = snap;
-				}
-			}
-
-			/* Now do the read */
-			if (read_blocks(read_snap->iobuf, read_snap->origin_dev->dev, read_start, nr_sectors)) {
-				DMERR("Read blocks from device %s failed\n", kdevname(read_snap->origin_dev->dev));
-				up_write(&lock_snap->origin->lock);
-				return -1;
-			}
-
-			/* And the COW writes */
-			list_for_each(snap_list, origin_snaps) {
-				struct snapshot_c *snap;
-				unsigned long reloc_sector;
-
-				snap = list_entry(snap_list, struct snapshot_c, list);
-
-				/* Update this snapshot if needed */
-				if (snap->need_cow) {
-
-					/* Write snapshot block */
-					if (write_blocks(read_snap->iobuf, snap->cow_dev->dev, snap->next_free_sector,
-							 snap->chunk_size)) {
-						DMERR("remap: write blocks to %s failed\n", kdevname(snap->cow_dev->dev));
-						snap->need_cow = 0;
 						continue;
-					}
-
+				}
+				else {
 					/* Update exception table */
+					unsigned long reloc_sector;
+					unsigned long read_start = bh->b_rsector - (bh->b_rsector & snap->chunk_size_mask);
+
 					reloc_sector = snap->next_free_sector;
 					snap->next_free_sector += snap->chunk_size;
-					if (add_exception(snap, read_start, reloc_sector)) {
+					ex = add_exception(snap, bh->b_rsector, reloc_sector);
+					if (!ex) {
 						DMERR("Snapshot %s error adding new exception entry\n",
 						      kdevname(snap->cow_dev->dev));
 						/* Error here - treat it as full */
 						snap->full = 1;
 						write_header(snap);
+						continue;
 					}
 
-					/* Done this one */
-					snap->need_cow = 0;
+					/* Get kcopyd to do the copy */
+					dm_blockcopy(read_start, reloc_sector, snap->chunk_size,
+						     snap->origin_dev->dev, snap->cow_dev->dev, 0,
+						     copy_callback, ex);
 				}
+			}
+			/* If the exception is in flight then defer the BH -
+			   but don't add it twice! */
+			if (ex && !atomic_read(&ex->ondisk) && !ret) {
+				bh->b_reqnext = ex->bh;
+				ex->bh = bh;
+				ret = 0;
 			}
 		}
 		up_write(&lock_snap->origin->lock);
 	}
-	return 1;
+	return ret;
 }
 
 
