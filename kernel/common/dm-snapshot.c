@@ -77,8 +77,10 @@ struct snapshot_c {
 	int    md_entries_per_block;   /* Number of metadata entries per hard disk block */
 	struct kiobuf *cow_iobuf;      /* kiobuf for doing I/O to header & metadata */
 	struct list_head *hash_table;  /* Hash table for looking up COW data */
+	struct list_head *inflight_hash_table;  /* Hash table for looking up inflight COW operations */
 	struct origin_list *origin;    /* So we can get at the locking rwsem */
 	uint32_t hash_mask;
+	uint32_t inflight_hash_mask;
 	uint32_t hash_size;
 	int    need_cow;
 	struct disk_exception *disk_cow; /* Disk extent with COW data in it. as an array of
@@ -88,10 +90,16 @@ struct snapshot_c {
 
 /* Exception in memory */
 struct exception {
-	struct list_head list; /* List of exceptions in this bucket */
+	struct list_head list;      /* List of exceptions in this bucket */
 	uint32_t rsector_org;
 	uint32_t rsector_new;
-	atomic_t ondisk;            /* Flag set when this COW block has actually hit the disk */
+};
+
+/* Inflight COW exception in memory */
+struct inflight_exception {
+	struct list_head list;      /* List of exceptions in this bucket */
+	uint32_t rsector_org;
+	uint32_t rsector_new;
 	struct   buffer_head *bh;   /* Chain of WRITE buffer heads to submit when this COW has completed */
 	struct   snapshot_c  *snap; /* Pointer back to snapshot context */
 };
@@ -120,6 +128,7 @@ static int write_metadata(struct snapshot_c *lc);
 #define ORIGIN_MASK      0xFF
 #define ORIGIN_HASH_FN(x)  (MINOR(x) & ORIGIN_MASK)
 #define EX_HASH_FN(sector, snap) ((((sector) - ((sector) & snap->chunk_size_mask)) >> snap->chunk_size_shift) & snap->hash_mask)
+#define EX_INFLIGHT_HASH_FN(sector, snap) ((((sector) - ((sector) & snap->chunk_size_mask)) >> snap->chunk_size_shift) & snap->inflight_hash_mask)
 
 /* Hash table mapping origin volumes to lists of snapshots and
    a lock to protect it */
@@ -223,25 +232,46 @@ static int update_metadata_block(struct snapshot_c *sc, unsigned long org, unsig
 }
 
 
+/* Add a new exception to the list */
+static struct exception *add_exception(struct snapshot_c *sc, unsigned long org, unsigned long new)
+{
+	struct list_head *l = &sc->hash_table[EX_HASH_FN(org, sc)];
+	struct exception *new_ex;
+
+	new_ex = kmalloc(sizeof(struct exception), GFP_KERNEL);
+	if (!new_ex) return NULL;
+
+	new_ex->rsector_org = org;
+	new_ex->rsector_new = new;
+
+	list_add(&new_ex->list, l);
+
+	return new_ex;
+}
+
 /* Called when the copy I/O has finished */
 static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 {
-	struct exception *ex = (struct exception *) context;
+	struct inflight_exception *iex = (struct inflight_exception *)context;
 	struct buffer_head *bh;
 
 	if (reason == COPY_CB_COMPLETE) {
 
 		/* Update the metadata if we are persistent */
-		if (ex->snap->persistent)
-			update_metadata_block(ex->snap, ex->rsector_org, ex->rsector_new);
+		if (iex->snap->persistent)
+			update_metadata_block(iex->snap, iex->rsector_org, iex->rsector_new);
 
-		atomic_set(&ex->ondisk, 1);
+		/* Add a proper exception,
+		   and remove the inflight exception from the list */
+		down_write(&iex->snap->origin->lock);
+
+		add_exception(iex->snap, iex->rsector_org, iex->rsector_new);
+		list_del(&iex->list);
 
 		/* Submit any pending write BHs */
-		down_write(&ex->snap->origin->lock);
-		bh = ex->bh;
-		ex->bh = NULL;
-		up_write(&ex->snap->origin->lock);
+		bh = iex->bh;
+		iex->bh = NULL;
+		up_write(&iex->snap->origin->lock);
 
 		while (bh) {
 			struct buffer_head *nextbh = bh->b_reqnext;
@@ -249,12 +279,15 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 			generic_make_request(WRITE, bh);
 			bh = nextbh;
 		}
+		kfree(iex);
 	}
 
 	/* Read/write error - snapshot is unusable */
 	if (reason == COPY_CB_FAILED_WRITE || reason == COPY_CB_FAILED_READ) {
 		DMERR("Error reading/writing snapshot");
-		ex->snap->full = 1;
+		iex->snap->full = 1;
+		list_del(&iex->list);
+		kfree(iex);
 	}
 }
 
@@ -310,6 +343,40 @@ static struct exception *find_exception(struct snapshot_c *sc, uint32_t b_rsecto
 		}
 	}
 	return NULL;
+}
+
+/* Return the inflight exception data for a sector, or NULL if none active */
+static struct inflight_exception *find_inflight_exception(struct snapshot_c *sc, uint32_t b_rsector)
+{
+	struct list_head *l = &sc->inflight_hash_table[EX_INFLIGHT_HASH_FN(b_rsector, sc)];
+        struct list_head *slist;
+
+	list_for_each(slist, l) {
+		struct inflight_exception *et = list_entry(slist, struct inflight_exception, list);
+		if (et->rsector_org == b_rsector - (b_rsector & sc->chunk_size_mask)) {
+			return et;
+		}
+	}
+	return NULL;
+}
+
+/* Add a new inflight exception to the list */
+static struct inflight_exception *add_inflight_exception(struct snapshot_c *sc, unsigned long org, unsigned long new)
+{
+	struct list_head *l = &sc->inflight_hash_table[EX_INFLIGHT_HASH_FN(org, sc)];
+	struct inflight_exception *new_ex;
+
+	new_ex = kmalloc(sizeof(struct inflight_exception), GFP_KERNEL);
+	if (!new_ex) return NULL;
+
+	new_ex->rsector_org = org;
+	new_ex->rsector_new = new;
+	new_ex->bh = NULL;
+	new_ex->snap = sc;
+
+	list_add(&new_ex->list, l);
+
+	return new_ex;
 }
 
 /* Allocate a kiobuf. This is the only code nicked from the
@@ -388,6 +455,16 @@ static int alloc_hash_table(struct snapshot_c *sc)
 	for (i=0; i<hash_size; i++)
 		INIT_LIST_HEAD(sc->hash_table + i);
 
+	/* Allocate hash table for in-flight exceptions */
+	/* Make this smaller than the real hash table */
+	hash_size >>= 1;
+	sc->inflight_hash_mask = sc->hash_mask >> 1;
+
+	sc->inflight_hash_table = vmalloc(sizeof(struct list_head) * (hash_size));
+	if (!sc->inflight_hash_table) return -1;
+	for (i=0; i<hash_size; i++)
+		INIT_LIST_HEAD(sc->inflight_hash_table + i);
+
 	return 0;
 }
 
@@ -431,26 +508,6 @@ static void free_exception_table(struct snapshot_c *lc)
 			}
 		}
 	}
-}
-
-/* Add a new exception to the list */
-static struct exception *add_exception(struct snapshot_c *sc, unsigned long org, unsigned long new)
-{
-	struct list_head *l = &sc->hash_table[EX_HASH_FN(org, sc)];
-	struct exception *new_ex;
-
-	new_ex = kmalloc(sizeof(struct exception), GFP_KERNEL);
-	if (!new_ex) return NULL;
-
-	new_ex->rsector_org = org;
-	new_ex->rsector_new = new;
-	new_ex->bh = NULL;
-	atomic_set(&new_ex->ondisk, 0);
-	new_ex->snap = sc;
-
-	list_add(&new_ex->list, l);
-
-	return new_ex;
 }
 
 /* Read on-disk COW metadata and populate the hash table */
@@ -512,7 +569,7 @@ static int read_metadata(struct snapshot_c *lc)
 				ex = add_exception(lc,
 						   le64_to_cpu(cow_block[entry].rsector_org),
 						   le64_to_cpu(cow_block[entry].rsector_new));
-				atomic_set(&ex->ondisk, 1);
+
 				first_free_sector = max(first_free_sector,
 							(unsigned long)(le64_to_cpu(cow_block[entry].rsector_new) +
 									lc->chunk_size));
@@ -898,6 +955,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	}
  bad_free1:
 	vfree(lc->hash_table);
+	vfree(lc->inflight_hash_table);
  bad_putdev:
 	dm_table_put_device(t, lc->cow_dev);
 	dm_table_put_device(t, lc->origin_dev);
@@ -922,6 +980,7 @@ static void snapshot_dtr(struct dm_table *t, void *c)
 	}
 
 	vfree(lc->hash_table);
+	vfree(lc->inflight_hash_table);
 	dm_table_put_device(t, lc->origin_dev);
 	dm_table_put_device(t, lc->cow_dev);
 	kfree(c);
@@ -940,28 +999,30 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 	/* Write to snapshot - higher level takes care of RW/RO flags so we should only
 	   get this if we are writeable */
 	if (rw == WRITE) {
+		struct inflight_exception *iex;
 
 		down_write(&lc->origin->lock);
 
 		/* If the block is already remapped - use that, else remap it */
 		ex = find_exception(context, bh->b_rsector);
 		if (ex) {
-			if (atomic_read(&ex->ondisk)) {
-				bh->b_rdev = lc->cow_dev->dev;
-				bh->b_rsector = ex->rsector_new + (bh->b_rsector & lc->chunk_size_mask);
-			}
-			else {
-				/* Exception has not been committed to disk - save this bh */
-				bh->b_reqnext = ex->bh;
-				ex->bh = bh;
-				up_write(&lc->origin->lock);
-				return 0;
-			}
+			bh->b_rdev = lc->cow_dev->dev;
+			bh->b_rsector = ex->rsector_new + (bh->b_rsector & lc->chunk_size_mask);
 		}
-		else {
+
+		if (!ex && (iex = find_inflight_exception(context, bh->b_rsector)) ) {
+			/* Exception has not been committed to disk - save this bh */
+			bh->b_reqnext = iex->bh;
+			iex->bh = bh;
+			up_write(&lc->origin->lock);
+			return 0;
+		}
+
+		if (!ex) {
 			unsigned long read_start = bh->b_rsector - (bh->b_rsector & lc->chunk_size_mask);
 			unsigned long devsize = get_dev_size(lc->cow_dev->dev);
 			unsigned long reloc_sector;
+			struct inflight_exception *iex;
 
 			/* Check there is enough space */
 			if (lc->next_free_sector + lc->chunk_size >= devsize) {
@@ -973,11 +1034,11 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 				return -1;
 			}
 
-			/* Update the exception table */
+			/* Update the inflight exception table */
 			reloc_sector = lc->next_free_sector;
 			lc->next_free_sector += lc->chunk_size;
-			ex = add_exception(lc, read_start, reloc_sector);
-			if (!ex) {
+			iex = add_inflight_exception(lc, read_start, reloc_sector);
+			if (!iex) {
 				DMERR("Snapshot %s error adding new exception entry", kdevname(lc->cow_dev->dev));
 				/* Error here - treat it as full */
 				lc->full = 1;
@@ -987,15 +1048,15 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 				return -1;
 			}
 
+			/* Add this bh to the list of those we need to resubmit when the COW has completed */
+			bh->b_reqnext = iex->bh;
+			iex->bh = bh;
+
 			/* Get kcopyd to do the work */
 			dm_blockcopy(read_start, reloc_sector, lc->chunk_size,
 				     lc->origin_dev->dev, lc->cow_dev->dev,
 				     SNAPSHOT_COPY_PRIORITY, 0,
-				     copy_callback, ex);
-
-			/* Add this bh to the list of those we need to resubmit when the COW has completed */
-			bh->b_reqnext = ex->bh;
-			ex->bh = bh;
+				     copy_callback, iex);
 
 			/* Tell the upper layers we have control of the BH now */
 			ret = 0;
@@ -1009,7 +1070,7 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 
 		/* See if it it has been remapped */
 		ex = find_exception(context, bh->b_rsector);
-		if (ex && atomic_read(&ex->ondisk)) {
+		if (ex) {
 
 			bh->b_rdev = lc->cow_dev->dev;
 			bh->b_rsector = ex->rsector_new + (bh->b_rsector & lc->chunk_size_mask);
@@ -1056,6 +1117,18 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 			ex = find_exception(snap, bh->b_rsector);
 			if (!ex) {
 				offset_t dev_size;
+				struct inflight_exception *iex = find_inflight_exception(snap, bh->b_rsector);
+
+				/* If the exception is in flight then defer the BH -
+				   but don't add it twice! */
+				if (iex) {
+					if (ret) {
+						bh->b_reqnext = iex->bh;
+						iex->bh = bh;
+						ret = 0;
+					}
+					continue;
+				}
 
                                 /* Check for full snapshot. Doing the size calculation here means that
 				   the COW device can be resized without us being told */
@@ -1074,11 +1147,12 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 					/* Update exception table */
 					unsigned long reloc_sector;
 					unsigned long read_start = bh->b_rsector - (bh->b_rsector & snap->chunk_size_mask);
+					struct inflight_exception *iex;
 
 					reloc_sector = snap->next_free_sector;
 					snap->next_free_sector += snap->chunk_size;
-					ex = add_exception(snap, read_start, reloc_sector);
-					if (!ex) {
+					iex = add_inflight_exception(snap, read_start, reloc_sector);
+					if (!iex) {
 						DMERR("Snapshot %s error adding new exception entry",
 						      kdevname(snap->cow_dev->dev));
 						/* Error here - treat it as full */
@@ -1092,15 +1166,13 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 					dm_blockcopy(read_start, reloc_sector, snap->chunk_size,
 						     snap->origin_dev->dev, snap->cow_dev->dev,
 						     SNAPSHOT_COPY_PRIORITY, 0,
-						     copy_callback, ex);
+						     copy_callback, iex);
+					if (ret) {
+						bh->b_reqnext = iex->bh;
+						iex->bh = bh;
+						ret = 0;
+					}
 				}
-			}
-			/* If the exception is in flight then defer the BH -
-			   but don't add it twice! */
-			if (ex && ret && !atomic_read(&ex->ondisk)) {
-				bh->b_reqnext = ex->bh;
-				ex->bh = bh;
-				ret = 0;
 			}
 		}
 		up_write(&lock_snap->origin->lock);
