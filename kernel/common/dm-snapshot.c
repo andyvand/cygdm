@@ -432,12 +432,14 @@ static int read_metadata(struct snapshot_c *lc)
 {
 	int status;
 	int i;
+	int entry = 0;
+	int map_page = 0;
 	int nr_sectors = lc->extent_size;
-	int nr_pages  = lc->extent_size / (PAGE_SIZE/SECTOR_SIZE);
 	int blocksize = get_hardsect_size(lc->cow_dev->dev);
 	unsigned long cur_sector = lc->start_of_exceptions;
 	unsigned long last_sector;
 	unsigned long first_free_sector = 0;
+	int entries_per_page = PAGE_SIZE / sizeof(struct disk_exception);
 	struct disk_exception *cow_block;
 	struct kiobuf *read_iobuf;
 	int err = 0;
@@ -454,41 +456,40 @@ static int read_metadata(struct snapshot_c *lc)
 		free_kiovec(1, &read_iobuf);
 		return -1;
 	}
-
-	/* Similarly, allocate a whole extent's block so we can easily
-	   process the data */
-	cow_block = vmalloc(lc->extent_size * SECTOR_SIZE);
-	if (cow_block == NULL) {
-		DMERR("Error allocating space for metadata on %s\n", kdevname(lc->cow_dev->dev));
-		unmap_kiobuf(read_iobuf);
-		free_kiovec(1, &read_iobuf);
-		return -1;
-	}
+	cow_block = page_address(read_iobuf->maplist[0]);
 
 	/* Temporarily clear the persistent flag so that add_exception() doesn't
 	   try to rewrite the on-disk table while we are populating it. */
 	lc->persistent = 0;
+
 	do
 	{
 		first_free_sector = max(first_free_sector, cur_sector+lc->extent_size);
 		status = read_blocks(read_iobuf, lc->cow_dev->dev, cur_sector, nr_sectors);
 		if (status == 0) {
-			/* Copy it to the allocated block */
-			for (i=0; i<nr_pages; i++) {
-				memcpy( ((char *)cow_block + (i*PAGE_SIZE)),
-				       page_address(read_iobuf->maplist[i]), PAGE_SIZE);
-			}
+
+			map_page = 0;
+			entry = 0;
+
+			cow_block = page_address(read_iobuf->maplist[0]);
 
 			/* Now populate the hash table from this data */
 			for (i=0; i <= lc->highest_metadata_entry &&
-				  cow_block[i].rsector_new != 0; i++) {
-				add_exception(lc,
-					      le64_to_cpu(cow_block[i].rsector_org),
-					      le64_to_cpu(cow_block[i].rsector_new));
-				first_free_sector = max(first_free_sector,
-							(unsigned long)(le64_to_cpu(cow_block[i].rsector_new)+lc->chunk_size));
-			}
+				  cow_block[entry].rsector_new != 0; i++) {
 
+				add_exception(lc,
+					      le64_to_cpu(cow_block[entry].rsector_org),
+					      le64_to_cpu(cow_block[entry].rsector_new));
+				first_free_sector = max(first_free_sector,
+							(unsigned long)(le64_to_cpu(cow_block[entry].rsector_new) +
+									lc->chunk_size));
+
+				/* Do we need to move onto the next page? */
+				if (++entry >= entries_per_page) {
+					entry = 0;
+					cow_block = page_address(read_iobuf->maplist[++map_page]);
+				}
+			}
 		}
 		else {
 			DMERR("Error reading COW metadata for %s\n", kdevname(lc->cow_dev->dev));
@@ -496,23 +497,24 @@ static int read_metadata(struct snapshot_c *lc)
 			goto ret_free;
 		}
 		last_sector = cur_sector;
-		cur_sector = le64_to_cpu(cow_block[i].rsector_org);
+		cur_sector = le64_to_cpu(cow_block[entry].rsector_org);
 
 	} while (cur_sector != 0);
 
 	lc->persistent = 1;
-	lc->current_metadata_sector = last_sector;
-	lc->current_metadata_entry  = i % lc->md_entries_per_block;
+	lc->current_metadata_sector = last_sector +
+		                      map_page*PAGE_SIZE/SECTOR_SIZE +
+                                      entry/(SECTOR_SIZE/sizeof(struct disk_exception));
+	lc->current_metadata_entry  = entry;
 	lc->current_metadata_number = i;
 	lc->next_free_sector = first_free_sector;
 
 	/* Copy last block into cow_iobuf */
-	memcpy(lc->disk_cow, (char *)((long)&cow_block[i] - (long)&cow_block[i] % blocksize), blocksize);
+	memcpy(lc->disk_cow, (char *)((long)&cow_block[entry] - ((long)&cow_block[entry] & (blocksize-1))), blocksize);
 
  ret_free:
 	unmap_kiobuf(read_iobuf);
 	free_kiovec(1, &read_iobuf);
-	vfree(cow_block);
 
 	return err;
 }
@@ -628,13 +630,10 @@ static int write_header(struct snapshot_c *lc)
 /* Write the latest COW metadata block */
 static int write_metadata(struct snapshot_c *lc)
 {
-	unsigned long start_sector;
 	int blocksize = get_hardsect_size(lc->cow_dev->dev);
 	int writesize = blocksize/SECTOR_SIZE;
 
-	start_sector = lc->current_metadata_sector;
-
-	if (write_blocks(lc->cow_iobuf, lc->cow_dev->dev, start_sector, writesize) != 0) {
+	if (write_blocks(lc->cow_iobuf, lc->cow_dev->dev, lc->current_metadata_sector, writesize) != 0) {
 		DMERR("Error writing COW block\n");
 		return -1;
 	}
