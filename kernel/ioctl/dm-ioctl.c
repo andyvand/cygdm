@@ -83,9 +83,9 @@ static int gap(struct dm_table *table, struct dm_target_spec *spec)
 
 static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 {
-	int i = 0, r, first = 1;
+	int i = 0, r, first = 1, argc;
 	struct dm_target_spec *spec;
-	char *params;
+	char *params, *argv[MAX_ARGS];
 	struct target_type *ttype;
 	void *context, *begin, *end;
 	offset_t high = 0;
@@ -108,21 +108,26 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 		if (!r)
 			PARSE_ERROR("unable to find target");
 
-		/* lookup the target type */
-		if (!(ttype = dm_get_target_type(spec->target_type)))
+		/* Look up the target type */
+		ttype = dm_get_target_type(spec->target_type);
+		if (!ttype)
 			PARSE_ERROR("unable to find target type");
 
 		if (gap(table, spec))
 			PARSE_ERROR("gap in target ranges");
 
-		/* build the target */
-		if (ttype->ctr(table, spec->sector_start, spec->length, params,
-			       &context))  {
+		/* Split up the parameter list */
+		if (split_args(MAX_ARGS, &argc, argv, params) < 0)
+			PARSE_ERROR("Too many arguments");
+
+		/* Build the target */
+		if (ttype->ctr(table, spec->sector_start, spec->length,
+			       argc, argv, &context))  {
 			dm_error(context);
 			PARSE_ERROR("target constructor failed");
 		}
 
-		/* add the target to the table */
+		/* Add the target to the table */
 		high = spec->sector_start + (spec->length - 1);
 		if (dm_table_add_target(table, high, ttype, context))
 			PARSE_ERROR("internal error adding target to table");

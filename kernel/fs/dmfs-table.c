@@ -46,6 +46,8 @@ static char *dmfs_parse_line(struct dm_table *t, char *str)
 	char *msg;
 	int pos = 0;
 	char target[33];
+	char *argv[MAX_ARGS];
+	int argc;
 
 	static char *err_table[] = {
 		"Missing/Invalid start argument",
@@ -69,8 +71,13 @@ static char *dmfs_parse_line(struct dm_table *t, char *str)
 	msg = "Target type unknown";
 	ttype = dm_get_target_type(target);
 	if (ttype) {
+		msg = "Too many arguments";
+		rv = split_args(MAX_ARGS, &argc, argv, str);
+		if (rv < 0)
+			goto out;
+
 		msg = "This message should never appear (constructor error)";
-		rv = ttype->ctr(t, start, size, str, &context);
+		rv = ttype->ctr(t, start, size, argc, argv, &context);
 		msg = context;
 		if (rv == 0) {
 			msg = "Error adding target to table";

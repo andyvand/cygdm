@@ -26,13 +26,16 @@ struct linear_c {
  * Construct a linear mapping: <dev_path> <offset>
  */
 static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
-		      const char *args, void **context)
+		      int argc, char **argv, void **context)
 {
 	struct linear_c *lc;
-	unsigned long start;	/* FIXME: unsigned long long with sscanf fix */
+	unsigned long start;	/* FIXME: unsigned long long */
+	char *end;
 
-	int r = -EINVAL;
-	char path[4096];
+	if (argc != 2) {
+		*context = "dm-linear: Not enough arguments";
+		return -EINVAL;
+	}
 
 	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
 	if (lc == NULL) {
@@ -40,15 +43,14 @@ static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
 		return -ENOMEM;
 	}
 
-	if (sscanf(args, "%4096s %lu", path, &start) != 2) {
-		*context = "dm-linear: Missing target parms: dev_path sector";
-		return -ENOMEM;
-        }
+	start = simple_strtoul(argv[1], &end, 10);
+	if (*end) {
+		*context = "dm-linear: Invalid device sector";
+		goto bad;
+	}
 
-	r = dm_table_get_device(t, path, start, l, &lc->dev);
-	if (r) {
+	if (dm_table_get_device(t, argv[0], start, l, &lc->dev)) {
 		*context = "dm-linear: Device lookup failed";
-		r = -ENXIO;
 		goto bad;
 	}
 
@@ -58,7 +60,7 @@ static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
 
       bad:
 	kfree(lc);
-	return r;
+	return -EINVAL;
 }
 
 static void linear_dtr(struct dm_table *t, void *c)
@@ -85,7 +87,6 @@ static struct target_type linear_target = {
 	ctr:	linear_ctr,
 	dtr:	linear_dtr,
 	map:	linear_map,
-	err:	NULL
 };
 
 static int __init linear_init(void)
@@ -93,8 +94,8 @@ static int __init linear_init(void)
 	int r = dm_register_target(&linear_target);
 
 	if (r < 0)
-		printk(KERN_ERR
-		       "Device mapper: Linear: register failed %d\n", r);
+		printk(KERN_ERR "Device mapper: Linear: "
+		       "register failed %d\n", r);
 
 	return r;
 }
@@ -104,8 +105,8 @@ static void __exit linear_exit(void)
 	int r = dm_unregister_target(&linear_target);
 
 	if (r < 0)
-		printk(KERN_ERR
-		       "Device mapper: Linear: unregister failed %d\n", r);
+		printk(KERN_ERR "Device mapper: Linear: "
+		       "unregister failed %d\n", r);
 }
 
 module_init(linear_init);

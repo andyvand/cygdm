@@ -19,6 +19,54 @@ static rwlock_t _lock = RW_LOCK_UNLOCKED;
 
 #define DM_MOD_NAME_SIZE 32
 
+/*
+ * Destructively splits up the argument list to pass to ctr.
+ */
+int split_args(int max, int *argc, char **argv, char *input)
+{
+	char *start, *end = input, *out;
+	*argc = 0;
+
+	while (1) {
+		start = end;
+
+		/* Skip whitespace */
+		while(*start && isspace(*start))
+			start++;
+
+		if (!*start)
+			break; /* success, we hit the end */
+
+		/* 'out' is used to remove any back-quotes */
+		end = out = start;
+		while(*end) {
+			/* Everything apart from '\0' can be quoted */
+			if (*end == '\\' && *(end + 1)) {
+				*out++ = *(end + 1);
+				end += 2;
+				continue;
+			}
+
+			if (isspace(*end))
+				break; /* end of token */
+
+			*out++ = *end++;
+		}
+
+		/* have we already filled the array ? */
+		if ((*argc + 1) > max)
+			return -EINVAL;
+
+		/* terminate the string and put it in the array */
+		*out = '\0';
+		end++;
+		argv[*argc] = start;
+		(*argc)++;
+	}
+
+	return 0;
+}
+
 static inline struct tt_internal *__find_target_type(const char *name)
 {
 	struct list_head *tih;
@@ -149,7 +197,7 @@ int dm_unregister_target(struct target_type *t)
  * up LV's that have holes in them.
  */
 static int io_err_ctr(struct dm_table *t, offset_t b, offset_t l,
-		      const char *args, void **context)
+		      int argc, char **args, void **context)
 {
 	*context = NULL;
 	return 0;
@@ -172,7 +220,6 @@ static struct target_type error_target = {
 	ctr:	io_err_ctr,
 	dtr:	io_err_dtr,
 	map:	io_err_map,
-	err:	NULL
 };
 
 int dm_target_init(void)

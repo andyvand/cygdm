@@ -27,6 +27,7 @@
 #define NODE_SIZE L1_CACHE_BYTES
 #define KEYS_PER_NODE (NODE_SIZE / sizeof(offset_t))
 #define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
+#define MAX_ARGS 32
 
 /*
  * List of devices that a metadevice uses and should open/close.
@@ -102,6 +103,12 @@ int dm_target_init(void);
 struct target_type *dm_get_target_type(const char *name);
 void dm_put_target_type(struct target_type *t);
 void dm_target_exit(void);
+
+/*
+ * Destructively splits argument list to pass to ctr.
+ */
+int split_args(int max, int *argc, char **argv, char *input);
+
 
 /* dm.c */
 struct mapped_device *dm_get(const char *name);

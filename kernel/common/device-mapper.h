@@ -22,7 +22,7 @@ typedef unsigned int offset_t;
  * Prototypes for functions for a target
  */
 typedef int (*dm_ctr_fn)(struct dm_table *t, offset_t b, offset_t l,
-			 const char *args, void **context);
+			 int argc, char **argv, void **context);
 typedef void (*dm_dtr_fn)(struct dm_table *t, void *c);
 typedef int (*dm_map_fn)(struct buffer_head *bh, int rw, void *context);
 typedef int (*dm_err_fn)(struct buffer_head *bh, int rw, void *context);
@@ -31,8 +31,8 @@ typedef int (*dm_err_fn)(struct buffer_head *bh, int rw, void *context);
 void dm_error(const char *message);
 
 /*
- * Contructors should call these functions to ensure destination devices 
- * are opened/closed correctly 
+ * Constructors should call these functions to ensure destination devices
+ * are opened/closed correctly
  */
 int dm_table_get_device(struct dm_table *t, const char *path,
 			offset_t start, offset_t len, struct dm_dev **result);
