@@ -759,17 +759,9 @@ static struct miscdevice _dm_misc = {
 	fops:  &_ctl_fops
 };
 
-/* Create misc character device and link to DM_DIR/control */
-int __init dm_interface_init(void)
-{
+static int __init dm_devfs_init(void) {
 	int r;
 	char rname[64];
-
-	r = misc_register(&_dm_misc);
-	if (r) {
-		DMERR("misc_register failed for control device");
-		return r;
-	}
 
 	r = devfs_generate_path(_dm_misc.devfs_handle, rname + 3,
 				sizeof rname - 3);
@@ -778,7 +770,7 @@ int __init dm_interface_init(void)
 
 	if (r < 0) {
 		DMERR("devfs_generate_path failed for control device");
-		goto failed;
+		return r;
 	}
 
 	strncpy(rname + r, "../", 3);
@@ -786,18 +778,35 @@ int __init dm_interface_init(void)
 			     DEVFS_FL_DEFAULT, rname + r, &_ctl_handle, NULL);
 	if (r) {
 		DMERR("devfs_mk_symlink failed for control device");
-		goto failed;
+		return r;
 	}
 	devfs_auto_unregister(_dm_misc.devfs_handle, _ctl_handle);
+
+	return 0;
+}
+
+/* Create misc character device and link to DM_DIR/control */
+int __init dm_interface_init(void)
+{
+	int r;
+
+	r = misc_register(&_dm_misc);
+	if (r) {
+		DMERR("misc_register failed for control device");
+		return r;
+	}
+
+	r = dm_devfs_init();
+	if (r) {
+		misc_deregister(&_dm_misc);
+		return r;
+	}
 
 	DMINFO("%d.%d.%d%s initialised: %s", DM_VERSION_MAJOR,
 	       DM_VERSION_MINOR, DM_VERSION_PATCHLEVEL, DM_VERSION_EXTRA,
 	       DM_DRIVER_EMAIL);
-	return 0;
 
-      failed:
-	misc_deregister(&_dm_misc);
-	return r;
+	return 0;
 }
 
 void dm_interface_exit(void)
