@@ -24,6 +24,7 @@
 #include <linux/ctype.h>
 #include <linux/device-mapper.h>
 #include <linux/list.h>
+#include <linux/init.h>
 
 #define DM_NAME "device-mapper"	/* Name for messaging */
 #define MAX_DEPTH 16
@@ -194,8 +195,8 @@ static inline offset_t *get_node(struct dm_table *t, int l, int n)
  * ioctl or filesystem, depending which patch you have applied.
  */
 
-int dm_interface_init(void);
-void dm_interface_exit(void);
+int __init dm_interface_init(void);
+void __exit dm_interface_exit(void);
 
 /* Code in dm-snapshot called by dm-origin to do snapshot COW */
 int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh);
