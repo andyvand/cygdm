@@ -42,8 +42,8 @@ install: $(INSTALL_TYPE)
 .PHONY: install_dynamic install_static
 
 install_dynamic: dmsetup
-	$(INSTALL) -D -o $(OWNER) -g $(GROUP) -m 555 $(STRIP) $< $(sbindir)/$<
+	$(INSTALL) -D $(OWNER) $(GROUP) -m 555 $(STRIP) $< $(sbindir)/$<
 
 install_static: dmsetup.static
-	$(INSTALL) -D -o $(OWNER) -g $(GROUP) -m 555 $(STRIP) $< $(sbindir)/$<
+	$(INSTALL) -D $(OWNER) $(GROUP) -m 555 $(STRIP) $< $(sbindir)/$<
 

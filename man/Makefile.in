@@ -26,6 +26,6 @@ install:
 	@for f in $(MANUALS); \
 	do \
 	   $(RM) $(MAN8DIR)/$$f; \
-	   @INSTALL@ -D -o $(OWNER) -g $(GROUP) -m 444 $$f $(MAN8DIR)/$$f; \
+	   @INSTALL@ -D $(OWNER) $(GROUP) -m 444 $$f $(MAN8DIR)/$$f; \
 	done
 
