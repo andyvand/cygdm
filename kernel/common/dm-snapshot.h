@@ -94,6 +94,9 @@ struct dm_snapshot {
 	/* You can't use a snapshot if this is 0 (e.g. if full) */
 	int valid;
 
+	/* Used for display of table */
+	char type;
+
 	/* The last percentage we notified */
 	int last_percent;
 
@@ -114,9 +117,7 @@ int dm_add_exception(struct dm_snapshot *s, chunk_t old, chunk_t new);
  * Constructor and destructor for the default persistent
  * store.
  */
-int dm_create_persistent(struct exception_store *store,
-			 struct dm_snapshot *s,
-			 int blocksize, offset_t extent_size, void **error);
+int dm_create_persistent(struct exception_store *store, uint32_t chunk_size);
 
 int dm_create_transient(struct exception_store *store,
 			struct dm_snapshot *s, int blocksize, void **error);

@@ -66,7 +66,7 @@ struct kcopyd_job {
 	 * Set this to ensure you are notified when the job has
 	 * completed.  'context' is for callback to use.
 	 */
-	void (*callback) (struct kcopyd_job *job);
+	void (*callback)(struct kcopyd_job *job);
 	void *context;
 };
 
@@ -82,15 +82,16 @@ int kcopyd_queue_job(struct kcopyd_job *job);
  * Submit a copy job to kcopyd.  This is built on top of the
  * previous three fns.
  */
-typedef void (*kcopyd_notify_fn) (int err, void *context);
+typedef void (*kcopyd_notify_fn)(int err, void *context);
 
-int kcopyd_copy(struct kcopyd_region *from,
-		struct kcopyd_region *to, kcopyd_notify_fn fn, void *context);
+int kcopyd_copy(struct kcopyd_region *from, struct kcopyd_region *to,
+		kcopyd_notify_fn fn, void *context);
 
 /*
- * Setup/teardown.
+ * We only want kcopyd to reserve resources if someone is
+ * actually using it.
  */
-int kcopyd_init(void);
-void kcopyd_exit(void);
+void kcopyd_inc_client_count(void);
+void kcopyd_dec_client_count(void);
 
 #endif

@@ -14,6 +14,8 @@
 #include <linux/device-mapper.h>
 #include <linux/mempool.h>
 #include <asm/atomic.h>
+#include <linux/pagemap.h>
+#include <linux/locks.h>
 
 #include "kcopyd.h"
 
@@ -25,7 +27,8 @@
  */
 #define SECTOR_SIZE 512
 #define SECTOR_SHIFT 9
-static int wake_kcopyd(void);
+
+static void wake_kcopyd(void);
 
 /*-----------------------------------------------------------------
  * We reserve our own pool of preallocated pages that are
@@ -40,8 +43,9 @@ static int wake_kcopyd(void);
 static DECLARE_MUTEX(_pages_lock);
 static int _num_free_pages;
 static struct page *_pages_array[NUM_PAGES];
+static DECLARE_MUTEX(start_lock);
 
-static __init int init_pages(void)
+static int init_pages(void)
 {
 	int i;
 	struct page *p;
@@ -123,7 +127,7 @@ static spinlock_t _buffer_lock = SPIN_LOCK_UNLOCKED;
 static struct buffer_head *_all_buffers;
 static struct buffer_head *_free_buffers;
 
-static __init int init_buffers(void)
+static int init_buffers(void)
 {
 	int i;
 	struct buffer_head *buffers;
@@ -215,7 +219,7 @@ static LIST_HEAD(_complete_jobs);
 static LIST_HEAD(_io_jobs);
 static LIST_HEAD(_pages_jobs);
 
-static __init int init_jobs(void)
+static int init_jobs(void)
 {
 	INIT_LIST_HEAD(&_complete_jobs);
 	INIT_LIST_HEAD(&_io_jobs);
@@ -458,23 +462,22 @@ static void do_work(void)
 /*-----------------------------------------------------------------
  * The daemon
  *---------------------------------------------------------------*/
-static struct task_struct *_kcopyd_task;
 static atomic_t _kcopyd_must_die;
 static DECLARE_MUTEX(_run_lock);
 static DECLARE_WAIT_QUEUE_HEAD(_job_queue);
 
-static int kcopyd(void *start_lock)
+static int kcopyd(void *arg)
 {
 	DECLARE_WAITQUEUE(wq, current);
 
 	daemonize();
 	strcpy(current->comm, "kcopyd");
-	_kcopyd_task = current;
 	atomic_set(&_kcopyd_must_die, 0);
-	down(&_run_lock);
-	up((struct semaphore *) start_lock);
 
 	add_wait_queue(&_job_queue, &wq);
+
+	down(&_run_lock);
+	up(&start_lock);
 
 	while (1) {
 		set_current_state(TASK_INTERRUPTIBLE);
@@ -490,17 +493,17 @@ static int kcopyd(void *start_lock)
 	remove_wait_queue(&_job_queue, &wq);
 
 	up(&_run_lock);
-	DMINFO("kcopyd shutting down");
+
 	return 0;
 }
 
 static int start_daemon(void)
 {
 	static pid_t pid = 0;
-	DECLARE_MUTEX(start_lock);
 
 	down(&start_lock);
-	pid = kernel_thread(kcopyd, &start_lock, 0);
+
+	pid = kernel_thread(kcopyd, NULL, 0);
 	if (pid <= 0) {
 		DMERR("Failed to start kcopyd thread");
 		return -EAGAIN;
@@ -510,34 +513,24 @@ static int start_daemon(void)
 	 * wait for the daemon to up this mutex.
 	 */
 	down(&start_lock);
-	DMINFO("Started kcopyd thread");
+	up(&start_lock);
 
 	return 0;
 }
 
 static int stop_daemon(void)
 {
-	if (_kcopyd_task) {
-		atomic_set(&_kcopyd_must_die, 1);
-		wake_kcopyd();
-		down(&_run_lock);
-	}
+	atomic_set(&_kcopyd_must_die, 1);
+	wake_kcopyd();
+	down(&_run_lock);
+	up(&_run_lock);
 
 	return 0;
 }
 
-static int wake_kcopyd(void)
+static void wake_kcopyd(void)
 {
-	int r = 0;
-
-	/* Start the thread if we don't have one already */
-	if (!_kcopyd_task)
-		r = start_daemon();
-
-	if (!r)
-		wake_up_interruptible(&_job_queue);
-
-	return r;
+	wake_up_interruptible(&_job_queue);
 }
 
 static int calc_shift(unsigned int n)
@@ -584,7 +577,7 @@ struct copy_info {
 static kmem_cache_t *_copy_cache = NULL;
 static mempool_t *_copy_pool = NULL;
 
-static __init int init_copier(void)
+static int init_copier(void)
 {
 	_copy_cache = kmem_cache_create("kcopyd-info",
 					sizeof(struct copy_info),
@@ -636,7 +629,6 @@ void copy_complete(struct kcopyd_job *job)
 
 /*
  * These callback functions implement the state machine that copies regions.
- * FIXME: handle large regions.
  */
 void copy_write(struct kcopyd_job *job)
 {
@@ -717,16 +709,14 @@ static struct {
 #undef xx
 };
 
-static int _has_initialised = 0;
+static int _client_count = 0;
+static DECLARE_MUTEX(_client_count_sem);
 
-int __init kcopyd_init(void)
+static int kcopyd_init(void)
 {
 	const int count = sizeof(_inits) / sizeof(*_inits);
 
 	int r, i;
-
-	if (_has_initialised)
-		return 0;
 
 	for (i = 0; i < count; i++) {
 		r = _inits[i].init();
@@ -734,7 +724,7 @@ int __init kcopyd_init(void)
 			goto bad;
 	}
 
-	_has_initialised = 1;
+	start_daemon();
 	return 0;
 
       bad:
@@ -744,7 +734,7 @@ int __init kcopyd_init(void)
 	return r;
 }
 
-void kcopyd_exit(void)
+static void kcopyd_exit(void)
 {
 	int i = sizeof(_inits) / sizeof(*_inits);
 
@@ -753,6 +743,28 @@ void kcopyd_exit(void)
 
 	while (i--)
 		_inits[i].exit();
+}
 
-	_has_initialised = 0;
+void kcopyd_inc_client_count(void)
+{
+	/*
+	 * What I need here is an atomic_test_and_inc that returns
+	 * the previous value of the atomic...  In its absence I lock
+	 * an int with a semaphore. :-(
+	 */
+	down(&_client_count_sem);
+	if (_client_count == 0)
+		kcopyd_init();
+	_client_count++;
+
+	up(&_client_count_sem);
+}
+
+void kcopyd_dec_client_count(void)
+{
+	down(&_client_count_sem);
+	if (--_client_count == 0)
+		kcopyd_exit();
+
+	up(&_client_count_sem);
 }

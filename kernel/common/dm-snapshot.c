@@ -504,6 +504,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	init_waitqueue_head(&s->waitq);
 	s->chunk_size = chunk_size;
 	s->chunk_mask = chunk_size - 1;
+	s->type = *persistent;
 	for (s->chunk_shift = 0; chunk_size;
 	     s->chunk_shift++, chunk_size >>= 1)
 		;
@@ -524,12 +525,11 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	 * Check the persistent flag - done here because we need the iobuf
 	 * to check the LV header
 	 */
-#if 0
+	s->store.snap = s;
+
 	if ((*persistent & 0x5f) == 'P')
-		r = dm_create_persistent(&s->store, s, blocksize,
-					 extent_size, context);
+		r = dm_create_persistent(&s->store, s->chunk_size);
 	else
-#endif
 		r = dm_create_transient(&s->store, s, blocksize, context);
 
 	if (r) {
@@ -554,6 +554,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 #if LVM_VFS_ENHANCEMENT
 	unlockfs(s->origin->dev);
 #endif
+	kcopyd_inc_client_count();
 
 	*context = s;
 	return 0;
@@ -593,6 +594,8 @@ static void snapshot_dtr(struct dm_table *t, void *context)
 	dm_table_put_device(t, s->origin);
 	dm_table_put_device(t, s->cow);
 	kfree(s);
+
+	kcopyd_dec_client_count();
 }
 
 /*
@@ -620,7 +623,6 @@ static void flush_buffers(struct buffer_head *bh)
 		bh = n;
 	}
 
-	/* FIXME: not sure we can this from this context. */
 	run_task_queue(&tq_disk);
 }
 
@@ -873,6 +875,20 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 	return r;
 }
 
+static void list_merge(struct list_head *l1, struct list_head *l2)
+{
+	struct list_head *l1_n, *l2_p;
+
+	l1_n = l1->next;
+	l2_p = l2->prev;
+
+	l1->next = l2;
+	l2->prev = l1;
+
+	l2_p->next = l1_n;
+	l1_n->prev = l2_p;
+}
+
 static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 {
 	int r = 1;
@@ -912,8 +928,8 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 
 			} else {
 				if (last)
-					list_splice(&pe->siblings,
-						    &last->siblings);
+					list_merge(&pe->siblings,
+						   &last->siblings);
 
 				last = pe;
 				r = 0;
@@ -942,14 +958,14 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 	return r;
 }
 
-static int snapshot_sts(status_type_t sts_type, char *result,
-			int maxlen, void *context)
+static int snapshot_status(status_type_t type, char *result,
+			   int maxlen, void *context)
 {
 	struct dm_snapshot *snap = (struct dm_snapshot *) context;
-	char cowdevname[PATH_MAX];
-	char orgdevname[PATH_MAX];
+	char cow[16];
+	char org[16];
 
-	switch (sts_type) {
+	switch (type) {
 	case STATUSTYPE_INFO:
 		if (!snap->valid)
 			snprintf(result, maxlen, "Invalid");
@@ -964,13 +980,15 @@ static int snapshot_sts(status_type_t sts_type, char *result,
 		break;
 
 	case STATUSTYPE_TABLE:
-		/* kdevname returns a static pointer so we
-		   need to make private copies if the output is to make sense */
-		strcpy(cowdevname, kdevname(snap->cow->dev));
-		strcpy(orgdevname, kdevname(snap->origin->dev));
-		snprintf(result, maxlen, "%s %s %c %ld", orgdevname, cowdevname,
-			 'N',	/* TODO persistent snaps */
-			 snap->chunk_size);
+		/*
+		 * kdevname returns a static pointer so we need
+		 * to make private copies if the output is to
+		 * make sense.
+		 */
+		strncpy(cow, kdevname(snap->cow->dev), sizeof(cow));
+		strncpy(org, kdevname(snap->origin->dev), sizeof(org));
+		snprintf(result, maxlen, "%s %s %c %ld", org, cow,
+			 snap->type, snap->chunk_size);
 		break;
 	}
 
@@ -1054,12 +1072,12 @@ static int origin_map(struct buffer_head *bh, int rw, void *context)
 	return (rw == WRITE) ? do_origin(dev, bh) : 1;
 }
 
-static int origin_sts(status_type_t sts_type, char *result,
-		      int maxlen, void *context)
+static int origin_status(status_type_t type, char *result,
+			 int maxlen, void *context)
 {
 	struct dm_dev *dev = (struct dm_dev *) context;
 
-	switch (sts_type) {
+	switch (type) {
 	case STATUSTYPE_INFO:
 		result[0] = '\0';
 		break;
@@ -1078,7 +1096,7 @@ static struct target_type origin_target = {
 	ctr:	origin_ctr,
 	dtr:	origin_dtr,
 	map:	origin_map,
-	sts:	origin_sts,
+	status:	origin_status,
 	wait:	NULL,
 	err:	NULL
 };
@@ -1089,7 +1107,7 @@ static struct target_type snapshot_target = {
 	ctr:	snapshot_ctr,
 	dtr:	snapshot_dtr,
 	map:	snapshot_map,
-	sts:	snapshot_sts,
+	status:	snapshot_status,
 	wait:	snapshot_wait,
 	err:	NULL
 };

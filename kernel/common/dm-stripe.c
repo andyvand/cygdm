@@ -173,14 +173,14 @@ static int stripe_map(struct buffer_head *bh, int rw, void *context)
 	return 1;
 }
 
-static int stripe_sts(status_type_t sts_type, char *result, int maxlen,
-		      void *context)
+static int stripe_status(status_type_t type, char *result, int maxlen,
+			 void *context)
 {
 	struct stripe_c *sc = (struct stripe_c *) context;
 	int offset;
 	int i;
 
-	switch (sts_type) {
+	switch (type) {
 	case STATUSTYPE_INFO:
 		result[0] = '\0';
 		break;
@@ -206,7 +206,7 @@ static struct target_type stripe_target = {
 	ctr:	stripe_ctr,
 	dtr:	stripe_dtr,
 	map:	stripe_map,
-	sts:	stripe_sts,
+	status:	stripe_status,
 	wait:	NULL,
 };
 

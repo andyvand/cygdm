@@ -28,8 +28,8 @@ typedef int (*dm_ctr_fn) (struct dm_table *t, offset_t b, offset_t l,
 typedef void (*dm_dtr_fn) (struct dm_table *t, void *c);
 typedef int (*dm_map_fn) (struct buffer_head *bh, int rw, void *context);
 typedef int (*dm_err_fn) (struct buffer_head *bh, int rw, void *context);
-typedef int (*dm_sts_fn) (status_type_t sts_type, char *, int maxlen,
-			  void *context);
+typedef int (*dm_status_fn) (status_type_t status_type, char *result,
+			     int maxlen, void *context);
 typedef int (*dm_wait_fn) (void *context, wait_queue_t *wq, int add);
 
 void dm_error(const char *message);
@@ -52,7 +52,7 @@ struct target_type {
 	dm_dtr_fn dtr;
 	dm_map_fn map;
 	dm_err_fn err;
-	dm_sts_fn sts;
+	dm_status_fn status;
 	dm_wait_fn wait;
 };
 

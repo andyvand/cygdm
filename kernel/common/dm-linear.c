@@ -79,12 +79,12 @@ static int linear_map(struct buffer_head *bh, int rw, void *context)
 	return 1;
 }
 
-static int linear_sts(status_type_t sts_type, char *result, int maxlen,
-		      void *context)
+static int linear_status(status_type_t type, char *result, int maxlen,
+			 void *context)
 {
 	struct linear_c *lc = (struct linear_c *) context;
 
-	switch (sts_type) {
+	switch (type) {
 	case STATUSTYPE_INFO:
 		result[0] = '\0';
 		break;
@@ -103,7 +103,7 @@ static struct target_type linear_target = {
 	ctr:	linear_ctr,
 	dtr:	linear_dtr,
 	map:	linear_map,
-	sts:	linear_sts,
+	status:	linear_status,
 	wait:	NULL,		/* No wait function */
 };
 

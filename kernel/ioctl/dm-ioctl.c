@@ -283,7 +283,7 @@ static int __status(struct mapped_device *md, struct dm_ioctl *param,
 
 		if (outptr - outbuf +
 		    sizeof(struct dm_target_spec) > param->data_size)
-			return -ENOMEM;
+			    return -ENOMEM;
 
 		spec = (struct dm_target_spec *) outptr;
 
@@ -295,10 +295,10 @@ static int __status(struct mapped_device *md, struct dm_ioctl *param,
 		outptr += sizeof(struct dm_target_spec);
 
 		/* Get the status/table string from the target driver */
-		if (tt->sts)
-			tt->sts(type, outptr,
-				outbuf + param->data_size - outptr,
-				md->map->targets[i].private);
+		if (tt->status)
+			tt->status(type, outptr,
+				   outbuf + param->data_size - outptr,
+				   md->map->targets[i].private);
 		else
 			outptr[0] = '\0';
 
@@ -331,7 +331,7 @@ static int __wait(struct mapped_device *md, struct dm_ioctl *param)
 		/* Add ourself to the target's wait queue */
 		if (tt->wait &&
 		    (!tt->wait(md->map->targets[i].private, &waitq, 1)))
-			waiting = 1;
+			    waiting = 1;
 	}
 
 	/* If at least one call succeeded then sleep */
@@ -525,7 +525,7 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 	}
 
 	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
-		MINOR(to_kdev_t(param->dev)) : -1;
+	    MINOR(to_kdev_t(param->dev)) : -1;
 
 	ro = (param->flags & DM_READONLY_FLAG) ? 1 : 0;
 
