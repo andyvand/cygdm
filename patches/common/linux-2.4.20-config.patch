@@ -18,14 +18,12 @@ diff -ruN linux-2.4.20/MAINTAINERS linux/MAINTAINERS
 diff -ruN linux-2.4.20/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.20/drivers/md/Config.in	Fri Jan 10 16:34:50 2003
 +++ linux/drivers/md/Config.in	Wed Apr 23 20:23:54 2003
-@@ -14,5 +14,9 @@
+@@ -14,5 +14,7 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
  dep_tristate ' Logical volume manager (LVM) support' CONFIG_BLK_DEV_LVM $CONFIG_MD
-+if [ "$CONFIG_EXPERIMENTAL" = "y" ]; then
-+   dep_tristate ' Device-mapper support (EXPERIMENTAL)' CONFIG_BLK_DEV_DM $CONFIG_MD
-+   dep_tristate '  Mirror (RAID-1) support (EXPERIMENTAL)' CONFIG_BLK_DEV_DM_MIRROR $CONFIG_BLK_DEV_DM
-+fi
++dep_tristate ' Device-mapper support' CONFIG_BLK_DEV_DM $CONFIG_MD
++dep_tristate '  Mirror (RAID-1) support' CONFIG_BLK_DEV_DM_MIRROR $CONFIG_BLK_DEV_DM
  
  endmenu
 diff -ruN linux-2.4.20/Documentation/Configure.help linux/Documentation/Configure.help
