@@ -380,15 +380,13 @@ static int init_hash_tables(struct dm_snapshot *s)
 }
 
 /*
- * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n>
- * <chunk-size>
+ * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n> <chunk-size>
  */
 static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 			int argc, char **argv, void **context)
 {
 	struct dm_snapshot *s;
 	unsigned long chunk_size;
-	unsigned long extent_size = 0L;
 	int r = -EINVAL;
 	char *persistent;
 	char *origin_path;
@@ -397,7 +395,7 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	int blocksize;
 
 	if (argc < 4) {
-		*context = "dm-snapshot: Not enough arguments";
+		*context = "dm-snapshot: requires exactly 4 arguments";
 		r = -EINVAL;
 		goto bad;
 	}
@@ -417,22 +415,6 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		*context = "Invalid chunk size";
 		r = -EINVAL;
 		goto bad;
-	}
-
-	/* Get the extent size for persistent snapshots */
-	if ((*persistent & 0x5f) == 'P') {
-		if (argc < 5) {
-			*context = "No extent size specified";
-			r = -EINVAL;
-			goto bad;
-		}
-
-		extent_size = simple_strtoul(argv[4], &value, 10);
-		if (extent_size == 0 || value == NULL) {
-			*context = "Invalid extent size";
-			r = -EINVAL;
-			goto bad;
-		}
 	}
 
 	s = kmalloc(sizeof(*s), GFP_KERNEL);
@@ -455,7 +437,11 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad_free;
 	}
 
-	/* Validate the extent and chunk sizes against the device block size */
+	/* Chunk size must be multiple of page size. If it's wrong, fix it */
+	if (chunk_size < (PAGE_SIZE / SECTOR_SIZE))
+		chunk_size = PAGE_SIZE / SECTOR_SIZE;
+
+	/* Validate the chunk size against the device block size */
 	blocksize = get_hardsect_size(s->cow->dev);
 	if (chunk_size % (blocksize / SECTOR_SIZE)) {
 		*context = "Chunk size is not a multiple of device blocksize";
@@ -463,21 +449,9 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		goto bad_putdev;
 	}
 
-	if (extent_size % (blocksize / SECTOR_SIZE)) {
-		*context = "Extent size is not a multiple of device blocksize";
-		r = -EINVAL;
-		goto bad_putdev;
-	}
-
 	/* Check the sizes are small enough to fit in one kiovec */
 	if (chunk_size > KIO_MAX_SECTORS) {
 		*context = "Chunk size is too big";
-		r = -EINVAL;
-		goto bad_putdev;
-	}
-
-	if (extent_size > KIO_MAX_SECTORS) {
-		*context = "Extent size is too big";
 		r = -EINVAL;
 		goto bad_putdev;
 	}
