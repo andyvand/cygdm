@@ -43,6 +43,16 @@ AC_TYPE_SIZE_T
 AC_STRUCT_ST_RDEV
 AC_HEADER_TIME
 
+dnl Get system type
+AC_CANONICAL_SYSTEM
+
+case "$host_os" in
+	linux*)
+		CFLAGS= ;;
+	darwin*)
+		CFLAGS="-no-cpp-precomp" ;;
+esac
+
 dnl -- prefix is /usr by default, the exec_prefix default is setup later
 AC_PREFIX_DEFAULT(/usr)
 
@@ -78,6 +88,9 @@ AC_PROG_GCC_TRADITIONAL
 AC_TYPE_SIGNAL
 AC_FUNC_VPRINTF
 AC_CHECK_FUNCS(mkdir rmdir uname)
+
+dnl Check for getopt
+AC_CHECK_HEADERS(getopt.h, CFLAGS="$CFLAGS -DHAVE_GETOPTLONG")
 
 echo $ac_n "checking for kernel directory""... $ac_c" 1>&6
 dnl -- Where the linux src tree is
