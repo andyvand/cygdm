@@ -1,6 +1,6 @@
-diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
---- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Thu Mar 14 16:32:40 2002
+diff -ruN linux-2.4.18/drivers/md/Config.in linux/drivers/md/Config.in
+--- linux-2.4.18/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
++++ linux/drivers/md/Config.in	Thu Mar 14 16:33:11 2002
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -8,9 +8,9 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 +dep_tristate ' Device mapper support' CONFIG_BLK_DEV_DM $CONFIG_MD
  
  endmenu
-diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
---- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Thu Mar 14 16:32:40 2002
+diff -ruN linux-2.4.18/drivers/md/Makefile linux/drivers/md/Makefile
+--- linux-2.4.18/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
++++ linux/drivers/md/Makefile	Thu Mar 14 16:33:11 2002
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -38,8 +38,8 @@ diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 +
 +dm-mod.o: $(dm-mod-objs)
 +	$(LD) -r -o $@ $(dm-mod-objs)
-diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper.h
---- linux-2.4.16/drivers/md/device-mapper.h	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/device-mapper.h linux/drivers/md/device-mapper.h
+--- linux-2.4.18/drivers/md/device-mapper.h	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/device-mapper.h	Thu Mar  7 16:56:22 2002
 @@ -0,0 +1,59 @@
 +/*
@@ -101,8 +101,8 @@ diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +#endif				/* __KERNEL__ */
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
-diff -ruN linux-2.4.16/drivers/md/dm-exception-store.c linux/drivers/md/dm-exception-store.c
---- linux-2.4.16/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-exception-store.c
+--- linux-2.4.18/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-exception-store.c	Thu Mar 14 16:02:50 2002
 @@ -0,0 +1,683 @@
 +/*
@@ -788,8 +788,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +	return store;
 +}
 +
-diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
---- linux-2.4.16/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
+--- linux-2.4.18/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-ioctl.c	Thu Mar 14 15:59:31 2002
 @@ -0,0 +1,557 @@
 +/*
@@ -1349,8 +1349,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	if (misc_deregister(&_dm_misc) < 0)
 +		DMERR("misc_deregister failed for control device");
 +}
-diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
---- linux-2.4.16/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
+--- linux-2.4.18/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-linear.c	Tue Jan 15 19:53:55 2002
 @@ -0,0 +1,105 @@
 +/*
@@ -1458,8 +1458,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +		DMERR("linear: unregister failed %d", r);
 +}
 +
-diff -ruN linux-2.4.16/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
---- linux-2.4.16/drivers/md/dm-mirror.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
+--- linux-2.4.18/drivers/md/dm-mirror.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-mirror.c	Thu Mar 14 15:53:19 2002
 @@ -0,0 +1,295 @@
 +/*
@@ -1757,8 +1757,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
 + * c-file-style: "linux"
 + * End:
 + */
-diff -ruN linux-2.4.16/drivers/md/dm-origin.c linux/drivers/md/dm-origin.c
---- linux-2.4.16/drivers/md/dm-origin.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/dm-origin.c linux/drivers/md/dm-origin.c
+--- linux-2.4.18/drivers/md/dm-origin.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-origin.c	Wed Mar 13 17:28:40 2002
 @@ -0,0 +1,105 @@
 +/*
@@ -1866,8 +1866,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-origin.c linux/drivers/md/dm-origin.c
 + * c-file-style: "linux"
 + * End:
 + */
-diff -ruN linux-2.4.16/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
---- linux-2.4.16/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
+--- linux-2.4.18/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-snapshot.c	Thu Mar 14 16:08:52 2002
 @@ -0,0 +1,862 @@
 +/*
@@ -2732,8 +2732,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 + * c-file-style: "linux"
 + * End:
 + */
-diff -ruN linux-2.4.16/drivers/md/dm-snapshot.h linux/drivers/md/dm-snapshot.h
---- linux-2.4.16/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/dm-snapshot.h linux/drivers/md/dm-snapshot.h
+--- linux-2.4.18/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-snapshot.h	Thu Mar 14 16:02:50 2002
 @@ -0,0 +1,135 @@
 +/*
@@ -2871,8 +2871,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-snapshot.h linux/drivers/md/dm-snapshot.h
 +}
 +
 +#endif
-diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
---- linux-2.4.16/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
+--- linux-2.4.18/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-stripe.c	Thu Jan 31 17:50:20 2002
 @@ -0,0 +1,202 @@
 +/*
@@ -3077,8 +3077,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +	return;
 +}
 +
-diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
---- linux-2.4.16/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/dm-table.c linux/drivers/md/dm-table.c
+--- linux-2.4.18/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-table.c	Thu Feb 21 12:46:57 2002
 @@ -0,0 +1,404 @@
 +/*
@@ -3485,8 +3485,8 @@ diff -ruN linux-2.4.16/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +
 +EXPORT_SYMBOL(dm_table_get_device);
 +EXPORT_SYMBOL(dm_table_put_device);
-diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
---- linux-2.4.16/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/dm-target.c linux/drivers/md/dm-target.c
+--- linux-2.4.18/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm-target.c	Tue Jan  8 17:57:45 2002
 @@ -0,0 +1,241 @@
 +/*
@@ -3730,9 +3730,9 @@ diff -ruN linux-2.4.16/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
-diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
---- linux-2.4.16/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Thu Mar 14 16:32:26 2002
+diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
+--- linux-2.4.18/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
++++ linux/drivers/md/dm.c	Thu Mar 14 16:32:58 2002
 @@ -0,0 +1,1130 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -4864,8 +4864,8 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +MODULE_DESCRIPTION(DM_NAME " driver");
 +MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 +MODULE_LICENSE("GPL");
-diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
---- linux-2.4.16/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/dm.h linux/drivers/md/dm.h
+--- linux-2.4.18/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/dm.h	Thu Mar  7 20:04:19 2002
 @@ -0,0 +1,233 @@
 +/*
@@ -5101,8 +5101,8 @@ diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 +void dm_stripe_exit(void);
 +
 +#endif
-diff -ruN linux-2.4.16/drivers/md/kcopyd.c linux/drivers/md/kcopyd.c
---- linux-2.4.16/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/drivers/md/kcopyd.c linux/drivers/md/kcopyd.c
+--- linux-2.4.18/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
 +++ linux/drivers/md/kcopyd.c	Thu Mar 14 13:45:09 2002
 @@ -0,0 +1,479 @@
 +/*
@@ -5584,8 +5584,8 @@ diff -ruN linux-2.4.16/drivers/md/kcopyd.c linux/drivers/md/kcopyd.c
 + * c-file-style: "linux"
 + * End:
 + */
-diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-mapper.h
---- linux-2.4.16/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
+diff -ruN linux-2.4.18/include/linux/device-mapper.h linux/include/linux/device-mapper.h
+--- linux-2.4.18/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
 +++ linux/include/linux/device-mapper.h	Thu Mar  7 16:56:22 2002
 @@ -0,0 +1,59 @@
 +/*
@@ -5647,9 +5647,9 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* __KERNEL__ */
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
-diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
---- linux-2.4.16/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Thu Mar 14 16:32:26 2002
+diff -ruN linux-2.4.18/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
+--- linux-2.4.18/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
++++ linux/include/linux/dm-ioctl.h	Thu Mar 14 16:32:58 2002
 @@ -0,0 +1,103 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -5754,10 +5754,10 @@ diff -ruN linux-2.4.16/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +#define DM_PERSISTENT_DEV_FLAG	0x00000008
 +
 +#endif				/* _LINUX_DM_IOCTL_H */
-diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
---- linux-2.4.16/include/linux/fs.h	Thu Dec  6 15:57:58 2001
-+++ linux/include/linux/fs.h	Thu Mar 14 16:32:40 2002
-@@ -257,7 +257,10 @@
+diff -ruN linux-2.4.18/include/linux/fs.h linux/include/linux/fs.h
+--- linux-2.4.18/include/linux/fs.h	Mon Mar  4 17:42:19 2002
++++ linux/include/linux/fs.h	Thu Mar 14 16:33:11 2002
+@@ -258,7 +258,10 @@
  	char * b_data;			/* pointer to data block */
  	struct page *b_page;		/* the page this bh is mapped to */
  	void (*b_end_io)(struct buffer_head *bh, int uptodate); /* I/O completion */
