@@ -5,6 +5,7 @@
  */
 
 #include "dm.h"
+#include "kcopyd.h"
 
 #include <linux/blk.h>
 #include <linux/blkpg.h>
@@ -92,7 +93,7 @@ static int namecmp(struct mapped_device *md, const char *name, int nametype)
 
 	case DM_LOOKUP_BY_UUID:
 		if (!md->uuid)
-			return -1; 	/* never equal */
+			return -1;	/* never equal */
 
 		return strcmp(md->uuid, name);
 		break;
@@ -266,15 +267,14 @@ static struct {
 	void (*exit)(void);
 
 } _inits[] = {
-#define xx(n) {n ## _init, n ## _exit}
-	xx(local),
-	xx(dm_target),
-	xx(dm_linear),
-	xx(dm_stripe),
-	xx(kcopyd),
-	xx(dm_snapshot),
-	xx(dm_mirror),
-	xx(dm_interface),
+#define xx(n) {n ## _init, n ## _exit},
+	xx(local)
+	xx(dm_target)
+	xx(dm_linear)
+	xx(dm_stripe)
+	xx(kcopyd)
+	xx(dm_snapshot)
+	xx(dm_interface)
 #undef xx
 };
 
@@ -1123,7 +1123,8 @@ int dm_resume(struct mapped_device *md)
 
 	dm_put_w(md);
 	flush_deferred_io(def);
-	sync_buffers(md->dev, 0);
+	run_task_queue(&tq_disk);
+
 	if (!dm_get_w(minor)) {
 		/* FIXME: yuck */
 		down_write(_dev_locks + minor);

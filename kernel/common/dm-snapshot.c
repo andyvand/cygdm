@@ -17,6 +17,16 @@
 #include <linux/device-mapper.h>
 
 #include "dm-snapshot.h"
+#include "kcopyd.h"
+
+/*
+ * FIXME: Remove this before release.
+ */
+#if 0
+#define DMDEBUG(x...) DMWARN( ## x)
+#else
+#define DMDEBUG(x...)
+#endif
 
 /*
  * Hard sector size used all over the kernel
@@ -31,20 +41,36 @@
 struct pending_exception {
 	struct exception e;
 
-	/* Chain of WRITE buffer heads to submit when this COW has completed */
-	struct buffer_head *origin_buffers;
-	struct buffer_head *snapshot_buffers;
+	/*
+	 * Origin buffers waiting for this to complete are held
+	 * in a list (using b_reqnext).
+	 */
+	struct buffer_head *origin_bhs;
+	struct buffer_head *snapshot_bhs;
+
+	/*
+	 * Other pending_exceptions that are processing this
+	 * chunk.  When this list is empty, we know we can
+	 * complete the origins.
+	 */
+	struct list_head siblings;
 
 	/* Pointer back to snapshot context */
 	struct dm_snapshot *snap;
+
+	/*
+	 * 1 indicates the exception has already been sent to
+	 * kcopyd.
+	 */
+	int started;
 };
 
 /*
  * Hash table mapping origin volumes to lists of snapshots and
  * a lock to protect it
  */
-static kmem_cache_t *exception_cachep;
-static kmem_cache_t *pending_cachep;
+static kmem_cache_t *exception_cache;
+static kmem_cache_t *pending_cache;
 static mempool_t *pending_pool;
 
 /*
@@ -61,7 +87,8 @@ struct origin {
 };
 
 /*
- * Useful macro for running the store functions.  Use store_int_fn if you want the return value.
+ * Useful macro for running the store functions.  Use
+ * store_int_fn if you want the return value.
  */
 #define store_fn(snap, fn, args...) \
     if ((snap)->store. ## fn) \
@@ -198,7 +225,7 @@ static int init_exception_table(struct exception_table *et, uint32_t size)
 	return 0;
 }
 
-static void exit_exception_table(struct exception_table *et, kmem_cache_t *mem)
+static void exit_exception_table(struct exception_table *et, kmem_cache_t * mem)
 {
 	struct list_head *slot, *entry, *temp;
 	struct exception *ex;
@@ -256,16 +283,14 @@ static struct exception *lookup_exception(struct exception_table *et,
 	return NULL;
 }
 
-void *pool_alloc_pending(int gfp_mask, void *pool_data)
+static inline struct exception *alloc_exception(void)
 {
-	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
-	return kmem_cache_alloc(mem, gfp_mask);
+	return kmem_cache_alloc(exception_cache, GFP_NOIO);
 }
 
-void pool_free_pending(void *element, void *pool_data)
+static inline void free_exception(struct exception *e)
 {
-	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
-	kmem_cache_free(mem, element);
+	kmem_cache_free(exception_cache, e);
 }
 
 static inline struct pending_exception *alloc_pending_exception(void)
@@ -276,16 +301,6 @@ static inline struct pending_exception *alloc_pending_exception(void)
 static inline void free_pending_exception(struct pending_exception *pe)
 {
 	mempool_free(pe, pending_pool);
-}
-
-static inline struct exception *alloc_exception(void)
-{
-	return kmem_cache_alloc(exception_cachep, GFP_NOIO);
-}
-
-static inline void free_exception(struct exception *e)
-{
-	kmem_cache_free(exception_cachep, e);
 }
 
 int dm_add_exception(struct dm_snapshot *s, chunk_t old, chunk_t new)
@@ -358,7 +373,7 @@ static int init_hash_tables(struct dm_snapshot *s)
 		hash_size = 64;
 
 	if (init_exception_table(&s->pending, hash_size)) {
-		exit_exception_table(&s->complete, exception_cachep);
+		exit_exception_table(&s->complete, exception_cache);
 		return -ENOMEM;
 	}
 
@@ -496,10 +511,12 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	 * Check the persistent flag - done here because we need the iobuf
 	 * to check the LV header
 	 */
-	/*AGKAGKAGKif ((*persistent & 0x5f) == 'P')
+#if 0
+	if ((*persistent & 0x5f) == 'P')
 		r = dm_create_persistent(&s->store, s, blocksize,
 					 extent_size, context);
-	else */
+	else
+#endif
 		r = dm_create_transient(&s->store, s, blocksize, context);
 
 	if (r) {
@@ -516,10 +533,10 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	}
 
 	/* Flush IO to the origin device */
-	/* FIXME: what does sct have against fsync_dev ? */
-	fsync_dev(s->origin->dev);
 #if LVM_VFS_ENHANCEMENT
 	fsync_dev_lockfs(s->origin->dev);
+#else
+	fsync_dev(s->origin->dev);
 #endif
 
 	/* Add snapshot to the list of snapshots for this origin */
@@ -528,7 +545,6 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 		*context = "Cannot register snapshot origin";
 		goto bad_free2;
 	}
-
 #if LVM_VFS_ENHANCEMENT
 	unlockfs(s->origin->dev);
 #endif
@@ -536,21 +552,21 @@ static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
 	*context = s;
 	return 0;
 
- bad_free2:
+      bad_free2:
 	store_fn(s, destroy);
 
- bad_free1:
-	exit_exception_table(&s->pending, pending_cachep);
-	exit_exception_table(&s->complete, exception_cachep);
+      bad_free1:
+	exit_exception_table(&s->pending, pending_cache);
+	exit_exception_table(&s->complete, exception_cache);
 
- bad_putdev:
+      bad_putdev:
 	dm_table_put_device(t, s->cow);
 	dm_table_put_device(t, s->origin);
 
- bad_free:
+      bad_free:
 	kfree(s);
 
- bad:
+      bad:
 	return r;
 }
 
@@ -560,8 +576,8 @@ static void snapshot_dtr(struct dm_table *t, void *context)
 
 	unregister_snapshot(s);
 
-	exit_exception_table(&s->pending, pending_cachep);
-	exit_exception_table(&s->complete, exception_cachep);
+	exit_exception_table(&s->pending, pending_cache);
+	exit_exception_table(&s->complete, exception_cache);
 
 	/* Deallocate memory used */
 	store_fn(s, destroy);
@@ -572,19 +588,31 @@ static void snapshot_dtr(struct dm_table *t, void *context)
 }
 
 /*
- * Flush a list of pending writes, that were waiting for an
- * exception.
+ * We hold lists of buffer_heads, using the b_reqnext field.
+ */
+static void queue_buffer(struct buffer_head **queue, struct buffer_head *bh)
+{
+	bh->b_reqnext = *queue;
+	*queue = bh;
+}
+
+/*
+ * Flush a list of buffers.
  */
 static void flush_buffers(struct buffer_head *bh)
 {
 	struct buffer_head *n;
 
+	DMDEBUG("begin flush");
 	while (bh) {
 		n = bh->b_reqnext;
 		bh->b_reqnext = NULL;
+		DMDEBUG("flushing %p", bh);
 		generic_make_request(WRITE, bh);
 		bh = n;
 	}
+
+	run_task_queue(&tq_disk);
 }
 
 /*
@@ -605,15 +633,13 @@ static void error_buffers(struct buffer_head *bh)
 /*
  * Called when the copy I/O has finished
  */
-static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
+static void copy_callback(int err, void *context)
 {
 	struct pending_exception *pe = (struct pending_exception *) context;
 	struct dm_snapshot *s = pe->snap;
 	struct exception *e;
-	struct buffer_head *origin_bh, *snapshot_bh;
 
-	switch (reason) {
-	case COPY_CB_COMPLETE:
+	if (!err) {
 		/* Update the metadata if we are persistent */
 		store_fn(s, commit_exception, &pe->e);
 
@@ -634,111 +660,101 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 		remove_exception(&pe->e);
 
 		/* Submit any pending write BHs */
-		origin_bh = pe->origin_buffers;
-		snapshot_bh = pe->snapshot_buffers;
 		up_write(&pe->snap->lock);
 
-		free_pending_exception(pe);
-		flush_buffers(origin_bh);
-		flush_buffers(snapshot_bh);
-		DMWARN("Exception completed successfully.");
-		break;
+		flush_buffers(pe->snapshot_bhs);
+		DMDEBUG("Exception completed successfully.");
 
-	case COPY_CB_FAILED_WRITE:
-	case COPY_CB_FAILED_READ:
+	} else {
 		/* Read/write error - snapshot is unusable */
 		DMERR("Error reading/writing snapshot");
 
 		down_write(&pe->snap->lock);
 		store_fn(pe->snap, drop_snapshot);
 		pe->snap->valid = 0;
-		origin_bh = pe->origin_buffers;
-		snapshot_bh = pe->snapshot_buffers;
 		remove_exception(&pe->e);
 		up_write(&pe->snap->lock);
 
-		free_pending_exception(pe);
-		flush_buffers(origin_bh);
-		error_buffers(snapshot_bh);
-		DMWARN("Exception failed.");
-		break;
+		error_buffers(pe->snapshot_bhs);
 
-	default:
-		DMWARN("Unknown kcopyd callback reason.");
-		BUG();
+		DMDEBUG("Exception failed.");
+	}
+
+	if (list_empty(&pe->siblings))
+		flush_buffers(pe->origin_bhs);
+	else
+		list_del(&pe->siblings);
+
+	free_pending_exception(pe);
+}
+
+/*
+ * Dispatches the copy operation to kcopyd.
+ */
+static inline void start_copy(struct pending_exception *pe)
+{
+	struct dm_snapshot *s = pe->snap;
+	struct kcopyd_region src, dest;
+
+	src.dev = s->origin->dev;
+	src.sector = chunk_to_sector(s, pe->e.old_chunk);
+	src.count = s->chunk_size;
+
+	dest.dev = s->cow->dev;
+	dest.sector = chunk_to_sector(s, pe->e.new_chunk);
+	dest.count = s->chunk_size;
+
+	if (!pe->started) {
+		/* Hand over to kcopyd */
+		kcopyd_copy(&src, &dest, copy_callback, pe);
+		pe->started = 1;
 	}
 }
 
 /*
- * Inserts the buffer head on the correct queue, depending
- * whether its a snapshot or origin buffer.
+ * Looks to see if this snapshot already has a pending exception
+ * for this chunk, otherwise it allocates a new one and inserts
+ * it into the pending table.
  */
-static void queue_buffer(struct pending_exception *pe,
-			 struct buffer_head *bh,
-			 int snapshot_buffer)
-{
-	struct buffer_head **bh_list;
-
-	bh_list = snapshot_buffer ? &pe->snapshot_buffers :
-		&pe->origin_buffers;
-
-	bh->b_reqnext = *bh_list;
-	*bh_list = bh;
-}
-
-/*
- * Performs a new copy on write.
- */
-static int new_exception(struct dm_snapshot *s, struct buffer_head *bh,
-			 int snapshot_buffer)
+static struct pending_exception *find_pending_exception(struct dm_snapshot *s,
+							struct buffer_head *bh)
 {
 	struct exception *e;
 	struct pending_exception *pe;
-	chunk_t chunk;
-
-	chunk = sector_to_chunk(s, bh->b_rsector);
+	chunk_t chunk = sector_to_chunk(s, bh->b_rsector);
 
 	/*
-	 * If the exception is in flight then we just defer the
-	 * bh until this copy has completed.
+	 * Is there a pending exception for this already ?
 	 */
 	e = lookup_exception(&s->pending, chunk);
 	if (e) {
 		/* cast the exception to a pending exception */
 		pe = list_entry(e, struct pending_exception, e);
-		queue_buffer(pe, bh, snapshot_buffer);
 
 	} else {
 		/* Create a new pending exception */
 		pe = alloc_pending_exception();
 		if (!pe) {
 			DMWARN("Couldn't allocate pending exception.");
-			return -ENOMEM;
+			return NULL;
 		}
 
 		pe->e.old_chunk = chunk;
+		pe->origin_bhs = pe->snapshot_bhs = NULL;
+		INIT_LIST_HEAD(&pe->siblings);
 		pe->snap = s;
-		pe->origin_buffers = pe->snapshot_buffers = NULL;
-		queue_buffer(pe, bh, snapshot_buffer);
+		pe->started = 0;
 
 		if (store_int_fn(s, prepare_exception, &pe->e)) {
 			free_pending_exception(pe);
 			s->valid = 0;
-			return -ENXIO;
+			return NULL;
 		}
 
 		insert_exception(&s->pending, &pe->e);
-
-		/* Get kcopyd to do the copy */
-		dm_blockcopy(chunk_to_sector(s, pe->e.old_chunk),
-			     chunk_to_sector(s, pe->e.new_chunk),
-			     s->chunk_size,
-			     s->origin->dev,
-			     s->cow->dev, SNAPSHOT_COPY_PRIORITY, 0,
-			     copy_callback, pe);
 	}
 
-	return 0;
+	return pe;
 }
 
 static inline void remap_exception(struct dm_snapshot *s, struct exception *e,
@@ -755,6 +771,7 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 	struct dm_snapshot *s = (struct dm_snapshot *) context;
 	int r = 1;
 	chunk_t chunk;
+	struct pending_exception *pe;
 
 	chunk = sector_to_chunk(s, bh->b_rsector);
 
@@ -777,12 +794,16 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 			remap_exception(s, e, bh);
 
 		else {
-			r = new_exception(s, bh, 1);
+			pe = find_pending_exception(s, bh);
 
-			if (r < 0) {
+			if (!pe) {
 				store_fn(s, drop_snapshot);
 				s->valid = 0;
 			}
+
+			queue_buffer(&pe->snapshot_bhs, bh);
+			start_copy(pe);
+			r = 0;
 		}
 
 		up_write(&s->lock);
@@ -817,11 +838,16 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 	struct list_head *sl;
 	struct dm_snapshot *snap;
 	struct exception *e;
+	struct pending_exception *pe, *last = NULL;
 	chunk_t chunk;
 
 	/* Do all the snapshots on this origin */
 	list_for_each(sl, snapshots) {
 		snap = list_entry(sl, struct dm_snapshot, list);
+
+		/* Only deal with valid snapshots */
+		if (!snap->valid)
+			continue;
 
 		down_write(&snap->lock);
 
@@ -831,28 +857,45 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 		 */
 		chunk = sector_to_chunk(snap, bh->b_rsector);
 
-		/* Only deal with valid snapshots */
-		if (snap->valid) {
-			/*
-			 * Check exception table to see if block
-			 * is already remapped in this snapshot
-			 * and trigger an exception if not.
-			 */
-			e = lookup_exception(&snap->complete, chunk);
-			if (!e) {
-				int lr;
+		/*
+		 * Check exception table to see if block
+		 * is already remapped in this snapshot
+		 * and trigger an exception if not.
+		 */
+		e = lookup_exception(&snap->complete, chunk);
+		if (!e) {
+			pe = find_pending_exception(snap, bh);
+			if (!pe) {
+				store_fn(snap, drop_snapshot);
+				snap->valid = 0;
+			} else {
 
-				lr = new_exception(snap, bh, 1);
-				if (lr < 0) {
-					store_fn(snap, drop_snapshot);
-					snap->valid = 0;
+				if (last)
+					list_splice(&pe->siblings,
+						    &last->siblings);
 
-				} else if (lr == 0)
-					r = 0; /* we must wait */
+				last = pe;
+				r = 0;
 			}
 		}
 
 		up_write(&snap->lock);
+	}
+
+	/*
+	 * Now that we have a complete pe list we can start the copying.
+	 */
+	if (last) {
+		pe = last;
+		do {
+			down_write(&pe->snap->lock);
+			queue_buffer(&pe->origin_bhs, bh);
+			start_copy(pe);
+			up_write(&pe->snap->lock);
+			pe = list_entry(pe->siblings.next,
+					struct pending_exception, siblings);
+
+		} while (pe != last);
 	}
 
 	return r;
@@ -876,7 +919,6 @@ int do_origin(struct dm_dev *origin, struct buffer_head *bh)
 
 	return r;
 }
-
 
 /*
  * Origin: maps a linear range of a device, with hooks for snapshotting.
@@ -934,12 +976,12 @@ static struct target_type origin_target = {
 };
 
 static struct target_type snapshot_target = {
-	name:"snapshot",
-	module:THIS_MODULE,
-	ctr:snapshot_ctr,
-	dtr:snapshot_dtr,
-	map:snapshot_map,
-	err:NULL
+	name:	"snapshot",
+	module:	THIS_MODULE,
+	ctr:	snapshot_ctr,
+	dtr:	snapshot_dtr,
+	map:	snapshot_map,
+	err:	NULL
 };
 
 int __init dm_snapshot_init(void)
@@ -964,29 +1006,29 @@ int __init dm_snapshot_init(void)
 		goto bad2;
 	}
 
-	exception_cachep = kmem_cache_create("dm-snapshot-ex",
-					     sizeof(struct exception),
-					     __alignof__(struct exception),
-					     0, NULL, NULL);
-	if (!exception_cachep) {
+	exception_cache = kmem_cache_create("dm-snapshot-ex",
+					    sizeof(struct exception),
+					    __alignof__(struct exception),
+					    0, NULL, NULL);
+	if (!exception_cache) {
 		DMERR("Couldn't create exception cache.");
 		r = -ENOMEM;
 		goto bad3;
 	}
 
-	pending_cachep =
+	pending_cache =
 	    kmem_cache_create("dm-snapshot-in",
 			      sizeof(struct pending_exception),
 			      __alignof__(struct pending_exception),
 			      0, NULL, NULL);
-	if (!pending_cachep) {
+	if (!pending_cache) {
 		DMERR("Couldn't create pending cache.");
 		r = -ENOMEM;
 		goto bad4;
 	}
 
-	pending_pool = mempool_create(128, pool_alloc_pending,
-				      pool_free_pending, pending_cachep);
+	pending_pool = mempool_create(128, mempool_alloc_slab,
+				      mempool_free_slab, pending_cache);
 	if (!pending_pool) {
 		DMERR("Couldn't create pending pool.");
 		r = -ENOMEM;
@@ -995,15 +1037,15 @@ int __init dm_snapshot_init(void)
 
 	return 0;
 
- bad5:
-	kmem_cache_destroy(pending_cachep);
- bad4:
-	kmem_cache_destroy(exception_cachep);
- bad3:
+      bad5:
+	kmem_cache_destroy(pending_cache);
+      bad4:
+	kmem_cache_destroy(exception_cache);
+      bad3:
 	exit_origin_hash();
- bad2:
+      bad2:
 	dm_unregister_target(&origin_target);
- bad1:
+      bad1:
 	dm_unregister_target(&snapshot_target);
 	return r;
 }
@@ -1022,8 +1064,8 @@ void dm_snapshot_exit(void)
 
 	exit_origin_hash();
 	mempool_destroy(pending_pool);
-	kmem_cache_destroy(pending_cachep);
-	kmem_cache_destroy(exception_cachep);
+	kmem_cache_destroy(pending_cache);
+	kmem_cache_destroy(exception_cache);
 }
 
 /*

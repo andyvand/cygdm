@@ -52,7 +52,7 @@
  */
 struct persistent_info {
 	/* Size of extents used for COW blocks */
-        long extent_size;
+	long extent_size;
 
 	/* Number of the next free sector for COW/data */
 	unsigned long next_free_sector;
@@ -80,11 +80,11 @@ struct persistent_info {
 	/* kiobuf for doing I/O to header & metadata */
 	struct kiobuf *cow_iobuf;
 
-	 /*
-	  * Disk extent with COW data in it. as an array of
-	  * exception tables. The first one points to the next
-	  * block of metadata or 0 if this is the last
-	  */
+	/*
+	 * Disk extent with COW data in it. as an array of
+	 * exception tables. The first one points to the next
+	 * block of metadata or 0 if this is the last
+	 */
 	struct disk_exception *disk_cow;
 };
 
@@ -150,7 +150,7 @@ static int write_metadata(struct dm_snapshot *s, struct persistent_info *pi)
 {
 	kdev_t dev = s->cow->dev;
 	int blocksize = get_hardsect_size(dev);
-	int writesize = blocksize/SECTOR_SIZE;
+	int writesize = blocksize / SECTOR_SIZE;
 
 	if (do_io(WRITE, pi->cow_iobuf, dev,
 		  pi->current_metadata_sector, writesize) != 0) {
@@ -172,7 +172,7 @@ static int alloc_iobuf_pages(struct kiobuf *iobuf, int nr_sectors)
 	if (nr_sectors > KIO_MAX_SECTORS)
 		return -1;
 
-	nr_pages = nr_sectors / (PAGE_SIZE/SECTOR_SIZE);
+	nr_pages = nr_sectors / (PAGE_SIZE / SECTOR_SIZE);
 	r = expand_kiobuf(iobuf, nr_pages);
 	if (r)
 		goto out;
@@ -181,7 +181,7 @@ static int alloc_iobuf_pages(struct kiobuf *iobuf, int nr_sectors)
 	iobuf->locked = 1;
 	iobuf->nr_pages = 0;
 	for (i = 0; i < nr_pages; i++) {
-		struct page * page;
+		struct page *page;
 
 		page = alloc_page(GFP_KERNEL);
 		if (!page)
@@ -195,7 +195,7 @@ static int alloc_iobuf_pages(struct kiobuf *iobuf, int nr_sectors)
 	iobuf->offset = 0;
 	r = 0;
 
-out:
+      out:
 	return r;
 }
 
@@ -225,14 +225,12 @@ static int read_metadata(struct dm_snapshot *s, struct persistent_info *pi)
 	 * others are way too small.
 	 */
 	if (alloc_kiovec(1, &read_iobuf)) {
-		DMERR("Error allocating iobuf for %s",
-		      kdevname(dev));
+		DMERR("Error allocating iobuf for %s", kdevname(dev));
 		return -1;
 	}
 
 	if (alloc_iobuf_pages(read_iobuf, pi->extent_size)) {
-		DMERR("Error allocating iobuf space for %s",
-		      kdevname(dev));
+		DMERR("Error allocating iobuf space for %s", kdevname(dev));
 		free_kiovec(1, &read_iobuf);
 		return -1;
 	}
@@ -250,8 +248,7 @@ static int read_metadata(struct dm_snapshot *s, struct persistent_info *pi)
 
 		first_free_sector = max(first_free_sector,
 					cur_sector + pi->extent_size);
-		status = do_io(READ, read_iobuf, dev,
-			       cur_sector, nr_sectors);
+		status = do_io(READ, read_iobuf, dev, cur_sector, nr_sectors);
 		if (status == 0) {
 			map_page = 0;
 			entry = 0;
@@ -260,26 +257,39 @@ static int read_metadata(struct dm_snapshot *s, struct persistent_info *pi)
 
 			/* Now populate the hash table from this data */
 			for (i = 0; i <= pi->highest_metadata_entry &&
-				     cow_block[entry].rsector_new != 0; i++) {
+			     cow_block[entry].rsector_new != 0; i++) {
 
-				chunk_t old = sector_to_chunk(s, le64_to_cpu(cow_block[entry].rsector_org));
-				chunk_t new = sector_to_chunk(s, le64_to_cpu(cow_block[entry].rsector_new));
+				chunk_t old =
+				    sector_to_chunk(s,
+						    le64_to_cpu(cow_block
+								[entry].
+								rsector_org));
+				chunk_t new =
+				    sector_to_chunk(s,
+						    le64_to_cpu(cow_block
+								[entry].
+								rsector_new));
 
 				if ((r = dm_add_exception(s, old, new)))
 					goto out;
 
 				first_free_sector = max(first_free_sector,
-							(unsigned long)(le64_to_cpu(cow_block[entry].rsector_new) +
-									s->chunk_size));
+							(unsigned
+							 long) (le64_to_cpu
+								(cow_block
+								 [entry].
+								 rsector_new) +
+								s->chunk_size));
 
 				/* Do we need to move onto the next page? */
 				if (++entry >= entries_per_page) {
 					entry = 0;
-					cow_block = page_address(read_iobuf->maplist[++map_page]);
+					cow_block =
+					    page_address(read_iobuf->
+							 maplist[++map_page]);
 				}
 			}
-		}
-		else {
+		} else {
 			DMERR("Error reading COW metadata for %s",
 			      kdevname(dev));
 			r = -1;
@@ -291,19 +301,18 @@ static int read_metadata(struct dm_snapshot *s, struct persistent_info *pi)
 	} while (cur_sector != 0);
 
 	pi->current_metadata_sector = last_sector +
-		                      map_page*PAGE_SIZE/SECTOR_SIZE +
-                                      entry / (SECTOR_SIZE /
-					       sizeof(struct disk_exception));
-	pi->current_metadata_entry  = entry;
+	    map_page * PAGE_SIZE / SECTOR_SIZE +
+	    entry / (SECTOR_SIZE / sizeof(struct disk_exception));
+	pi->current_metadata_entry = entry;
 	pi->current_metadata_number = i;
 	pi->next_free_sector = first_free_sector;
 
 	/* Copy last block into cow_iobuf */
-	memcpy(pi->disk_cow, (char *)((long)&cow_block[entry] -
-				      ((long)&cow_block[entry] &
-				       (blocksize-1))), blocksize);
+	memcpy(pi->disk_cow, (char *) ((long) &cow_block[entry] -
+				       ((long) &cow_block[entry] &
+					(blocksize - 1))), blocksize);
 
- out:
+      out:
 	unmap_kiobuf(read_iobuf);
 	free_kiovec(1, &read_iobuf);
 
@@ -325,15 +334,14 @@ static int read_header(struct dm_snapshot *s, struct persistent_info *pi)
 	unsigned long devsize;
 
 	/* Get it */
-	status = do_io(READ, pi->cow_iobuf, dev, 0L, blocksize/SECTOR_SIZE);
+	status = do_io(READ, pi->cow_iobuf, dev, 0L, blocksize / SECTOR_SIZE);
 	if (status != 0) {
-		DMERR("Snapshot dev %s error reading header",
-		      kdevname(dev));
+		DMERR("Snapshot dev %s error reading header", kdevname(dev));
 		return -1;
 	}
 
 	header = (struct snap_disk_header *)
-		page_address(pi->cow_iobuf->maplist[0]);
+	    page_address(pi->cow_iobuf->maplist[0]);
 
 	/*
 	 * Check the magic. It's OK if this fails, we just create
@@ -409,7 +417,7 @@ static int write_header(struct dm_snapshot *s, struct persistent_info *pi)
 		return -1;
 	}
 
-	if (alloc_iobuf_pages(head_iobuf, PAGE_SIZE/SECTOR_SIZE)) {
+	if (alloc_iobuf_pages(head_iobuf, PAGE_SIZE / SECTOR_SIZE)) {
 		DMERR("Error allocating iobuf space for header on %s",
 		      kdevname(dev));
 		free_kiovec(1, &head_iobuf);
@@ -417,18 +425,18 @@ static int write_header(struct dm_snapshot *s, struct persistent_info *pi)
 	}
 
 	header = (struct snap_disk_header *)
-		page_address(head_iobuf->maplist[0]);
+	    page_address(head_iobuf->maplist[0]);
 
-	header->magic       = cpu_to_le32(SNAP_MAGIC);
-	header->version     = cpu_to_le32(SNAPSHOT_DISK_VERSION);
-	header->chunk_size  = cpu_to_le32(s->chunk_size);
+	header->magic = cpu_to_le32(SNAP_MAGIC);
+	header->version = cpu_to_le32(SNAPSHOT_DISK_VERSION);
+	header->chunk_size = cpu_to_le32(s->chunk_size);
 	header->extent_size = cpu_to_le32(pi->extent_size);
-	header->full        = cpu_to_le32(pi->full);
+	header->full = cpu_to_le32(pi->full);
 
 	header->start_of_exceptions = cpu_to_le64(pi->start_of_exceptions);
 
 	/* Must write at least a full block */
-	status = do_io(WRITE, head_iobuf, dev, 0, blocksize/SECTOR_SIZE);
+	status = do_io(WRITE, head_iobuf, dev, 0, blocksize / SECTOR_SIZE);
 
 	unmap_kiobuf(head_iobuf);
 	free_kiovec(1, &head_iobuf);
@@ -458,7 +466,7 @@ static int init_persistent(struct exception_store *store, int blocksize,
 		pi->start_of_exceptions = pi->next_free_sector;
 		pi->next_free_sector += pi->extent_size;
 		pi->current_metadata_sector = pi->start_of_exceptions;
-		pi->current_metadata_entry  = 0;
+		pi->current_metadata_entry = 0;
 		pi->current_metadata_number = 0;
 
 		*context = "Unable to write snapshot header";
@@ -488,7 +496,7 @@ static int init_persistent(struct exception_store *store, int blocksize,
 
 	return 0;
 
- free_ret:
+      free_ret:
 	unmap_kiobuf(pi->cow_iobuf);
 	free_kiovec(1, &pi->cow_iobuf);
 	return -1;
@@ -532,8 +540,7 @@ static int prepare_persistent(struct exception_store *store,
 /*
  * Add a new exception entry to the on-disk metadata.
  */
-static int commit_persistent(struct exception_store *store,
-			     struct exception *e)
+static int commit_persistent(struct exception_store *store, struct exception *e)
 {
 	struct persistent_info *pi = get_info(store);
 	struct dm_snapshot *s = store->snap;
@@ -545,9 +552,9 @@ static int commit_persistent(struct exception_store *store,
 
 	/* Update copy of disk COW */
 	pi->disk_cow[i].rsector_org =
-		cpu_to_le64(chunk_to_sector(s, e->old_chunk));
+	    cpu_to_le64(chunk_to_sector(s, e->old_chunk));
 	pi->disk_cow[i].rsector_new =
-		cpu_to_le64(chunk_to_sector(s, e->new_chunk));
+	    cpu_to_le64(chunk_to_sector(s, e->new_chunk));
 
 	/* Have we filled this extent ? */
 	if (pi->current_metadata_number >= pi->highest_metadata_entry) {
@@ -564,7 +571,7 @@ static int commit_persistent(struct exception_store *store,
 
 	/* Commit to disk */
 	if (write_metadata(s, pi)) {
-		pi->full = 1; /* Failed. don't try again */
+		pi->full = 1;	/* Failed. don't try again */
 		return -1;
 	}
 
@@ -586,7 +593,7 @@ static int commit_persistent(struct exception_store *store,
 
 		} else {
 			int blocksize = get_hardsect_size(s->cow->dev);
-			pi->current_metadata_sector += blocksize/SECTOR_SIZE;
+			pi->current_metadata_sector += blocksize / SECTOR_SIZE;
 		}
 
 		pi->current_metadata_entry = 0;
@@ -607,7 +614,6 @@ static void drop_persistent(struct exception_store *store)
 	get_info(store)->full = 1;
 	write_header(store->snap, get_info(store));
 }
-
 
 int dm_create_persistent(struct exception_store *store, struct dm_snapshot *s,
 			 int blocksize, offset_t extent_size, void **error)
@@ -633,11 +639,11 @@ int dm_create_persistent(struct exception_store *store, struct dm_snapshot *s,
 
 	/* Leave the first block alone */
 	pi->next_free_sector = blocksize / SECTOR_SIZE;
-	pi->disk_cow  = NULL;
+	pi->disk_cow = NULL;
 
 	pi->highest_metadata_entry = (pi->extent_size * SECTOR_SIZE) /
-		sizeof(struct disk_exception) - 1;
-	pi->md_entries_per_block   = blocksize / sizeof(struct disk_exception);
+	    sizeof(struct disk_exception) - 1;
+	pi->md_entries_per_block = blocksize / sizeof(struct disk_exception);
 
 	/* Allocate and set up iobuf for metadata I/O */
 	*error = "Unable to allocate COW iovec";
@@ -662,7 +668,6 @@ int dm_create_persistent(struct exception_store *store, struct dm_snapshot *s,
 	return 0;
 }
 
-
 /*
  * Implementation of the store for non-persistent snapshots.
  */
@@ -686,8 +691,10 @@ int prepare_transient(struct exception_store *store, struct exception *e)
 	e->new_chunk = sector_to_chunk(store->snap, tc->next_free);
 	tc->next_free += store->snap->chunk_size;
 
+#if 0
 	DMWARN("Preparing exception, chunk %lu -> %lu.",
 	       (unsigned long) e->old_chunk, (unsigned long) e->new_chunk);
+#endif
 
 	return 0;
 }

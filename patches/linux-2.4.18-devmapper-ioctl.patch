@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.18/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.18/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Thu Mar 14 16:33:11 2002
++++ linux/drivers/md/Config.in	Tue Apr 23 22:39:09 2002
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.18/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.18/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.18/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Thu Mar 14 16:33:11 2002
++++ linux/drivers/md/Makefile	Tue Apr 23 22:39:09 2002
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -21,7 +21,7 @@ diff -ruN linux-2.4.18/drivers/md/Makefile linux/drivers/md/Makefile
  lvm-mod-objs	:= lvm.o lvm-snap.o lvm-fs.o
 +dm-mod-objs	:= dm.o dm-table.o dm-target.o dm-ioctl.o \
 +		   dm-linear.o dm-stripe.o dm-snapshot.o dm-exception-store.o \
-+		   dm-origin.o dm-mirror.o kcopyd.o
++		   kcopyd.o
  
  # Note: link order is important.  All raid personalities
  # and xor.o must come before md.o, as they each initialise 
@@ -38,73 +38,10 @@ diff -ruN linux-2.4.18/drivers/md/Makefile linux/drivers/md/Makefile
 +
 +dm-mod.o: $(dm-mod-objs)
 +	$(LD) -r -o $@ $(dm-mod-objs)
-diff -ruN linux-2.4.18/drivers/md/device-mapper.h linux/drivers/md/device-mapper.h
---- linux-2.4.18/drivers/md/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/device-mapper.h	Thu Mar  7 16:56:22 2002
-@@ -0,0 +1,59 @@
-+/*
-+ * Copyright (C) 2001 Sistina Software (UK) Limited.
-+ *
-+ * This file is released under the LGPL.
-+ */
-+
-+#ifndef _LINUX_DEVICE_MAPPER_H
-+#define _LINUX_DEVICE_MAPPER_H
-+
-+#define DM_DIR "device-mapper"	/* Slashes not supported */
-+#define DM_MAX_TYPE_NAME 16
-+#define DM_NAME_LEN 128
-+#define DM_UUID_LEN 129
-+
-+#ifdef __KERNEL__
-+
-+struct dm_table;
-+struct dm_dev;
-+typedef unsigned long offset_t;
-+
-+
-+/*
-+ * Prototypes for functions for a target
-+ */
-+typedef int (*dm_ctr_fn)(struct dm_table *t, offset_t b, offset_t l,
-+			 int argc, char **argv, void **context);
-+typedef void (*dm_dtr_fn)(struct dm_table *t, void *c);
-+typedef int (*dm_map_fn)(struct buffer_head *bh, int rw, void *context);
-+typedef int (*dm_err_fn)(struct buffer_head *bh, int rw, void *context);
-+
-+
-+void dm_error(const char *message);
-+
-+/*
-+ * Constructors should call these functions to ensure destination devices
-+ * are opened/closed correctly
-+ */
-+int dm_table_get_device(struct dm_table *t, const char *path,
-+			offset_t start, offset_t len, struct dm_dev **result);
-+void dm_table_put_device(struct dm_table *table, struct dm_dev *d);
-+
-+/*
-+ * Information about a target type
-+ */
-+struct target_type {
-+	const char *name;
-+	struct module *module;
-+	dm_ctr_fn ctr;
-+	dm_dtr_fn dtr;
-+	dm_map_fn map;
-+	dm_err_fn err;
-+};
-+
-+int dm_register_target(struct target_type *t);
-+int dm_unregister_target(struct target_type *t);
-+
-+#endif				/* __KERNEL__ */
-+
-+#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-exception-store.c
 --- linux-2.4.18/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-exception-store.c	Thu Mar 14 16:02:50 2002
-@@ -0,0 +1,683 @@
++++ linux/drivers/md/dm-exception-store.c	Tue Apr 23 21:54:20 2002
+@@ -0,0 +1,720 @@
 +/*
 + * dm-snapshot.c
 + *
@@ -115,7 +52,8 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +
 +#include "dm-snapshot.h"
 +
-+#if 0
++#define SECTOR_SIZE 512
++
 +/*
 + * Magic for persistent snapshots: "SnAp" - Feeble isn't it.
 + */
@@ -158,7 +96,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 + */
 +struct persistent_info {
 +	/* Size of extents used for COW blocks */
-+        long extent_size;
++	long extent_size;
 +
 +	/* Number of the next free sector for COW/data */
 +	unsigned long next_free_sector;
@@ -181,14 +119,16 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +	/* Number of metadata entries per hard disk block */
 +	int md_entries_per_block;
 +
++	int full;
++
 +	/* kiobuf for doing I/O to header & metadata */
 +	struct kiobuf *cow_iobuf;
 +
-+	 /*
-+	  * Disk extent with COW data in it. as an array of
-+	  * exception tables. The first one points to the next
-+	  * block of metadata or 0 if this is the last
-+	  */
++	/*
++	 * Disk extent with COW data in it. as an array of
++	 * exception tables. The first one points to the next
++	 * block of metadata or 0 if this is the last
++	 */
 +	struct disk_exception *disk_cow;
 +};
 +
@@ -218,6 +158,11 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +	uint32_t full;
 +};
 +
++static inline struct persistent_info *get_info(struct exception_store *store)
++{
++	return (struct persistent_info *) store->context;
++}
++
 +/*
 + * READ or WRITE some blocks to/from a device
 + */
@@ -245,11 +190,11 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +/*
 + * Write the latest COW metadata block.
 + */
-+static int write_metadata(struct snapshot_c *s, struct persistent_info *pi)
++static int write_metadata(struct dm_snapshot *s, struct persistent_info *pi)
 +{
-+	kdev_t dev = s->cow_dev->dev;
++	kdev_t dev = s->cow->dev;
 +	int blocksize = get_hardsect_size(dev);
-+	int writesize = blocksize/SECTOR_SIZE;
++	int writesize = blocksize / SECTOR_SIZE;
 +
 +	if (do_io(WRITE, pi->cow_iobuf, dev,
 +		  pi->current_metadata_sector, writesize) != 0) {
@@ -266,47 +211,49 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 + */
 +static int alloc_iobuf_pages(struct kiobuf *iobuf, int nr_sectors)
 +{
-+	int nr_pages, err, i;
++	int nr_pages, r, i;
 +
 +	if (nr_sectors > KIO_MAX_SECTORS)
 +		return -1;
 +
-+	nr_pages = nr_sectors / (PAGE_SIZE/SECTOR_SIZE);
-+	err = expand_kiobuf(iobuf, nr_pages);
-+	if (err) goto out;
++	nr_pages = nr_sectors / (PAGE_SIZE / SECTOR_SIZE);
++	r = expand_kiobuf(iobuf, nr_pages);
++	if (r)
++		goto out;
 +
-+	err = -ENOMEM;
++	r = -ENOMEM;
 +	iobuf->locked = 1;
 +	iobuf->nr_pages = 0;
 +	for (i = 0; i < nr_pages; i++) {
-+		struct page * page;
++		struct page *page;
 +
 +		page = alloc_page(GFP_KERNEL);
-+		if (!page) goto out;
++		if (!page)
++			goto out;
 +
 +		iobuf->maplist[i] = page;
 +		LockPage(page);
 +		iobuf->nr_pages++;
 +	}
++
 +	iobuf->offset = 0;
++	r = 0;
 +
-+	err = 0;
-+
-+out:
-+	return err;
++      out:
++	return r;
 +}
 +
 +/*
 + * Read on-disk COW metadata and populate the hash table.
 + */
-+static int read_metadata(struct snapshot_c *lc, struct persistent_info *pi)
++static int read_metadata(struct dm_snapshot *s, struct persistent_info *pi)
 +{
 +	int status;
 +	int i;
 +	int entry = 0;
 +	int map_page = 0;
 +	int nr_sectors = pi->extent_size;
-+	kdev_t dev = lc->cow_dev->dev;
++	kdev_t dev = s->cow->dev;
 +	int blocksize = get_hardsect_size(dev);
 +	unsigned long cur_sector = pi->start_of_exceptions;
 +	unsigned long last_sector;
@@ -314,7 +261,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +	int entries_per_page = PAGE_SIZE / sizeof(struct disk_exception);
 +	struct disk_exception *cow_block;
 +	struct kiobuf *read_iobuf;
-+	int err = 0;
++	int r = 0;
 +	int devsize = get_dev_size(dev);
 +
 +	/*
@@ -322,14 +269,12 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +	 * others are way too small.
 +	 */
 +	if (alloc_kiovec(1, &read_iobuf)) {
-+		DMERR("Error allocating iobuf for %s",
-+		      kdevname(dev));
++		DMERR("Error allocating iobuf for %s", kdevname(dev));
 +		return -1;
 +	}
 +
 +	if (alloc_iobuf_pages(read_iobuf, pi->extent_size)) {
-+		DMERR("Error allocating iobuf space for %s",
-+		      kdevname(dev));
++		DMERR("Error allocating iobuf space for %s", kdevname(dev));
 +		free_kiovec(1, &read_iobuf);
 +		return -1;
 +	}
@@ -341,16 +286,14 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +		if (cur_sector > devsize || cur_sector < first_free_sector) {
 +			DMERR("COW table chain pointers are inconsistent, "
 +			      "can't activate snapshot");
-+			err = -1;
-+			goto ret_free;
++			r = -1;
++			goto out;
 +		}
 +
 +		first_free_sector = max(first_free_sector,
 +					cur_sector + pi->extent_size);
-+		status = do_io(READ, read_iobuf, dev,
-+			       cur_sector, nr_sectors);
++		status = do_io(READ, read_iobuf, dev, cur_sector, nr_sectors);
 +		if (status == 0) {
-+
 +			map_page = 0;
 +			entry = 0;
 +
@@ -358,52 +301,66 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +
 +			/* Now populate the hash table from this data */
 +			for (i = 0; i <= pi->highest_metadata_entry &&
-+				     cow_block[entry].rsector_new != 0; i++) {
++			     cow_block[entry].rsector_new != 0; i++) {
 +
-+				struct exception *ex;
++				chunk_t old =
++				    sector_to_chunk(s,
++						    le64_to_cpu(cow_block
++								[entry].
++								rsector_org));
++				chunk_t new =
++				    sector_to_chunk(s,
++						    le64_to_cpu(cow_block
++								[entry].
++								rsector_new));
 +
-+				ex = add_exception(lc,
-+						   le64_to_cpu(cow_block[entry].rsector_org),
-+						   le64_to_cpu(cow_block[entry].rsector_new));
++				if ((r = dm_add_exception(s, old, new)))
++					goto out;
 +
 +				first_free_sector = max(first_free_sector,
-+							(unsigned long)(le64_to_cpu(cow_block[entry].rsector_new) +
-+									lc->chunk_size));
++							(unsigned
++							 long) (le64_to_cpu
++								(cow_block
++								 [entry].
++								 rsector_new) +
++								s->chunk_size));
 +
 +				/* Do we need to move onto the next page? */
 +				if (++entry >= entries_per_page) {
 +					entry = 0;
-+					cow_block = page_address(read_iobuf->maplist[++map_page]);
++					cow_block =
++					    page_address(read_iobuf->
++							 maplist[++map_page]);
 +				}
 +			}
-+		}
-+		else {
++		} else {
 +			DMERR("Error reading COW metadata for %s",
 +			      kdevname(dev));
-+			err = -1;
-+			goto ret_free;
++			r = -1;
++			goto out;
 +		}
 +		last_sector = cur_sector;
 +		cur_sector = le64_to_cpu(cow_block[entry].rsector_org);
 +
 +	} while (cur_sector != 0);
 +
-+	lc->persistent = 1;
 +	pi->current_metadata_sector = last_sector +
-+		                      map_page*PAGE_SIZE/SECTOR_SIZE +
-+                                      entry/(SECTOR_SIZE/sizeof(struct disk_exception));
-+	pi->current_metadata_entry  = entry;
++	    map_page * PAGE_SIZE / SECTOR_SIZE +
++	    entry / (SECTOR_SIZE / sizeof(struct disk_exception));
++	pi->current_metadata_entry = entry;
 +	pi->current_metadata_number = i;
 +	pi->next_free_sector = first_free_sector;
 +
 +	/* Copy last block into cow_iobuf */
-+	memcpy(pi->disk_cow, (char *)((long)&cow_block[entry] - ((long)&cow_block[entry] & (blocksize-1))), blocksize);
++	memcpy(pi->disk_cow, (char *) ((long) &cow_block[entry] -
++				       ((long) &cow_block[entry] &
++					(blocksize - 1))), blocksize);
 +
-+ ret_free:
++      out:
 +	unmap_kiobuf(read_iobuf);
 +	free_kiovec(1, &read_iobuf);
 +
-+	return err;
++	return r;
 +}
 +
 +/*
@@ -412,27 +369,27 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 + * error.  All fields are checked against the snapshot structure
 + * itself to make sure we don't corrupt the data.
 + */
-+static int read_header(struct snapshot_c *lc, struct persistent_info *pi)
++static int read_header(struct dm_snapshot *s, struct persistent_info *pi)
 +{
 +	int status;
 +	struct snap_disk_header *header;
-+	kdev_t dev = lc->cow_dev->dev;
++	kdev_t dev = s->cow->dev;
 +	int blocksize = get_hardsect_size(dev);
 +	unsigned long devsize;
 +
 +	/* Get it */
-+	status = do_io(READ, pi->cow_iobuf, dev, 0L, blocksize/SECTOR_SIZE);
++	status = do_io(READ, pi->cow_iobuf, dev, 0L, blocksize / SECTOR_SIZE);
 +	if (status != 0) {
-+		DMERR("Snapshot dev %s error reading header",
-+		      kdevname(dev));
++		DMERR("Snapshot dev %s error reading header", kdevname(dev));
 +		return -1;
 +	}
 +
-+	header = (struct snap_disk_header *) page_address(pi->cow_iobuf->maplist[0]);
++	header = (struct snap_disk_header *)
++	    page_address(pi->cow_iobuf->maplist[0]);
 +
 +	/*
-+	 * Check the magic. It's OK if this fails, we just create a new snapshot header
-+	 * and start from scratch
++	 * Check the magic. It's OK if this fails, we just create
++	 * a new snapshot header and start from scratch.
 +	 */
 +	if (le32_to_cpu(header->magic) != SNAP_MAGIC) {
 +		return 1;
@@ -440,54 +397,58 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +
 +	/* Check the version matches */
 +	if (le32_to_cpu(header->version) != SNAPSHOT_DISK_VERSION) {
-+		DMWARN("Snapshot dev %s version mismatch. Stored: %d, driver: %d",
-+		       kdevname(dev), le32_to_cpu(header->version), SNAPSHOT_DISK_VERSION);
++		DMWARN("Snapshot dev %s version mismatch. Stored: %d, "
++		       "driver: %d", kdevname(dev),
++		       le32_to_cpu(header->version), SNAPSHOT_DISK_VERSION);
 +		return -1;
 +	}
 +
 +	/* Check the chunk sizes match */
-+	if (le32_to_cpu(header->chunk_size) != lc->chunk_size) {
-+		DMWARN("Snapshot dev %s chunk size mismatch. Stored: %d, requested: %d",
-+		       kdevname(dev), le32_to_cpu(header->chunk_size), lc->chunk_size);
++	if (le32_to_cpu(header->chunk_size) != s->chunk_size) {
++		DMWARN("Snapshot dev %s chunk size mismatch. Stored: %d, "
++		       "requested: %ld", kdevname(dev),
++		       le32_to_cpu(header->chunk_size), s->chunk_size);
 +		return -1;
 +	}
 +
 +	/* Check the extent sizes match */
 +	if (le32_to_cpu(header->extent_size) != pi->extent_size) {
-+		DMWARN("Snapshot dev %s extent size mismatch. Stored: %d, requested: %ld",
-+		       kdevname(dev), le32_to_cpu(header->extent_size), pi->extent_size);
++		DMWARN("Snapshot dev %s extent size mismatch. Stored: %d, "
++		       "requested: %ld", kdevname(dev),
++		       le32_to_cpu(header->extent_size), pi->extent_size);
 +		return -1;
 +	}
 +
 +	/* Get the rest of the data */
 +	pi->start_of_exceptions = le64_to_cpu(header->start_of_exceptions);
 +	if (header->full) {
-+		DMWARN("Snapshot dev %s is full. It cannot be used", kdevname(dev));
-+		lc->full = 1;
++		DMWARN("Snapshot dev %s is full. It cannot be used",
++		       kdevname(dev));
 +		return -1;
 +	}
 +
 +	/* Validate against the size of the volume */
 +	devsize = get_dev_size(dev);
 +	if (pi->start_of_exceptions > devsize) {
-+		DMWARN("Snapshot metadata error on %s. start exceptions > device size (%ld > %ld)",
++		DMWARN("Snapshot metadata error on %s. start exceptions > "
++		       "device size (%ld > %ld)",
 +		       kdevname(dev), pi->start_of_exceptions, devsize);
 +		return -1;
 +	}
 +
 +	/* Read metadata into the hash table and update pointers */
-+	return read_metadata(lc, &lc->p_info);
++	return read_metadata(s, pi);
 +}
 +
 +/*
 + * Write (or update) the header. The only time we should need to
 + * do an update is when the snapshot becomes full.
 + */
-+static int write_header(struct snapshot_c *lc, struct persistent_info *pi)
++static int write_header(struct dm_snapshot *s, struct persistent_info *pi)
 +{
 +	struct snap_disk_header *header;
 +	struct kiobuf *head_iobuf;
-+	kdev_t dev = lc->cow_dev->dev;
++	kdev_t dev = s->cow->dev;
 +	int blocksize = get_hardsect_size(dev);
 +	int status;
 +
@@ -500,88 +461,69 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +		return -1;
 +	}
 +
-+	if (alloc_iobuf_pages(head_iobuf, PAGE_SIZE/SECTOR_SIZE)) {
-+		DMERR("Error allocating iobuf space for header on %s", kdevname(dev));
++	if (alloc_iobuf_pages(head_iobuf, PAGE_SIZE / SECTOR_SIZE)) {
++		DMERR("Error allocating iobuf space for header on %s",
++		      kdevname(dev));
 +		free_kiovec(1, &head_iobuf);
 +		return -1;
 +	}
 +
-+	header = (struct snap_disk_header *) page_address(head_iobuf->maplist[0]);
++	header = (struct snap_disk_header *)
++	    page_address(head_iobuf->maplist[0]);
 +
-+	header->magic       = cpu_to_le32(SNAP_MAGIC);
-+	header->version     = cpu_to_le32(SNAPSHOT_DISK_VERSION);
-+	header->chunk_size  = cpu_to_le32(lc->chunk_size);
++	header->magic = cpu_to_le32(SNAP_MAGIC);
++	header->version = cpu_to_le32(SNAPSHOT_DISK_VERSION);
++	header->chunk_size = cpu_to_le32(s->chunk_size);
 +	header->extent_size = cpu_to_le32(pi->extent_size);
-+	header->full        = cpu_to_le32(lc->full);
++	header->full = cpu_to_le32(pi->full);
 +
 +	header->start_of_exceptions = cpu_to_le64(pi->start_of_exceptions);
 +
 +	/* Must write at least a full block */
-+	status = do_io(WRITE, head_iobuf, dev, 0, blocksize/SECTOR_SIZE);
++	status = do_io(WRITE, head_iobuf, dev, 0, blocksize / SECTOR_SIZE);
 +
 +	unmap_kiobuf(head_iobuf);
 +	free_kiovec(1, &head_iobuf);
 +	return status;
 +}
 +
-+
-+static int init_persistent_snapshot(struct snapshot_c *lc, int blocksize,
-+				    unsigned long extent_size, void **context)
++static void destroy_persistent(struct exception_store *store)
 +{
-+	struct persistent_info *pi = &lc->p_info;
++	struct persistent_info *pi = get_info(store);
++	unmap_kiobuf(pi->cow_iobuf);
++	free_kiovec(1, &pi->cow_iobuf);
++	kfree(pi);
++}
 +
++static int init_persistent(struct exception_store *store, int blocksize,
++			   unsigned long extent_size, void **context)
++{
++	struct persistent_info *pi = get_info(store);
++	struct dm_snapshot *s = store->snap;
 +	int status;
-+	int i;
-+	int cow_sectors;
-+
-+	pi->extent_size = extent_size;
-+	pi->next_free_sector = blocksize / SECTOR_SIZE; /* Leave the first block alone */
-+	pi->disk_cow  = NULL;
-+
-+	pi->highest_metadata_entry = (pi->extent_size*SECTOR_SIZE) / sizeof(struct disk_exception) - 1;
-+	pi->md_entries_per_block   = blocksize / sizeof(struct disk_exception);
-+
-+	/* Allocate and set up iobuf for metadata I/O */
-+	*context = "Unable to allocate COW iovec";
-+	if (alloc_kiovec(1, &pi->cow_iobuf))
-+		return -1;
-+
-+	/* Allocate space for the COW buffer. It should be at least PAGE_SIZE. */
-+	cow_sectors = blocksize/SECTOR_SIZE + PAGE_SIZE/SECTOR_SIZE;
-+	*context = "Unable to allocate COW I/O buffer space";
-+	if (alloc_iobuf_pages(pi->cow_iobuf, cow_sectors)) {
-+		free_kiovec(1, &pi->cow_iobuf);
-+		return -1;
-+	}
-+
-+	for (i=0; i < pi->cow_iobuf->nr_pages; i++) {
-+		memset(page_address(pi->cow_iobuf->maplist[i]), 0, PAGE_SIZE);
-+	}
-+
-+	pi->disk_cow = page_address(pi->cow_iobuf->maplist[0]);
 +
 +	*context = "Error in disk header";
 +	/* Check for a header on disk and create a new one if not */
-+	if ( (status = read_header(lc, &lc->p_info)) == 1) {
++	if ((status = read_header(s, pi)) == 1) {
 +
 +		/* Write a new header */
 +		pi->start_of_exceptions = pi->next_free_sector;
 +		pi->next_free_sector += pi->extent_size;
 +		pi->current_metadata_sector = pi->start_of_exceptions;
-+		pi->current_metadata_entry  = 0;
++		pi->current_metadata_entry = 0;
 +		pi->current_metadata_number = 0;
 +
 +		*context = "Unable to write snapshot header";
-+		if (write_header(lc, &lc->p_info) != 0) {
++		if (write_header(s, pi) != 0) {
 +			DMERR("Error writing header to snapshot volume %s",
-+			      kdevname(lc->cow_dev->dev));
++			      kdevname(s->cow->dev));
 +			goto free_ret;
 +		}
 +
 +		/* Write a blank metadata block to the device */
-+		if (write_metadata(lc, &lc->p_info) != 0) {
-+			DMERR("Error writing initial COW table to snapshot volume %s",
-+			      kdevname(lc->cow_dev->dev));
++		if (write_metadata(s, pi) != 0) {
++			DMERR("Error writing initial COW table to "
++			      "snapshot volume %s", kdevname(s->cow->dev));
 +			goto free_ret;
 +		}
 +	}
@@ -598,47 +540,42 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +
 +	return 0;
 +
-+ free_ret:
++      free_ret:
 +	unmap_kiobuf(pi->cow_iobuf);
 +	free_kiovec(1, &pi->cow_iobuf);
 +	return -1;
 +}
 +
-+static void exit_persistent_snapshot(struct persistent_info *pi)
-+{
-+	unmap_kiobuf(pi->cow_iobuf);
-+	free_kiovec(1, &pi->cow_iobuf);
-+}
-+
 +/*
 + * Finds a suitable destination for the exception.
 + */
-+static int prepare_exception(struct snapshot_c *s,
-+			     struct inflight_exception *e)
++static int prepare_persistent(struct exception_store *store,
++			      struct exception *e)
 +{
++	struct persistent_info *pi = get_info(store);
++	struct dm_snapshot *s = store->snap;
 +	offset_t dev_size;
 +
 +	/*
 +	 * Check for full snapshot. Doing the size calculation here means that
 +	 * the COW device can be resized without us being told
 +	 */
-+	dev_size = get_dev_size(s->cow_dev->dev);
-+	if (s->p_info.next_free_sector + s->chunk_size >= dev_size) {
++	dev_size = get_dev_size(s->cow->dev);
++	if (pi->next_free_sector + s->chunk_size >= dev_size) {
 +		/* Snapshot is full, we can't use it */
 +		DMWARN("Snapshot %s is full (sec=%ld, size=%ld)",
-+		       kdevname(s->cow_dev->dev),
-+		       s->p_info.next_free_sector + s->chunk_size, dev_size);
-+		s->full = 1;
++		       kdevname(s->cow->dev),
++		       pi->next_free_sector + s->chunk_size, dev_size);
++		pi->full = 1;
 +
 +		/* Mark it full on the device */
-+		if (s->persistent)
-+			write_header(s, &s->p_info);
++		write_header(s, pi);
 +
 +		return -1;
 +
 +	} else {
-+		e->rsector_new = s->p_info.next_free_sector;
-+		s->p_info.next_free_sector += s->chunk_size;
++		e->new_chunk = sector_to_chunk(s, pi->next_free_sector);
++		pi->next_free_sector += s->chunk_size;
 +	}
 +
 +	return 0;
@@ -647,10 +584,10 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +/*
 + * Add a new exception entry to the on-disk metadata.
 + */
-+static int commit_exception(struct snapshot_c *sc,
-+			    unsigned long org, unsigned long new)
++static int commit_persistent(struct exception_store *store, struct exception *e)
 +{
-+	struct persistent_info *pi = &sc->p_info;
++	struct persistent_info *pi = get_info(store);
++	struct dm_snapshot *s = store->snap;
 +
 +	int i = pi->current_metadata_entry++;
 +	unsigned long next_md_block = pi->current_metadata_sector;
@@ -658,8 +595,10 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +	pi->current_metadata_number++;
 +
 +	/* Update copy of disk COW */
-+	pi->disk_cow[i].rsector_org = cpu_to_le64(org);
-+	pi->disk_cow[i].rsector_new = cpu_to_le64(new);
++	pi->disk_cow[i].rsector_org =
++	    cpu_to_le64(chunk_to_sector(s, e->old_chunk));
++	pi->disk_cow[i].rsector_new =
++	    cpu_to_le64(chunk_to_sector(s, e->new_chunk));
 +
 +	/* Have we filled this extent ? */
 +	if (pi->current_metadata_number >= pi->highest_metadata_entry) {
@@ -675,8 +614,8 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +	}
 +
 +	/* Commit to disk */
-+	if (write_metadata(sc, &sc->p_info)) {
-+		sc->full = 1; /* Failed. don't try again */
++	if (write_metadata(s, pi)) {
++		pi->full = 1;	/* Failed. don't try again */
 +		return -1;
 +	}
 +
@@ -697,41 +636,81 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +			pi->current_metadata_number = 0;
 +
 +		} else {
-+			int blocksize = get_hardsect_size(sc->cow_dev->dev);
-+			pi->current_metadata_sector += blocksize/SECTOR_SIZE;
++			int blocksize = get_hardsect_size(s->cow->dev);
++			pi->current_metadata_sector += blocksize / SECTOR_SIZE;
 +		}
 +
 +		pi->current_metadata_entry = 0;
-+		if (write_metadata(sc, &sc->p_info) != 0) {
-+			sc->full = 1;
++		if (write_metadata(s, pi) != 0) {
++			pi->full = 1;
 +			return -1;
 +		}
 +	}
++
 +	return 0;
 +}
 +
 +/*
 + * Sets the full flag in the metadata.  A quick hack for now.
 + */
-+static void invalidate_snapshot(struct snapshot_c *s)
++static void drop_persistent(struct exception_store *store)
 +{
-+	s->full = 1;
-+	if (s->persistent)
-+		write_header(s, &s->p_info);
++	get_info(store)->full = 1;
++	write_header(store->snap, get_info(store));
 +}
 +
-+
-+#endif
-+
-+
-+struct exception_store * dm_create_persistent(struct dm_snapshot *s,
-+					      int blocksize,
-+					      offset_t extent_size,
-+					      void **error)
++int dm_create_persistent(struct exception_store *store, struct dm_snapshot *s,
++			 int blocksize, offset_t extent_size, void **error)
 +{
-+	return NULL;
-+}
++	struct persistent_info *pi;
++	int i, r;
++	int cow_sectors;
 +
++	pi = kmalloc(sizeof(*pi), GFP_KERNEL);
++	if (!pi)
++		return -ENOMEM;
++
++	memset(store, 0, sizeof(*store));
++	store->destroy = destroy_persistent;
++	store->init = init_persistent;
++	store->prepare_exception = prepare_persistent;
++	store->commit_exception = commit_persistent;
++	store->drop_snapshot = drop_persistent;
++	store->snap = s;
++	store->context = pi;
++
++	pi->extent_size = extent_size;
++
++	/* Leave the first block alone */
++	pi->next_free_sector = blocksize / SECTOR_SIZE;
++	pi->disk_cow = NULL;
++
++	pi->highest_metadata_entry = (pi->extent_size * SECTOR_SIZE) /
++	    sizeof(struct disk_exception) - 1;
++	pi->md_entries_per_block = blocksize / sizeof(struct disk_exception);
++
++	/* Allocate and set up iobuf for metadata I/O */
++	*error = "Unable to allocate COW iovec";
++	if ((r = alloc_kiovec(1, &pi->cow_iobuf)))
++		return r;
++
++	/*
++	 * Allocate space for the COW buffer. It should be at
++	 * least PAGE_SIZE.
++	 */
++	cow_sectors = blocksize / SECTOR_SIZE + PAGE_SIZE / SECTOR_SIZE;
++	*error = "Unable to allocate COW I/O buffer space";
++	if ((r = alloc_iobuf_pages(pi->cow_iobuf, cow_sectors))) {
++		free_kiovec(1, &pi->cow_iobuf);
++		return r;
++	}
++
++	for (i = 0; i < pi->cow_iobuf->nr_pages; i++)
++		memset(page_address(pi->cow_iobuf->maplist[i]), 0, PAGE_SIZE);
++
++	pi->disk_cow = page_address(pi->cow_iobuf->maplist[0]);
++	return 0;
++}
 +
 +/*
 + * Implementation of the store for non-persistent snapshots.
@@ -743,7 +722,6 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +void destroy_transient(struct exception_store *store)
 +{
 +	kfree(store->context);
-+	kfree(store);
 +}
 +
 +int prepare_transient(struct exception_store *store, struct exception *e)
@@ -756,20 +734,19 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +
 +	e->new_chunk = sector_to_chunk(store->snap, tc->next_free);
 +	tc->next_free += store->snap->chunk_size;
++
++#if 0
++	DMWARN("Preparing exception, chunk %lu -> %lu.",
++	       (unsigned long) e->old_chunk, (unsigned long) e->new_chunk);
++#endif
++
 +	return 0;
 +}
 +
-+struct exception_store *dm_create_transient(struct dm_snapshot *s,
-+					    int blocksize, void **error)
++int dm_create_transient(struct exception_store *store,
++			struct dm_snapshot *s, int blocksize, void **error)
 +{
-+	struct exception_store *store;
 +	struct transient_c *tc;
-+
-+	store = kmalloc(sizeof(*store), GFP_KERNEL);
-+	if (!store) {
-+		DMWARN("out of memory.");
-+		return NULL;
-+	}
 +
 +	memset(store, 0, sizeof(*store));
 +	store->destroy = destroy_transient;
@@ -777,21 +754,18 @@ diff -ruN linux-2.4.18/drivers/md/dm-exception-store.c linux/drivers/md/dm-excep
 +	store->snap = s;
 +
 +	tc = kmalloc(sizeof(struct transient_c), GFP_KERNEL);
-+	if (!tc) {
-+		kfree(store);
-+		return NULL;
-+	}
++	if (!tc)
++		return -ENOMEM;
 +
 +	tc->next_free = 0;
 +	store->context = tc;
 +
-+	return store;
++	return 0;
 +}
-+
 diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 --- linux-2.4.18/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Thu Mar 14 15:59:31 2002
-@@ -0,0 +1,557 @@
++++ linux/drivers/md/dm-ioctl.c	Tue Apr 23 21:51:57 2002
+@@ -0,0 +1,588 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -804,9 +778,9 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +#include <linux/dm-ioctl.h>
 +#include <linux/init.h>
 +
-+static void free_params(struct dm_ioctl *p)
++static void free_params(struct dm_ioctl *param)
 +{
-+	vfree(p);
++	vfree(param);
 +}
 +
 +static int version(struct dm_ioctl *user)
@@ -814,7 +788,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	return copy_to_user(user, DM_DRIVER_VERSION, sizeof(DM_DRIVER_VERSION));
 +}
 +
-+static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
++static int copy_params(struct dm_ioctl *user, struct dm_ioctl **param)
 +{
 +	struct dm_ioctl tmp, *dmi;
 +
@@ -822,7 +796,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		return -EFAULT;
 +
 +	if (strcmp(DM_IOCTL_VERSION, tmp.version)) {
-+		DMWARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
++		DMWARN("struct dm_ioctl version incompatible");
 +		return -EINVAL;
 +	}
 +
@@ -838,7 +812,25 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		return -EFAULT;
 +	}
 +
-+	*result = dmi;
++	*param = dmi;
++	return 0;
++}
++
++static int validate_params(uint cmd, struct dm_ioctl *param)
++{
++	/* Unless creating, either name of uuid but not both */
++	if (cmd != DM_CREATE_CMD) {
++		if ((!*param->uuid && !*param->name) ||
++		    (*param->uuid && *param->name)) {
++			DMWARN("one of name or uuid must be supplied");
++			return -EINVAL;
++		}
++	}
++
++	/* Ensure strings are terminated */
++	param->name[DM_NAME_LEN - 1] = '\0';
++	param->uuid[DM_UUID_LEN - 1] = '\0';
++
 +	return 0;
 +}
 +
@@ -1002,7 +994,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	strncpy(param->name, md->name, sizeof(param->name));
 +
 +	if (md->uuid)
-+		strncpy(param->uuid, md->uuid, sizeof(param->uuid));
++		strncpy(param->uuid, md->uuid, sizeof(param->uuid) - 1);
 +	else
 +		param->uuid[0] = '\0';
 +
@@ -1012,26 +1004,37 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +}
 +
 +/*
++ * Always use UUID for lookups if it's present, otherwise use name.
++ */
++static inline char *lookup_name(struct dm_ioctl *param)
++{
++	return (*param->uuid) ? param->uuid : param->name;
++}
++
++static inline int lookup_type(struct dm_ioctl *param)
++{
++	return (*param->uuid) ? DM_LOOKUP_BY_UUID : DM_LOOKUP_BY_NAME;
++}
++
++/*
 + * Copies device info back to user space, used by
 + * the create and info ioctls.
 + */
 +static int info(struct dm_ioctl *param, struct dm_ioctl *user)
 +{
-+	int minor;
 +	struct mapped_device *md;
 +
 +	param->flags = 0;
 +
-+	md = dm_get_name_r(param->name);
++	md = dm_get_name_r(lookup_name(param), lookup_type(param));
 +	if (!md)
 +		/*
 +		 * Device not found - returns cleared exists flag.
 +		 */
 +		goto out;
 +
-+	minor = MINOR(md->dev);
 +	__info(md, param);
-+	dm_put_r(minor);
++	dm_put_r(md);
 +
 +      out:
 +	return results_to_user(user, param, NULL, 0);
@@ -1042,16 +1045,15 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 + */
 +static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
 +{
-+	int minor, count, r;
++	int count, r;
 +	struct mapped_device *md;
 +	struct list_head *tmp;
 +	size_t len = 0;
 +	struct dm_target_deps *deps = NULL;
 +
-+	md = dm_get_name_r(param->name);
++	md = dm_get_name_r(lookup_name(param), lookup_type(param));
 +	if (!md)
 +		goto out;
-+	minor = MINOR(md->dev);
 +
 +	/*
 +	 * Setup the basic dm_ioctl structure.
@@ -1072,7 +1074,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	len = sizeof(*deps) + (sizeof(*deps->dev) * count);
 +	deps = kmalloc(len, GFP_KERNEL);
 +	if (!deps) {
-+		dm_put_r(minor);
++		dm_put_r(md);
 +		return -ENOMEM;
 +	}
 +
@@ -1085,7 +1087,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
 +		deps->dev[count++] = kdev_t_to_nr(dd->dev);
 +	}
-+	dm_put_r(minor);
++	dm_put_r(md);
 +
 +      out:
 +	r = results_to_user(user, param, deps, len);
@@ -1096,8 +1098,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 +{
-+	int r;
-+	struct mapped_device *md;
++	int r, ro;
 +	struct dm_table *t;
 +	int minor;
 +
@@ -1112,22 +1113,15 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	}
 +
 +	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
-+	    MINOR(to_kdev_t(param->dev)) : -1;
++		MINOR(to_kdev_t(param->dev)) : -1;
 +
-+	r = dm_create(param->name, param->uuid, minor, t);
++	ro = (param->flags & DM_READONLY_FLAG) ? 1 : 0;
++
++	r = dm_create(param->name, param->uuid, minor, ro, t);
 +	if (r) {
 +		dm_table_destroy(t);
 +		return r;
 +	}
-+
-+	md = dm_get_name_w(param->name);
-+	if (!md)
-+		/* shouldn't get here */
-+		return -EINVAL;
-+
-+	minor = MINOR(md->dev);
-+	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
-+	dm_put_w(minor);
 +
 +	r = info(param, user);
 +	return r;
@@ -1135,39 +1129,39 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +static int remove(struct dm_ioctl *param)
 +{
-+	int r, minor;
++	int r;
 +	struct mapped_device *md;
 +
-+	md = dm_get_name_w(param->name);
++	md = dm_get_name_w(lookup_name(param), lookup_type(param));
 +	if (!md)
 +		return -ENXIO;
 +
-+	minor = MINOR(md->dev);
 +	r = dm_destroy(md);
-+	dm_put_w(minor);
++	dm_put_w(md);
++	if (!r)
++		kfree(md);
 +
 +	return r;
 +}
 +
 +static int suspend(struct dm_ioctl *param)
 +{
-+	int r, minor;
++	int r;
 +	struct mapped_device *md;
 +
-+	md = dm_get_name_w(param->name);
++	md = dm_get_name_w(lookup_name(param), lookup_type(param));
 +	if (!md)
 +		return -ENXIO;
 +
-+	minor = MINOR(md->dev);
 +	r = (param->flags & DM_SUSPEND_FLAG) ? dm_suspend(md) : dm_resume(md);
-+	dm_put_w(minor);
++	dm_put_w(md);
 +
 +	return r;
 +}
 +
-+static int reload(struct dm_ioctl *param)
++static int reload(struct dm_ioctl *param, struct dm_ioctl *user)
 +{
-+	int r, minor;
++	int r;
 +	struct mapped_device *md;
 +	struct dm_table *t;
 +
@@ -1181,24 +1175,24 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		return r;
 +	}
 +
-+	md = dm_get_name_w(param->name);
++	md = dm_get_name_w(lookup_name(param), lookup_type(param));
 +	if (!md) {
 +		dm_table_destroy(t);
 +		return -ENXIO;
 +	}
 +
-+	minor = MINOR(md->dev);
-+
 +	r = dm_swap_table(md, t);
 +	if (r) {
-+		dm_put_w(minor);
++		dm_put_w(md);
 +		dm_table_destroy(t);
 +		return r;
 +	}
 +
 +	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
-+	dm_put_w(minor);
-+	return 0;
++	dm_put_w(md);
++
++	r = info(param, user);
++	return r;
 +}
 +
 +static int rename(struct dm_ioctl *param)
@@ -1207,7 +1201,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +	if (valid_str(newname, (void *) param,
 +		      (void *) param + param->data_size) ||
-+	    dm_set_name(param->name, newname)) {
++	    dm_set_name(lookup_name(param), lookup_type(param), newname)) {
 +		DMWARN("Invalid new logical volume name supplied.");
 +		return -EINVAL;
 +	}
@@ -1233,53 +1227,60 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +}
 +
 +static int ctl_ioctl(struct inode *inode, struct file *file,
-+		     uint command, ulong a)
++		     uint command, ulong u)
 +{
-+	int r;
-+	struct dm_ioctl *p;
++	int r = 0;
++	struct dm_ioctl *param;
++	struct dm_ioctl *user = (struct dm_ioctl *) u;
 +	uint cmd = _IOC_NR(command);
 +
++	/* Process commands without params first - always return version */
 +	switch (cmd) {
 +	case DM_REMOVE_ALL_CMD:
 +		dm_destroy_all();
 +	case DM_VERSION_CMD:
-+		return version((struct dm_ioctl *) a);
++		return version(user);
 +	default:
 +		break;
 +	}
 +
-+	r = copy_params((struct dm_ioctl *) a, &p);
++	r = copy_params(user, &param);
 +	if (r)
-+		return r;
++		goto err;
 +
-+	/* FIXME: Change to use size 0 next time ioctl version gets changed */
++	r = validate_params(cmd, param);
++	if (r) {
++		free_params(param);
++		goto err;
++	}
++
 +	switch (cmd) {
-+	case DM_CREATE_CMD:
-+		r = create(p, (struct dm_ioctl *) a);
-+		break;
-+
-+	case DM_REMOVE_CMD:
-+		r = remove(p);
++	case DM_INFO_CMD:
++		r = info(param, user);
 +		break;
 +
 +	case DM_SUSPEND_CMD:
-+		r = suspend(p);
++		r = suspend(param);
++		break;
++
++	case DM_CREATE_CMD:
++		r = create(param, user);
 +		break;
 +
 +	case DM_RELOAD_CMD:
-+		r = reload(p);
++		r = reload(param, user);
 +		break;
 +
-+	case DM_INFO_CMD:
-+		r = info(p, (struct dm_ioctl *) a);
-+		break;
-+
-+	case DM_DEPS_CMD:
-+		r = dep(p, (struct dm_ioctl *) a);
++	case DM_REMOVE_CMD:
++		r = remove(param);
 +		break;
 +
 +	case DM_RENAME_CMD:
-+		r = rename(p);
++		r = rename(param);
++		break;
++
++	case DM_DEPS_CMD:
++		r = dep(param, user);
 +		break;
 +
 +	default:
@@ -1287,7 +1288,11 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		r = -EINVAL;
 +	}
 +
-+	free_params(p);
++	free_params(param);
++	return r;
++
++      err:
++	version(user);
 +	return r;
 +}
 +
@@ -1344,7 +1349,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	return r;
 +}
 +
-+void __exit dm_interface_exit(void)
++void dm_interface_exit(void)
 +{
 +	if (misc_deregister(&_dm_misc) < 0)
 +		DMERR("misc_deregister failed for control device");
@@ -1460,8 +1465,8 @@ diff -ruN linux-2.4.18/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +
 diff -ruN linux-2.4.18/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
 --- linux-2.4.18/drivers/md/dm-mirror.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-mirror.c	Thu Mar 14 15:53:19 2002
-@@ -0,0 +1,295 @@
++++ linux/drivers/md/dm-mirror.c	Tue Apr 23 22:13:47 2002
+@@ -0,0 +1,299 @@
 +/*
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
 + *
@@ -1469,6 +1474,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
 + */
 +
 +#include "dm.h"
++#include "kcopyd.h"
 +
 +#include <linux/module.h>
 +#include <linux/init.h>
@@ -1498,7 +1504,6 @@ diff -ruN linux-2.4.18/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
 +	int error;
 +};
 +
-+
 +/* Called when a duplicating I/O has finished */
 +static void mirror_end_io(struct buffer_head *bh, int uptodate)
 +{
@@ -1519,8 +1524,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
 +	if (dbh) {
 +		*dbh = *bh;
 +		dbh->b_rdev = mc->todev->dev;
-+		dbh->b_rsector = bh->b_rsector - mc->from_delta
-+			+ mc->to_delta;
++		dbh->b_rsector = bh->b_rsector - mc->from_delta + mc->to_delta;
 +		dbh->b_end_io = mirror_end_io;
 +		dbh->b_private = mc;
 +
@@ -1584,6 +1588,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
 +	char *value;
 +	int priority = MIRROR_COPY_PRIORITY;
 +	int throttle;
++	struct kcopyd_region src, dest;
 +
 +	if (argc <= 4) {
 +		*context = "dm-mirror: Not enough arguments";
@@ -1644,10 +1649,15 @@ diff -ruN linux-2.4.18/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
 +	*context = lc;
 +
 +	/* Tell kcopyd to do the biz */
-+	if (dm_blockcopy(offset1, offset2,
-+			 l - offset1,
-+			 lc->fromdev->dev, lc->todev->dev,
-+			 priority, 0, copy_callback, lc)) {
++	src.dev = lc->fromdev->dev;
++	src.sector = offset1;
++	src.count = l - offset1;
++
++	dest.dev = lc->todev->dev;
++	dest.sector = offset2;
++	dest.count = l - offset1;
++
++	if (kcopyd_copy(&src, &dest, priority, 0, copy_callback, lc)) {
 +		DMERR("block copy call failed");
 +		dm_table_put_device(t, lc->fromdev);
 +		dm_table_put_device(t, lc->todev);
@@ -1728,7 +1738,6 @@ diff -ruN linux-2.4.18/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
 +		return -1;
 +	}
 +
-+
 +	r = dm_register_target(&mirror_target);
 +	if (r < 0) {
 +		DMERR("mirror: register failed %d", r);
@@ -1757,119 +1766,10 @@ diff -ruN linux-2.4.18/drivers/md/dm-mirror.c linux/drivers/md/dm-mirror.c
 + * c-file-style: "linux"
 + * End:
 + */
-diff -ruN linux-2.4.18/drivers/md/dm-origin.c linux/drivers/md/dm-origin.c
---- linux-2.4.18/drivers/md/dm-origin.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-origin.c	Wed Mar 13 17:28:40 2002
-@@ -0,0 +1,105 @@
-+/*
-+ * dm-origin.c
-+ *
-+ * Copyright (C) 2001-2002 Sistina Software (UK) Limited.
-+ *
-+ * This file is released under the GPL.
-+ */
-+
-+
-+#include <linux/config.h>
-+#include <linux/module.h>
-+#include <linux/init.h>
-+#include <linux/slab.h>
-+#include <linux/fs.h>
-+#include <linux/list.h>
-+#include <linux/blkdev.h>
-+#include <linux/device-mapper.h>
-+
-+#include "dm.h"
-+
-+/*
-+ * Origin: maps a linear range of a device, with hooks for snapshotting.
-+ */
-+
-+/*
-+ * Construct an origin mapping: <dev_path>
-+ * The context for an origin is merely a 'struct dm_dev *'
-+ * pointing to the real device.
-+ */
-+static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
-+		      int argc, char **argv, void **context)
-+{
-+	int r;
-+	struct dm_dev *dev;
-+
-+	if (argc != 1) {
-+		*context = "dm-origin: incorrect number of arguments";
-+		return -EINVAL;
-+	}
-+
-+	r = dm_table_get_device(t, argv[0], 0, l, &dev);
-+	if (r) {
-+		*context = "Cannot get target device";
-+		return r;
-+	}
-+
-+	*context = dev;
-+
-+	return 0;
-+}
-+
-+static void origin_dtr(struct dm_table *t, void *c)
-+{
-+	struct dm_dev *dev = (struct dm_dev *) c;
-+
-+	dm_table_put_device(t, dev);
-+}
-+
-+static int origin_map(struct buffer_head *bh, int rw, void *context)
-+{
-+	struct dm_dev *dev = (struct dm_dev *) context;
-+
-+	bh->b_rdev = dev->dev;
-+
-+	/* Only tell snapshots if this is a write */
-+	return (rw == WRITE) ? dm_do_snapshot(dev, bh) : 1;
-+}
-+
-+static struct target_type origin_target = {
-+	name:	"snapshot-origin",
-+	module:	THIS_MODULE,
-+	ctr:	origin_ctr,
-+	dtr:	origin_dtr,
-+	map:	origin_map,
-+	err:	NULL
-+};
-+
-+int __init dm_origin_init(void)
-+{
-+	int r = dm_register_target(&origin_target);
-+
-+	if (r < 0)
-+		DMERR("Device mapper: Origin: register failed %d\n", r);
-+
-+	return r;
-+}
-+
-+void dm_origin_exit(void)
-+{
-+	int r = dm_unregister_target(&origin_target);
-+
-+	if (r < 0)
-+		DMERR("Device mapper: Origin: unregister failed %d\n", r);
-+}
-+
-+/*
-+ * Overrides for Emacs so that we follow Linus's tabbing style.
-+ * Emacs will notice this stuff at the end of the file and automatically
-+ * adjust the settings for this buffer only.  This must remain at the end
-+ * of the file.
-+ * ---------------------------------------------------------------------------
-+ * Local variables:
-+ * c-file-style: "linux"
-+ * End:
-+ */
 diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 --- linux-2.4.18/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.c	Thu Mar 14 16:08:52 2002
-@@ -0,0 +1,862 @@
++++ linux/drivers/md/dm-snapshot.c	Tue Apr 23 22:07:45 2002
+@@ -0,0 +1,1080 @@
 +/*
 + * dm-snapshot.c
 + *
@@ -1885,9 +1785,20 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +#include <linux/list.h>
 +#include <linux/fs.h>
 +#include <linux/blkdev.h>
++#include <linux/mempool.h>
 +#include <linux/device-mapper.h>
 +
 +#include "dm-snapshot.h"
++#include "kcopyd.h"
++
++/*
++ * FIXME: Remove this before release.
++ */
++#if 0
++#define DMDEBUG(x...) DMWARN( ## x)
++#else
++#define DMDEBUG(x...)
++#endif
 +
 +/*
 + * Hard sector size used all over the kernel
@@ -1902,19 +1813,37 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +struct pending_exception {
 +	struct exception e;
 +
-+	/* Chain of WRITE buffer heads to submit when this COW has completed */
-+	struct buffer_head *bh;
++	/*
++	 * Origin buffers waiting for this to complete are held
++	 * in a list (using b_reqnext).
++	 */
++	struct buffer_head *origin_bhs;
++	struct buffer_head *snapshot_bhs;
++
++	/*
++	 * Other pending_exceptions that are processing this
++	 * chunk.  When this list is empty, we know we can
++	 * complete the origins.
++	 */
++	struct list_head siblings;
 +
 +	/* Pointer back to snapshot context */
 +	struct dm_snapshot *snap;
++
++	/*
++	 * 1 indicates the exception has already been sent to
++	 * kcopyd.
++	 */
++	int started;
 +};
 +
 +/*
 + * Hash table mapping origin volumes to lists of snapshots and
 + * a lock to protect it
 + */
-+static kmem_cache_t *exception_cachep;
-+static kmem_cache_t *pending_cachep;
++static kmem_cache_t *exception_cache;
++static kmem_cache_t *pending_cache;
++static mempool_t *pending_pool;
 +
 +/*
 + * One of these per registered origin, held in the snapshot_origins hash
@@ -1928,6 +1857,18 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +	/* List of snapshots for this origin */
 +	struct list_head snapshots;
 +};
++
++/*
++ * Useful macro for running the store functions.  Use
++ * store_int_fn if you want the return value.
++ */
++#define store_fn(snap, fn, args...) \
++    if ((snap)->store. ## fn) \
++        (snap)->store. ## fn ( &(snap)->store , ## args )
++
++#define store_int_fn(snap, fn, args...) \
++    (((snap)->store. ## fn) ? \
++        ((snap)->store. ## fn ( &(snap)->store , ## args )) : 0)
 +
 +/*
 + * Size of the hash table for origin volumes. If we make this
@@ -2056,7 +1997,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +	return 0;
 +}
 +
-+static void exit_exception_table(struct exception_table *et, kmem_cache_t *mem)
++static void exit_exception_table(struct exception_table *et, kmem_cache_t * mem)
 +{
 +	struct list_head *slot, *entry, *temp;
 +	struct exception *ex;
@@ -2116,78 +2057,36 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +
 +static inline struct exception *alloc_exception(void)
 +{
-+	return kmem_cache_alloc(exception_cachep, GFP_NOIO);
-+}
-+
-+static inline struct pending_exception *alloc_pending_exception(void)
-+{
-+	return kmem_cache_alloc(pending_cachep, GFP_NOIO);
++	return kmem_cache_alloc(exception_cache, GFP_NOIO);
 +}
 +
 +static inline void free_exception(struct exception *e)
 +{
-+	kmem_cache_free(exception_cachep, e);
++	kmem_cache_free(exception_cache, e);
++}
++
++static inline struct pending_exception *alloc_pending_exception(void)
++{
++	return mempool_alloc(pending_pool, GFP_NOIO);
 +}
 +
 +static inline void free_pending_exception(struct pending_exception *pe)
 +{
-+	kmem_cache_free(pending_cachep, pe);
++	mempool_free(pe, pending_pool);
 +}
 +
-+/*
-+ * Called when the copy I/O has finished
-+ */
-+static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
++int dm_add_exception(struct dm_snapshot *s, chunk_t old, chunk_t new)
 +{
-+	struct pending_exception *pe = (struct pending_exception *) context;
-+	struct dm_snapshot *s = pe->snap;
 +	struct exception *e;
 +
-+	if (reason == COPY_CB_COMPLETE) {
-+		struct buffer_head *bh;
++	e = alloc_exception();
++	if (!e)
++		return -ENOMEM;
 +
-+		/* Update the metadata if we are persistent */
-+		if (s->store->commit_exception)
-+			s->store->commit_exception(s->store, &pe->e);
-+
-+		e = alloc_exception();
-+		if (!e) {
-+			/* FIXME: what do we do now ? */
-+			return;
-+		}
-+
-+		/* Add a proper exception,
-+		   and remove the inflight exception from the list */
-+		down_write(&pe->snap->lock);
-+
-+		memcpy(e, &pe->e, sizeof(*e));
-+		insert_exception(&s->complete, e);
-+		remove_exception(&pe->e);
-+
-+		/* Submit any pending write BHs */
-+		bh = pe->bh;
-+		pe->bh = NULL;
-+		up_write(&pe->snap->lock);
-+
-+		kmem_cache_free(pending_cachep, pe);
-+
-+		while (bh) {
-+			struct buffer_head *nextbh = bh->b_reqnext;
-+			bh->b_reqnext = NULL;
-+			generic_make_request(WRITE, bh);
-+			bh = nextbh;
-+		}
-+	}
-+
-+	/* Read/write error - snapshot is unusable */
-+	if (reason == COPY_CB_FAILED_WRITE || reason == COPY_CB_FAILED_READ) {
-+		DMERR("Error reading/writing snapshot");
-+
-+		if (pe->snap->store->drop_snapshot)
-+			pe->snap->store->drop_snapshot(pe->snap->store);
-+		remove_exception(&pe->e);
-+		kmem_cache_free(pending_cachep, pe);
-+	}
++	e->old_chunk = old;
++	e->new_chunk = new;
++	insert_exception(&s->complete, e);
++	return 0;
 +}
 +
 +/*
@@ -2246,7 +2145,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +		hash_size = 64;
 +
 +	if (init_exception_table(&s->pending, hash_size)) {
-+		exit_exception_table(&s->complete, exception_cachep);
++		exit_exception_table(&s->complete, exception_cache);
 +		return -ENOMEM;
 +	}
 +
@@ -2319,7 +2218,6 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +	r = dm_table_get_device(t, origin_path, 0, 0, &s->origin);
 +	if (r) {
 +		*context = "Cannot get origin device";
-+		r = -EINVAL;
 +		goto bad_free;
 +	}
 +
@@ -2327,7 +2225,6 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +	if (r) {
 +		dm_table_put_device(t, s->origin);
 +		*context = "Cannot get COW device";
-+		r = -EINVAL;
 +		goto bad_free;
 +	}
 +
@@ -2368,7 +2265,9 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +	s->chunk_size = chunk_size;
 +	s->chunk_mask = chunk_size - 1;
 +	for (s->chunk_shift = 0; chunk_size;
-+	     s->chunk_shift++, chunk_size >>= 1) ;
++	     s->chunk_shift++, chunk_size >>= 1)
++		;
++	s->chunk_shift--;
 +
 +	s->valid = 1;
 +	init_rwsem(&s->lock);
@@ -2386,31 +2285,30 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +	 */
 +#if 0
 +	if ((*persistent & 0x5f) == 'P')
-+		s->store = dm_create_persistent(s, blocksize,
-+						extent_size, context);
++		r = dm_create_persistent(&s->store, s, blocksize,
++					 extent_size, context);
 +	else
 +#endif
-+		s->store = dm_create_transient(s, blocksize, context);
++		r = dm_create_transient(&s->store, s, blocksize, context);
 +
-+	if (!s->store) {
++	if (r) {
 +		*context = "Couldn't create exception store";
 +		r = -EINVAL;
 +		goto bad_free1;
 +	}
 +
 +	/* Allocate the COW iobuf and set associated variables */
-+	if (s->store->init &&
-+	    s->store->init(s->store, blocksize, extent_size, context)) {
++	r = store_int_fn(s, init, blocksize, extent_size, context);
++	if (r) {
 +		*context = "Couldn't initialise exception store";
-+		r = -ENOMEM;
 +		goto bad_free1;
 +	}
 +
 +	/* Flush IO to the origin device */
-+	/* FIXME: what does sct have against fsync_dev ? */
-+	fsync_dev(s->origin->dev);
 +#if LVM_VFS_ENHANCEMENT
 +	fsync_dev_lockfs(s->origin->dev);
++#else
++	fsync_dev(s->origin->dev);
 +#endif
 +
 +	/* Add snapshot to the list of snapshots for this origin */
@@ -2419,7 +2317,6 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +		*context = "Cannot register snapshot origin";
 +		goto bad_free2;
 +	}
-+
 +#if LVM_VFS_ENHANCEMENT
 +	unlockfs(s->origin->dev);
 +#endif
@@ -2427,22 +2324,21 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +	*context = s;
 +	return 0;
 +
-+ bad_free2:
-+	if (s->store->destroy)
-+		s->store->destroy(s->store);
++      bad_free2:
++	store_fn(s, destroy);
 +
-+ bad_free1:
-+	exit_exception_table(&s->pending, pending_cachep);
-+	exit_exception_table(&s->complete, exception_cachep);
++      bad_free1:
++	exit_exception_table(&s->pending, pending_cache);
++	exit_exception_table(&s->complete, exception_cache);
 +
-+ bad_putdev:
++      bad_putdev:
 +	dm_table_put_device(t, s->cow);
 +	dm_table_put_device(t, s->origin);
 +
-+ bad_free:
++      bad_free:
 +	kfree(s);
 +
-+ bad:
++      bad:
 +	return r;
 +}
 +
@@ -2452,12 +2348,11 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +
 +	unregister_snapshot(s);
 +
-+	exit_exception_table(&s->pending, pending_cachep);
-+	exit_exception_table(&s->complete, exception_cachep);
++	exit_exception_table(&s->pending, pending_cache);
++	exit_exception_table(&s->complete, exception_cache);
 +
 +	/* Deallocate memory used */
-+	if (s->store->destroy)
-+		s->store->destroy(s->store);
++	store_fn(s, destroy);
 +
 +	dm_table_put_device(t, s->origin);
 +	dm_table_put_device(t, s->cow);
@@ -2465,59 +2360,173 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +}
 +
 +/*
-+ * Performs a new copy on write.
++ * We hold lists of buffer_heads, using the b_reqnext field.
 + */
-+static int new_exception(struct dm_snapshot *s, struct buffer_head *bh)
++static void queue_buffer(struct buffer_head **queue, struct buffer_head *bh)
++{
++	bh->b_reqnext = *queue;
++	*queue = bh;
++}
++
++/*
++ * Flush a list of buffers.
++ */
++static void flush_buffers(struct buffer_head *bh)
++{
++	struct buffer_head *n;
++
++	DMDEBUG("begin flush");
++	while (bh) {
++		n = bh->b_reqnext;
++		bh->b_reqnext = NULL;
++		DMDEBUG("flushing %p", bh);
++		generic_make_request(WRITE, bh);
++		bh = n;
++	}
++
++	run_task_queue(&tq_disk);
++}
++
++/*
++ * Error a list of buffers.
++ */
++static void error_buffers(struct buffer_head *bh)
++{
++	struct buffer_head *n;
++
++	while (bh) {
++		n = bh->b_reqnext;
++		bh->b_reqnext = NULL;
++		buffer_IO_error(bh);
++		bh = n;
++	}
++}
++
++/*
++ * Called when the copy I/O has finished
++ */
++static void copy_callback(int err, void *context)
++{
++	struct pending_exception *pe = (struct pending_exception *) context;
++	struct dm_snapshot *s = pe->snap;
++	struct exception *e;
++
++	if (!err) {
++		/* Update the metadata if we are persistent */
++		store_fn(s, commit_exception, &pe->e);
++
++		e = alloc_exception();
++		if (!e) {
++			/* FIXME: what do we do now ? */
++			return;
++		}
++
++		/*
++		 * Add a proper exception, and remove the
++		 * inflight exception from the list.
++		 */
++		down_write(&pe->snap->lock);
++
++		memcpy(e, &pe->e, sizeof(*e));
++		insert_exception(&s->complete, e);
++		remove_exception(&pe->e);
++
++		/* Submit any pending write BHs */
++		up_write(&pe->snap->lock);
++
++		flush_buffers(pe->snapshot_bhs);
++		DMDEBUG("Exception completed successfully.");
++
++	} else {
++		/* Read/write error - snapshot is unusable */
++		DMERR("Error reading/writing snapshot");
++
++		down_write(&pe->snap->lock);
++		store_fn(pe->snap, drop_snapshot);
++		pe->snap->valid = 0;
++		remove_exception(&pe->e);
++		up_write(&pe->snap->lock);
++
++		error_buffers(pe->snapshot_bhs);
++
++		DMDEBUG("Exception failed.");
++	}
++
++	if (list_empty(&pe->siblings))
++		flush_buffers(pe->origin_bhs);
++	else
++		list_del(&pe->siblings);
++
++	free_pending_exception(pe);
++}
++
++/*
++ * Dispatches the copy operation to kcopyd.
++ */
++static inline void start_copy(struct pending_exception *pe)
++{
++	struct dm_snapshot *s = pe->snap;
++	struct kcopyd_region src, dest;
++
++	src.dev = s->origin->dev;
++	src.sector = chunk_to_sector(s, pe->e.old_chunk);
++	src.count = s->chunk_size;
++
++	dest.dev = s->cow->dev;
++	dest.sector = chunk_to_sector(s, pe->e.new_chunk);
++	dest.count = s->chunk_size;
++
++	if (!pe->started) {
++		/* Hand over to kcopyd */
++		kcopyd_copy(&src, &dest, copy_callback, pe);
++		pe->started = 1;
++	}
++}
++
++/*
++ * Looks to see if this snapshot already has a pending exception
++ * for this chunk, otherwise it allocates a new one and inserts
++ * it into the pending table.
++ */
++static struct pending_exception *find_pending_exception(struct dm_snapshot *s,
++							struct buffer_head *bh)
 +{
 +	struct exception *e;
 +	struct pending_exception *pe;
-+	chunk_t chunk;
-+
-+	chunk = sector_to_chunk(s, bh->b_rsector);
++	chunk_t chunk = sector_to_chunk(s, bh->b_rsector);
 +
 +	/*
-+	 * If the exception is in flight then we just defer the
-+	 * bh until this copy has completed.
++	 * Is there a pending exception for this already ?
 +	 */
-+
-+	/* FIXME: great big race. */
 +	e = lookup_exception(&s->pending, chunk);
 +	if (e) {
 +		/* cast the exception to a pending exception */
 +		pe = list_entry(e, struct pending_exception, e);
-+		bh->b_reqnext = pe->bh;
-+		pe->bh = bh;
-+		return 0;
++
++	} else {
++		/* Create a new pending exception */
++		pe = alloc_pending_exception();
++		if (!pe) {
++			DMWARN("Couldn't allocate pending exception.");
++			return NULL;
++		}
++
++		pe->e.old_chunk = chunk;
++		pe->origin_bhs = pe->snapshot_bhs = NULL;
++		INIT_LIST_HEAD(&pe->siblings);
++		pe->snap = s;
++		pe->started = 0;
++
++		if (store_int_fn(s, prepare_exception, &pe->e)) {
++			free_pending_exception(pe);
++			s->valid = 0;
++			return NULL;
++		}
++
++		insert_exception(&s->pending, &pe->e);
 +	}
 +
-+	pe = alloc_pending_exception();
-+	if (!pe) {
-+		DMWARN("Couldn't allocate inflight_exception.");
-+		return -ENOMEM;
-+	}
-+
-+	pe->e.old_chunk = chunk;
-+
-+	if (s->store->prepare_exception &&
-+	    s->store->prepare_exception(s->store, &pe->e)) {
-+		s->valid = 0;
-+		return -ENXIO;
-+	}
-+
-+	bh->b_reqnext = pe->bh;
-+	pe->bh = bh;
-+	pe->snap = s;
-+
-+	insert_exception(&s->pending, &pe->e);
-+
-+	/* Get kcopyd to do the copy */
-+	dm_blockcopy(chunk_to_sector(s, pe->e.old_chunk),
-+		     chunk_to_sector(s, pe->e.new_chunk),
-+		     s->chunk_size,
-+		     s->origin->dev,
-+		     s->cow->dev, SNAPSHOT_COPY_PRIORITY, 0, copy_callback, pe);
-+
-+	return 1;
++	return pe;
 +}
 +
 +static inline void remap_exception(struct dm_snapshot *s, struct exception *e,
@@ -2534,6 +2543,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +	struct dm_snapshot *s = (struct dm_snapshot *) context;
 +	int r = 1;
 +	chunk_t chunk;
++	struct pending_exception *pe;
 +
 +	chunk = sector_to_chunk(s, bh->b_rsector);
 +
@@ -2552,31 +2562,21 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +
 +		/* If the block is already remapped - use that, else remap it */
 +		e = lookup_exception(&s->complete, chunk);
-+		if (e) {
++		if (e)
 +			remap_exception(s, e, bh);
-+			up_write(&s->lock);
-+			return 1;
-+		}
 +
-+		e = lookup_exception(&s->pending, chunk);
-+		if (e) {
-+			struct pending_exception *pe;
-+			pe = list_entry(e, struct pending_exception, e);
++		else {
++			pe = find_pending_exception(s, bh);
 +
-+			/*
-+			 * Exception has not been committed to
-+			 * disk - save this bh
-+			 */
-+			bh->b_reqnext = pe->bh;
-+			pe->bh = bh;
-+			up_write(&s->lock);
-+			return 0;
-+		}
++			if (!pe) {
++				store_fn(s, drop_snapshot);
++				s->valid = 0;
++			}
 +
-+		if (new_exception(s, bh))
-+			r = -1;
-+		else
++			queue_buffer(&pe->snapshot_bhs, bh);
++			start_copy(pe);
 +			r = 0;
++		}
 +
 +		up_write(&s->lock);
 +
@@ -2604,70 +2604,156 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +	return r;
 +}
 +
-+/*
-+ * Called on a write from the origin driver.
-+ */
-+int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
++static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 +{
-+	struct list_head *snap_list;
-+	struct origin *o;
 +	int r = 1;
++	struct list_head *sl;
++	struct dm_snapshot *snap;
++	struct exception *e;
++	struct pending_exception *pe, *last = NULL;
 +	chunk_t chunk;
 +
-+	down_read(&_origins_lock);
-+	o = __lookup_origin(origin->dev);
++	/* Do all the snapshots on this origin */
++	list_for_each(sl, snapshots) {
++		snap = list_entry(sl, struct dm_snapshot, list);
 +
-+	if (o) {
-+		struct list_head *origin_snaps = &o->snapshots;
-+		struct dm_snapshot *lock_snap;
++		/* Only deal with valid snapshots */
++		if (!snap->valid)
++			continue;
 +
-+		/* Lock the metadata */
-+		lock_snap = list_entry(origin_snaps->next,
-+				       struct dm_snapshot, list);
++		down_write(&snap->lock);
 +
-+		/* Do all the snapshots on this origin */
-+		list_for_each(snap_list, origin_snaps) {
-+			struct dm_snapshot *snap;
-+			struct exception *e;
-+			snap = list_entry(snap_list, struct dm_snapshot, list);
++		/*
++		 * Remember, different snapshots can have
++		 * different chunk sizes.
++		 */
++		chunk = sector_to_chunk(snap, bh->b_rsector);
 +
-+			down_write(&snap->lock);
++		/*
++		 * Check exception table to see if block
++		 * is already remapped in this snapshot
++		 * and trigger an exception if not.
++		 */
++		e = lookup_exception(&snap->complete, chunk);
++		if (!e) {
++			pe = find_pending_exception(snap, bh);
++			if (!pe) {
++				store_fn(snap, drop_snapshot);
++				snap->valid = 0;
++			} else {
 +
-+			/*
-+			 * Remember different snapshots can have
-+			 * different chunk sizes.
-+			 */
-+			chunk = sector_to_chunk(snap, bh->b_rsector);
++				if (last)
++					list_splice(&pe->siblings,
++						    &last->siblings);
 +
-+			/* Only deal with valid snapshots */
-+			if (snap->valid) {
-+				/*
-+				 * Check exception table to see
-+				 * if block is already remapped
-+				 * in this snapshot and mark the
-+				 * snapshot as needing a COW if
-+				 * not
-+				 */
-+				e = lookup_exception(&snap->complete, chunk);
-+				if (!e && !new_exception(snap, bh))
-+					r = 0;
++				last = pe;
++				r = 0;
 +			}
-+
-+			up_write(&snap->lock);
 +		}
++
++		up_write(&snap->lock);
 +	}
 +
-+	up_read(&_origins_lock);
++	/*
++	 * Now that we have a complete pe list we can start the copying.
++	 */
++	if (last) {
++		pe = last;
++		do {
++			down_write(&pe->snap->lock);
++			queue_buffer(&pe->origin_bhs, bh);
++			start_copy(pe);
++			up_write(&pe->snap->lock);
++			pe = list_entry(pe->siblings.next,
++					struct pending_exception, siblings);
++
++		} while (pe != last);
++	}
++
 +	return r;
 +}
 +
++/*
++ * Called on a write from the origin driver.
++ */
++int do_origin(struct dm_dev *origin, struct buffer_head *bh)
++{
++	struct origin *o;
++	int r;
++
++	down_read(&_origins_lock);
++	o = __lookup_origin(origin->dev);
++	if (!o)
++		BUG();
++
++	r = __origin_write(&o->snapshots, bh);
++	up_read(&_origins_lock);
++
++	return r;
++}
++
++/*
++ * Origin: maps a linear range of a device, with hooks for snapshotting.
++ */
++
++/*
++ * Construct an origin mapping: <dev_path>
++ * The context for an origin is merely a 'struct dm_dev *'
++ * pointing to the real device.
++ */
++static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
++		      int argc, char **argv, void **context)
++{
++	int r;
++	struct dm_dev *dev;
++
++	if (argc != 1) {
++		*context = "dm-origin: incorrect number of arguments";
++		return -EINVAL;
++	}
++
++	r = dm_table_get_device(t, argv[0], 0, l, &dev);
++	if (r) {
++		*context = "Cannot get target device";
++		return r;
++	}
++
++	*context = dev;
++
++	return 0;
++}
++
++static void origin_dtr(struct dm_table *t, void *c)
++{
++	struct dm_dev *dev = (struct dm_dev *) c;
++	dm_table_put_device(t, dev);
++}
++
++static int origin_map(struct buffer_head *bh, int rw, void *context)
++{
++	struct dm_dev *dev = (struct dm_dev *) context;
++	bh->b_rdev = dev->dev;
++
++	/* Only tell snapshots if this is a write */
++	return (rw == WRITE) ? do_origin(dev, bh) : 1;
++}
++
++static struct target_type origin_target = {
++	name:	"snapshot-origin",
++	module:	THIS_MODULE,
++	ctr:	origin_ctr,
++	dtr:	origin_dtr,
++	map:	origin_map,
++	err:	NULL
++};
++
 +static struct target_type snapshot_target = {
-+	name:"snapshot",
-+	module:THIS_MODULE,
-+	ctr:snapshot_ctr,
-+	dtr:snapshot_dtr,
-+	map:snapshot_map,
-+	err:NULL
++	name:	"snapshot",
++	module:	THIS_MODULE,
++	ctr:	snapshot_ctr,
++	dtr:	snapshot_dtr,
++	map:	snapshot_map,
++	err:	NULL
 +};
 +
 +int __init dm_snapshot_init(void)
@@ -2680,46 +2766,78 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 +		return r;
 +	}
 +
++	r = dm_register_target(&origin_target);
++	if (r < 0) {
++		DMERR("Device mapper: Origin: register failed %d\n", r);
++		goto bad1;
++	}
++
 +	r = init_origin_hash();
 +	if (r) {
 +		DMERR("init_origin_hash failed.");
-+		return r;
++		goto bad2;
 +	}
 +
-+	exception_cachep = kmem_cache_create("dm-snapshot-ex",
-+					     sizeof(struct exception),
-+					     __alignof__(struct exception),
-+					     0, NULL, NULL);
-+	if (!exception_cachep) {
-+		exit_origin_hash();
-+		return -1;
++	exception_cache = kmem_cache_create("dm-snapshot-ex",
++					    sizeof(struct exception),
++					    __alignof__(struct exception),
++					    0, NULL, NULL);
++	if (!exception_cache) {
++		DMERR("Couldn't create exception cache.");
++		r = -ENOMEM;
++		goto bad3;
 +	}
 +
-+	pending_cachep =
++	pending_cache =
 +	    kmem_cache_create("dm-snapshot-in",
 +			      sizeof(struct pending_exception),
 +			      __alignof__(struct pending_exception),
 +			      0, NULL, NULL);
-+	if (!pending_cachep) {
-+		exit_origin_hash();
-+		kmem_cache_destroy(exception_cachep);
-+		return -1;
++	if (!pending_cache) {
++		DMERR("Couldn't create pending cache.");
++		r = -ENOMEM;
++		goto bad4;
++	}
++
++	pending_pool = mempool_create(128, mempool_alloc_slab,
++				      mempool_free_slab, pending_cache);
++	if (!pending_pool) {
++		DMERR("Couldn't create pending pool.");
++		r = -ENOMEM;
++		goto bad5;
 +	}
 +
 +	return 0;
++
++      bad5:
++	kmem_cache_destroy(pending_cache);
++      bad4:
++	kmem_cache_destroy(exception_cache);
++      bad3:
++	exit_origin_hash();
++      bad2:
++	dm_unregister_target(&origin_target);
++      bad1:
++	dm_unregister_target(&snapshot_target);
++	return r;
 +}
 +
 +void dm_snapshot_exit(void)
 +{
-+	int r = dm_unregister_target(&snapshot_target);
++	int r;
 +
-+	if (r < 0)
-+		DMERR("Device mapper: Snapshot: unregister failed %d", r);
++	r = dm_unregister_target(&snapshot_target);
++	if (r)
++		DMERR("snapshot unregister failed %d", r);
++
++	r = dm_unregister_target(&origin_target);
++	if (r)
++		DMERR("origin unregister failed %d", r);
 +
 +	exit_origin_hash();
-+
-+	kmem_cache_destroy(pending_cachep);
-+	kmem_cache_destroy(exception_cachep);
++	mempool_destroy(pending_pool);
++	kmem_cache_destroy(pending_cache);
++	kmem_cache_destroy(exception_cache);
 +}
 +
 +/*
@@ -2734,8 +2852,8 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.c linux/drivers/md/dm-snapshot.c
 + */
 diff -ruN linux-2.4.18/drivers/md/dm-snapshot.h linux/drivers/md/dm-snapshot.h
 --- linux-2.4.18/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.h	Thu Mar 14 16:02:50 2002
-@@ -0,0 +1,135 @@
++++ linux/drivers/md/dm-snapshot.h	Tue Apr 23 22:23:32 2002
+@@ -0,0 +1,144 @@
 +/*
 + * dm-snapshot.c
 + *
@@ -2762,30 +2880,6 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.h linux/drivers/md/dm-snapshot.h
 +/* FIXME: can we get away with limiting these to a uint32_t ? */
 +typedef offset_t chunk_t;
 +
-+struct dm_snapshot {
-+	struct rw_semaphore lock;
-+
-+	struct dm_dev *origin;
-+	struct dm_dev *cow;
-+
-+	/* List of snapshots per Origin */
-+	struct list_head list;
-+
-+	/* Size of data blocks saved - must be a power of 2 */
-+	chunk_t chunk_size;
-+	chunk_t chunk_mask;
-+	chunk_t chunk_shift;
-+
-+	/* You can't use a snapshot if this is 0 (e.g. if full) */
-+	int valid;
-+
-+	struct exception_table pending;
-+	struct exception_table complete;
-+
-+	/* The on disk metadata handler */
-+	struct exception_store *store;
-+};
-+
 +/*
 + * An exception is used where an old chunk of data has been
 + * replaced by a new one.
@@ -2798,7 +2892,8 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.h linux/drivers/md/dm-snapshot.h
 +};
 +
 +/*
-+ * Abstraction to handle persistent snapshots.
++ * Abstraction to handle the meta/layout of exception stores (the
++ * COW device).
 + */
 +struct exception_store {
 +
@@ -2834,17 +2929,49 @@ diff -ruN linux-2.4.18/drivers/md/dm-snapshot.h linux/drivers/md/dm-snapshot.h
 +	void *context;
 +};
 +
++struct dm_snapshot {
++	struct rw_semaphore lock;
++
++	struct dm_dev *origin;
++	struct dm_dev *cow;
++
++	/* List of snapshots per Origin */
++	struct list_head list;
++
++	/* Size of data blocks saved - must be a power of 2 */
++	chunk_t chunk_size;
++	chunk_t chunk_mask;
++	chunk_t chunk_shift;
++
++	/* You can't use a snapshot if this is 0 (e.g. if full) */
++	int valid;
++
++	struct exception_table pending;
++	struct exception_table complete;
++
++	/* The on disk metadata handler */
++	struct exception_store store;
++};
++
++/*
++ * Used by the exception stores to load exceptions hen
++ * initialising.
++ */
++int dm_add_exception(struct dm_snapshot *s, chunk_t old, chunk_t new);
++
 +/*
 + * Constructor and destructor for the default persistent
 + * store.
 + */
-+struct exception_store *dm_create_persistent(struct dm_snapshot *s,
-+					     int blocksize,
-+					     offset_t extent_size,
-+					     void **error);
++int dm_create_persistent(struct exception_store *store,
++				struct dm_snapshot *s,
++				int blocksize,
++				offset_t extent_size,
++				void **error);
 +
-+struct exception_store *dm_create_transient(struct dm_snapshot *s,
-+					    int blocksize, void **error);
++int dm_create_transient(struct exception_store *store,
++			struct dm_snapshot *s,
++			int blocksize, void **error);
 +
 +/*
 + * Return the number of sectors in the device.
@@ -3079,7 +3206,7 @@ diff -ruN linux-2.4.18/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +
 diff -ruN linux-2.4.18/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 --- linux-2.4.18/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-table.c	Thu Feb 21 12:46:57 2002
++++ linux/drivers/md/dm-table.c	Tue Apr 23 21:48:53 2002
 @@ -0,0 +1,404 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -3732,8 +3859,8 @@ diff -ruN linux-2.4.18/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +EXPORT_SYMBOL(dm_unregister_target);
 diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.18/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Thu Mar 14 16:32:58 2002
-@@ -0,0 +1,1130 @@
++++ linux/drivers/md/dm.c	Tue Apr 23 22:38:53 2002
+@@ -0,0 +1,1154 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -3741,6 +3868,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 + */
 +
 +#include "dm.h"
++#include "kcopyd.h"
 +
 +#include <linux/blk.h>
 +#include <linux/blkpg.h>
@@ -3751,7 +3879,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +#define DEFAULT_READ_AHEAD 64
 +
 +static const char *_name = DM_NAME;
-+static const char *_version = "0.94.08-ioctl-cvs (2002-03-14)";
++static const char *_version = "0.94.10-ioctl (2002-04-23)";
 +static const char *_email = "lvm-devel@lists.sistina.com";
 +
 +static int major = 0;
@@ -3802,7 +3930,6 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	md = _devs[minor];
 +	if (!md)
 +		up_read(_dev_locks + minor);
-+
 +	return md;
 +}
 +
@@ -3817,8 +3944,29 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	md = _devs[minor];
 +	if (!md)
 +		up_write(_dev_locks + minor);
-+
 +	return md;
++}
++
++static int namecmp(struct mapped_device *md, const char *name, int nametype)
++{
++	switch (nametype) {
++	case DM_LOOKUP_BY_NAME:
++		return strcmp(md->name, name);
++		break;
++
++	case DM_LOOKUP_BY_UUID:
++		if (!md->uuid)
++			return -1;	/* never equal */
++
++		return strcmp(md->uuid, name);
++		break;
++
++	default:
++		DMWARN("Unknown comparison type in namecmp: %d", nametype);
++		BUG();
++	}
++
++	return -1;
 +}
 +
 +/*
@@ -3827,7 +3975,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 + * some point if people start playing with *large* numbers of dm
 + * devices.
 + */
-+struct mapped_device *dm_get_name_r(const char *name)
++struct mapped_device *dm_get_name_r(const char *name, int nametype)
 +{
 +	int i;
 +	struct mapped_device *md;
@@ -3835,17 +3983,17 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	for (i = 0; i < MAX_DEVICES; i++) {
 +		md = dm_get_r(i);
 +		if (md) {
-+			if (!strcmp(md->name, name))
++			if (!namecmp(md, name, nametype))
 +				return md;
 +
-+			dm_put_r(i);
++			dm_put_r(md);
 +		}
 +	}
 +
 +	return NULL;
 +}
 +
-+struct mapped_device *dm_get_name_w(const char *name)
++struct mapped_device *dm_get_name_w(const char *name, int nametype)
 +{
 +	int i;
 +	struct mapped_device *md;
@@ -3857,43 +4005,48 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	 */
 +
 +      restart:
-+
 +	for (i = 0; i < MAX_DEVICES; i++) {
 +		md = dm_get_r(i);
-+		if (md) {
-+			if (strcmp(md->name, name))
-+				dm_put_r(i);
-+			else {
-+				/* found it */
-+				dm_put_r(i);
++		if (!md)
++			continue;
 +
-+				md = dm_get_w(i);
-+				if (!md)
-+					goto restart;
-+				if (strcmp(md->name, name)) {
-+					dm_put_w(i);
-+					goto restart;
-+				}
-+
-+				return md;
-+
-+			}
++		if (namecmp(md, name, nametype)) {
++			dm_put_r(md);
++			continue;
 +		}
++
++		/* found it */
++		dm_put_r(md);
++
++		md = dm_get_w(i);
++		if (!md)
++			goto restart;
++
++		if (namecmp(md, name, nametype)) {
++			dm_put_w(md);
++			goto restart;
++		}
++
++		return md;
 +	}
 +
 +	return NULL;
 +}
 +
-+void dm_put_r(int minor)
++void dm_put_r(struct mapped_device *md)
 +{
++	int minor = MINOR(md->dev);
++
 +	if (minor >= MAX_DEVICES)
 +		return;
 +
 +	up_read(_dev_locks + minor);
 +}
 +
-+void dm_put_w(int minor)
++void dm_put_w(struct mapped_device *md)
 +{
++	int minor = MINOR(md->dev);
++
 +	if (minor >= MAX_DEVICES)
 +		return;
 +
@@ -3967,80 +4120,55 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	DMINFO("%s cleaned up", _version);
 +}
 +
++/*
++ * We have a lot of init/exit functions, so it seems easier to
++ * store them in an array.  The disposable macro 'xx'
++ * expands a prefix into a pair of function names.
++ */
++static struct {
++	int (*init)(void);
++	void (*exit)(void);
++
++} _inits[] = {
++#define xx(n) {n ## _init, n ## _exit},
++	xx(local)
++	xx(dm_target)
++	xx(dm_linear)
++	xx(dm_stripe)
++	xx(kcopyd)
++	xx(dm_snapshot)
++	xx(dm_interface)
++#undef xx
++};
++
 +static int __init dm_init(void)
 +{
-+	int r;
++	const int count = sizeof(_inits) / sizeof(*_inits);
 +
-+	r = local_init();
-+	if (r)
-+		goto out;
++	int r, i;
 +
-+	r = dm_target_init();
-+	if (r)
-+		goto out_local;
-+
-+	r = dm_linear_init();
-+	if (r)
-+		goto out_target;
-+
-+	r = dm_stripe_init();
-+	if (r)
-+		goto out_linear;
-+
-+	r = kcopyd_init();
-+	if (r)
-+		goto out_stripe;
-+
-+	r = dm_snapshot_init();
-+	if (r)
-+		goto out_kcopyd;
-+
-+	r = dm_origin_init();
-+	if (r)
-+		goto out_snapshot;
-+
-+	r = dm_mirror_init();
-+	if (r)
-+		goto out_origin;
-+
-+	r = dm_interface_init();
-+	if (r)
-+		goto out_mirror;
++	for (i = 0; i < count; i++) {
++		r = _inits[i].init();
++		if (r)
++			goto bad;
++	}
 +
 +	return 0;
 +
-+      out_mirror:
-+	dm_mirror_exit();
-+      out_origin:
-+	dm_origin_exit();
-+      out_snapshot:
-+	dm_snapshot_exit();
-+      out_kcopyd:
-+	kcopyd_exit();
-+      out_stripe:
-+	dm_stripe_exit();
-+      out_linear:
-+	dm_linear_exit();
-+      out_target:
-+	dm_target_exit();
-+      out_local:
-+	local_exit();
-+      out:
++      bad:
++	while (i--)
++		_inits[i].exit();
++
 +	return r;
 +}
 +
 +static void __exit dm_exit(void)
 +{
++	int i = sizeof(_inits) / sizeof(*_inits);
++
 +	dm_destroy_all();
-+	dm_interface_exit();
-+	dm_stripe_exit();
-+	dm_linear_exit();
-+	dm_snapshot_exit();
-+	dm_origin_exit();
-+	dm_mirror_exit();
-+	kcopyd_exit();
-+	dm_target_exit();
-+	local_exit();
++	while (i--)
++		_inits[i].exit();
 +}
 +
 +/*
@@ -4048,25 +4176,23 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 + */
 +static int dm_blk_open(struct inode *inode, struct file *file)
 +{
-+	int minor = MINOR(inode->i_rdev);
 +	struct mapped_device *md;
 +
-+	md = dm_get_w(minor);
++	md = dm_get_w(MINOR(inode->i_rdev));
 +	if (!md)
 +		return -ENXIO;
 +
 +	md->use_count++;
-+	dm_put_w(minor);
++	dm_put_w(md);
 +
 +	return 0;
 +}
 +
 +static int dm_blk_close(struct inode *inode, struct file *file)
 +{
-+	int minor = MINOR(inode->i_rdev);
 +	struct mapped_device *md;
 +
-+	md = dm_get_w(minor);
++	md = dm_get_w(MINOR(inode->i_rdev));
 +	if (!md)
 +		return -ENXIO;
 +
@@ -4074,7 +4200,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +		DMWARN("incorrect reference count found in mapped_device");
 +
 +	md->use_count--;
-+	dm_put_w(minor);
++	dm_put_w(md);
 +
 +	return 0;
 +}
@@ -4199,19 +4325,18 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +{
 +	struct deferred_io *di = alloc_deferred();
 +	struct mapped_device *md;
-+	int minor = MINOR(bh->b_rdev);
 +
 +	if (!di)
 +		return -ENOMEM;
 +
-+	md = dm_get_w(minor);
++	md = dm_get_w(MINOR(bh->b_rdev));
 +	if (!md) {
 +		free_deferred(di);
 +		return -ENXIO;
 +	}
 +
 +	if (!md->suspended) {
-+		dm_put_w(minor);
++		dm_put_w(md);
 +		free_deferred(di);
 +		return 1;
 +	}
@@ -4221,7 +4346,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	di->next = md->deferred;
 +	md->deferred = di;
 +
-+	dm_put_w(minor);
++	dm_put_w(md);
 +
 +	return 0;		/* deferred successfully */
 +}
@@ -4308,7 +4433,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	 * this io for later.
 +	 */
 +	while (md->suspended) {
-+		dm_put_r(minor);
++		dm_put_r(md);
 +
 +		if (rw == READA)
 +			goto bad_no_lock;
@@ -4335,11 +4460,11 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	if ((r = __map_buffer(md, bh, rw, __find_node(md->map, bh))) < 0)
 +		goto bad;
 +
-+	dm_put_r(minor);
++	dm_put_r(md);
 +	return r;
 +
 +      bad:
-+	dm_put_r(minor);
++	dm_put_r(md);
 +
 +      bad_no_lock:
 +	buffer_IO_error(bh);
@@ -4371,12 +4496,12 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +		return -ENXIO;
 +
 +	if (md->suspended) {
-+		dm_put_r(minor);
++		dm_put_r(md);
 +		return -EPERM;
 +	}
 +
 +	if (!check_dev_size(minor, block)) {
-+		dm_put_r(minor);
++		dm_put_r(md);
 +		return -EINVAL;
 +	}
 +
@@ -4396,7 +4521,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	*r_dev = bh.b_rdev;
 +	*r_block = bh.b_rsector / (bh.b_size >> 9);
 +
-+	dm_put_r(minor);
++	dm_put_r(md);
 +	return r;
 +}
 +
@@ -4441,7 +4566,6 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +		return -1;
 +	}
 +
-+	_devs[minor] = md;
 +	return minor;
 +}
 +
@@ -4461,13 +4585,15 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +}
 +
 +/*
-+ * Allocate and initialise a blank device.  Device is returned
-+ * with a write lock held.
++ * Allocate and initialise a blank device.
++ * Caller must ensure uuid is null-terminated.
++ * Device is returned with a write lock held.
 + */
 +static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 +				       int minor)
 +{
 +	struct mapped_device *md = kmalloc(sizeof(*md), GFP_KERNEL);
++	int len;
 +
 +	if (!md) {
 +		DMWARN("unable to allocate device, out of memory.");
@@ -4485,26 +4611,26 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +		return NULL;
 +	}
 +
-+	_devs[minor] = md;
 +	md->dev = MKDEV(_major, minor);
 +	md->suspended = 0;
 +
 +	strncpy(md->name, name, sizeof(md->name) - 1);
 +	md->name[sizeof(md->name) - 1] = '\0';
 +
-+	if (*uuid) {
-+		if (!(md->uuid = kmalloc(strnlen(uuid, DM_UUID_LEN),
-+					 GFP_KERNEL))) {
++	/*
++	 * Copy in the uuid.
++	 */
++	if (uuid && *uuid) {
++		len = strlen(uuid) + 1;
++		if (!(md->uuid = kmalloc(len, GFP_KERNEL))) {
 +			DMWARN("unable to allocate uuid - out of memory.");
++			kfree(md);
 +			return NULL;
 +		}
-+
-+		strncpy(md->uuid, uuid, DM_UUID_LEN - 1);
-+		md->uuid[DM_UUID_LEN] = '\0';
++		strcpy(md->uuid, uuid);
 +	}
 +
 +	init_waitqueue_head(&md->wait);
-+
 +	return md;
 +}
 +
@@ -4590,10 +4716,9 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +		return -1;
 +	}
 +
-+	md = dm_get_name_r(name);
-+
++	md = dm_get_name_r(name, DM_LOOKUP_BY_NAME);
 +	if (md) {
-+		dm_put_r(MINOR(md->dev));
++		dm_put_r(md);
 +		DMWARN("device name already in use");
 +		return -1;
 +	}
@@ -4601,17 +4726,33 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	return 0;
 +}
 +
++static int check_uuid(const char *uuid)
++{
++	struct mapped_device *md;
++
++	if (uuid) {
++		md = dm_get_name_r(uuid, DM_LOOKUP_BY_UUID);
++		if (md) {
++			dm_put_r(md);
++			DMWARN("device uuid already in use");
++			return -1;
++		}
++	}
++
++	return 0;
++}
++
 +/*
-+ * Constructor for a new device
++ * Constructor for a new device.
 + */
-+int dm_create(const char *name, const char *uuid,
-+	      int minor, struct dm_table *table)
++int dm_create(const char *name, const char *uuid, int minor, int ro,
++	      struct dm_table *table)
 +{
 +	int r;
 +	struct mapped_device *md;
 +
 +	spin_lock(&_create_lock);
-+	if (check_name(name) < 0) {
++	if (check_name(name) || check_uuid(uuid)) {
 +		spin_unlock(&_create_lock);
 +		return -EINVAL;
 +	}
@@ -4622,6 +4763,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +		return -ENXIO;
 +	}
 +	minor = MINOR(md->dev);
++	_devs[minor] = md;
 +
 +	r = __register_device(md);
 +	if (r)
@@ -4631,8 +4773,10 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	if (r)
 +		goto err;
 +
-+	dm_put_w(minor);
++	dm_set_ro(md, ro);
++
 +	spin_unlock(&_create_lock);
++	dm_put_w(md);
 +	return 0;
 +
 +      err:
@@ -4640,8 +4784,8 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	if (md->uuid)
 +		kfree(md->uuid);
 +
++	dm_put_w(md);
 +	kfree(md);
-+	dm_put_w(minor);
 +	spin_unlock(&_create_lock);
 +	return r;
 +}
@@ -4649,9 +4793,9 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +/*
 + * Renames the device.  No lock held.
 + */
-+int dm_set_name(const char *oldname, const char *newname)
++int dm_set_name(const char *name, int nametype, const char *newname)
 +{
-+	int r, minor;
++	int r;
 +	struct mapped_device *md;
 +
 +	spin_lock(&_create_lock);
@@ -4660,12 +4804,11 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +		return -EINVAL;
 +	}
 +
-+	md = dm_get_name_w(oldname);
++	md = dm_get_name_w(name, nametype);
 +	if (!md) {
 +		spin_unlock(&_create_lock);
 +		return -ENXIO;
 +	}
-+	minor = MINOR(md->dev);
 +
 +	r = __unregister_device(md);
 +	if (r)
@@ -4675,7 +4818,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	r = __register_device(md);
 +
 +      out:
-+	dm_put_w(minor);
++	dm_put_w(md);
 +	spin_unlock(&_create_lock);
 +	return r;
 +}
@@ -4683,6 +4826,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +/*
 + * Destructor for the device.  You cannot destroy an open
 + * device.  Write lock must be held before calling.
++ * Caller must dm_put_w(md) then kfree(md) if call was successful.
 + */
 +int dm_destroy(struct mapped_device *md)
 +{
@@ -4702,8 +4846,6 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	if (md->uuid)
 +		kfree(md->uuid);
 +
-+	kfree(md);
-+
 +	return 0;
 +}
 +
@@ -4712,17 +4854,25 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 + */
 +void dm_destroy_all(void)
 +{
-+	int i;
++	int i, some_destroyed, r;
 +	struct mapped_device *md;
 +
-+	for (i = 0; i < MAX_DEVICES; i++) {
-+		md = dm_get_w(i);
-+		if (!md)
-+			continue;
++	do {
++		some_destroyed = 0;
++		for (i = 0; i < MAX_DEVICES; i++) {
++			md = dm_get_w(i);
++			if (!md)
++				continue;
 +
-+		dm_destroy(md);
-+		dm_put_w(i);
-+	}
++			r = dm_destroy(md);
++			dm_put_w(md);
++
++			if (!r) {
++				kfree(md);
++				some_destroyed = 1;
++			}
++		}
++	} while (some_destroyed);
 +}
 +
 +/*
@@ -4795,7 +4945,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +		return -EINVAL;
 +
 +	md->suspended = 1;
-+	dm_put_w(minor);
++	dm_put_w(md);
 +
 +	/* wait for all the pending io to flush */
 +	add_wait_queue(&md->wait, &wait);
@@ -4811,7 +4961,7 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +		if (!atomic_read(&md->pending))
 +			break;
 +
-+		dm_put_w(minor);
++		dm_put_w(md);
 +		schedule();
 +
 +	} while (1);
@@ -4834,9 +4984,10 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +	def = md->deferred;
 +	md->deferred = NULL;
 +
-+	dm_put_w(minor);
++	dm_put_w(md);
 +	flush_deferred_io(def);
-+	fsync_dev(md->dev);
++	run_task_queue(&tq_disk);
++
 +	if (!dm_get_w(minor)) {
 +		/* FIXME: yuck */
 +		down_write(_dev_locks + minor);
@@ -4866,8 +5017,8 @@ diff -ruN linux-2.4.18/drivers/md/dm.c linux/drivers/md/dm.c
 +MODULE_LICENSE("GPL");
 diff -ruN linux-2.4.18/drivers/md/dm.h linux/drivers/md/dm.h
 --- linux-2.4.18/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Thu Mar  7 20:04:19 2002
-@@ -0,0 +1,233 @@
++++ linux/drivers/md/dm.h	Tue Apr 23 22:23:30 2002
+@@ -0,0 +1,220 @@
 +/*
 + * Internal header file for device mapper
 + *
@@ -4988,18 +5139,27 @@ diff -ruN linux-2.4.18/drivers/md/dm.h linux/drivers/md/dm.h
 +/* dm.c */
 +struct mapped_device *dm_get_r(int minor);
 +struct mapped_device *dm_get_w(int minor);
-+struct mapped_device *dm_get_name_r(const char *name);
-+struct mapped_device *dm_get_name_w(const char *name);
 +
-+void dm_put_r(int minor);
-+void dm_put_w(int minor);
++/*
++ * There are two ways to lookup a device.
++ */
++enum {
++	DM_LOOKUP_BY_NAME,
++	DM_LOOKUP_BY_UUID
++};
++
++struct mapped_device *dm_get_name_r(const char *name, int nametype);
++struct mapped_device *dm_get_name_w(const char *name, int nametype);
++
++void dm_put_r(struct mapped_device *md);
++void dm_put_w(struct mapped_device *md);
 +
 +/*
 + * Call with no lock.
 + */
-+int dm_create(const char *name, const char *uuid,
-+	      int minor, struct dm_table *table);
-+int dm_set_name(const char *oldname, const char *newname);
++int dm_create(const char *name, const char *uuid, int minor, int ro,
++	      struct dm_table *table);
++int dm_set_name(const char *name, int nametype, const char *newname);
 +void dm_destroy_all(void);
 +
 +/*
@@ -5033,27 +5193,9 @@ diff -ruN linux-2.4.18/drivers/md/dm.h linux/drivers/md/dm.h
 +			struct target_type *type, void *private);
 +int dm_table_complete(struct dm_table *t);
 +
-+/* kcopyd.c */
-+typedef enum {
-+	COPY_CB_COMPLETE,
-+	COPY_CB_FAILED_READ,
-+	COPY_CB_FAILED_WRITE,
-+	COPY_CB_PROGRESS
-+} copy_cb_reason_t;
-+
-+int dm_blockcopy(unsigned long fromsec, unsigned long tosec,
-+		 unsigned long nr_sectors, kdev_t fromdev, kdev_t todev,
-+		 int priority, int throttle,
-+		 void (*callback) (copy_cb_reason_t, void *, long),
-+		 void *context);
-+int kcopyd_init(void);
-+void kcopyd_exit(void);
-+
 +/* Snapshots */
 +int dm_snapshot_init(void);
 +void dm_snapshot_exit(void);
-+int dm_origin_init(void);
-+void dm_origin_exit(void);
 +
 +/* dm-mirror.c */
 +int dm_mirror_init(void);
@@ -5083,12 +5225,8 @@ diff -ruN linux-2.4.18/drivers/md/dm.h linux/drivers/md/dm.h
 + * The device-mapper can be driven through one of two interfaces;
 + * ioctl or filesystem, depending which patch you have applied.
 + */
-+
 +int __init dm_interface_init(void);
-+void __exit dm_interface_exit(void);
-+
-+/* Code in dm-snapshot called by dm-origin to do snapshot COW */
-+int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh);
++void dm_interface_exit(void);
 +
 +/*
 + * Targets for linear and striped mappings
@@ -5103,11 +5241,9 @@ diff -ruN linux-2.4.18/drivers/md/dm.h linux/drivers/md/dm.h
 +#endif
 diff -ruN linux-2.4.18/drivers/md/kcopyd.c linux/drivers/md/kcopyd.c
 --- linux-2.4.18/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.c	Thu Mar 14 13:45:09 2002
-@@ -0,0 +1,479 @@
++++ linux/drivers/md/kcopyd.c	Tue Apr 23 22:28:13 2002
+@@ -0,0 +1,779 @@
 +/*
-+ * kcopyd.c
-+ *
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
 + *
 + * This file is released under the GPL.
@@ -5121,469 +5257,871 @@ diff -ruN linux-2.4.18/drivers/md/kcopyd.c linux/drivers/md/kcopyd.c
 +#include <linux/fs.h>
 +#include <linux/blkdev.h>
 +#include <linux/device-mapper.h>
++#include <linux/mempool.h>
++#include <asm/atomic.h>
 +
++#include "kcopyd.h"
++
++/* FIXME: this is only needed for the DMERR macros */
 +#include "dm.h"
 +
-+/* Hard sector size used all over the kernel */
++/*
++ * Hard sector size used all over the kernel.
++ */
 +#define SECTOR_SIZE 512
-+
-+/* Number of entries in the free list to start with */
-+#define FREE_LIST_SIZE 32
-+
-+/* Slab cache for work entries when the freelist runs out */
-+static kmem_cache_t *entry_cachep;
-+
-+/* Structure of work to do in the list */
-+struct copy_work
-+{
-+	unsigned long fromsec;
-+	unsigned long tosec;
-+	unsigned long nr_sectors;
-+	unsigned long done_sectors;
-+	kdev_t fromdev;
-+	kdev_t todev;
-+	int    throttle;
-+	int    priority; /* 0=highest */
-+	void   (*callback)(copy_cb_reason_t, void *, long);
-+	void   *context;
-+	int    freelist;      /* Whether we came from the free list */
-+	struct list_head list;
-+};
-+
-+static LIST_HEAD(work_list);
-+static LIST_HEAD(free_list);
-+static struct task_struct *copy_task = NULL;
-+static struct rw_semaphore work_list_lock;
-+static struct rw_semaphore free_list_lock;
-+static DECLARE_MUTEX(start_lock);
-+static DECLARE_MUTEX(run_lock);
-+static DECLARE_WAIT_QUEUE_HEAD(start_waitq);
-+static DECLARE_WAIT_QUEUE_HEAD(work_waitq);
-+static DECLARE_WAIT_QUEUE_HEAD(freelist_waitq);
-+static struct kiobuf *iobuf;
-+static int thread_exit = 0;
-+static long last_jiffies = 0;
-+
-+/* Find a free entry from the free-list or allocate a new one.
-+   This routine always returns a valid pointer even if it has to wait
-+   for it */
-+static struct copy_work *get_work_struct(void)
-+{
-+	struct copy_work *entry = NULL;
-+
-+	while (!entry) {
-+
-+		down_write(&free_list_lock);
-+		if (!list_empty(&free_list)) {
-+			entry = list_entry(free_list.next, struct copy_work, list);
-+			list_del(&entry->list);
-+		}
-+		up_write(&free_list_lock);
-+
-+		if (!entry) {
-+			/* Nothing on the free-list - try to allocate one without doing IO */
-+			entry = kmem_cache_alloc(entry_cachep, GFP_NOIO);
-+
-+			/* Make sure we know it didn't come from the free list */
-+			if (entry) {
-+				entry->freelist = 0;
-+			}
-+		}
-+
-+		/* Failed...wait for IO to finish */
-+		if (!entry) {
-+			DECLARE_WAITQUEUE(wq, current);
-+
-+			set_task_state(current, TASK_INTERRUPTIBLE);
-+			add_wait_queue(&freelist_waitq, &wq);
-+
-+			if (list_empty(&free_list))
-+				schedule();
-+
-+			set_task_state(current, TASK_RUNNING);
-+			remove_wait_queue(&freelist_waitq, &wq);
-+		}
-+	}
-+
-+	return entry;
-+}
-+
-+/* Allocate pages for a kiobuf. */
-+static int alloc_iobuf_pages(struct kiobuf *iobuf, int nr_sectors)
-+{
-+	int nr_pages, err, i;
-+
-+	if (nr_sectors > KIO_MAX_SECTORS)
-+		return -1;
-+
-+	nr_pages = nr_sectors / (PAGE_SIZE/SECTOR_SIZE);
-+	err = expand_kiobuf(iobuf, nr_pages);
-+	if (err) goto out;
-+
-+	err = -ENOMEM;
-+	iobuf->locked = 1;
-+	iobuf->nr_pages = 0;
-+	for (i = 0; i < nr_pages; i++) {
-+		struct page * page;
-+
-+		page = alloc_page(GFP_KERNEL);
-+		if (!page) goto out;
-+
-+		iobuf->maplist[i] = page;
-+		LockPage(page);
-+		iobuf->nr_pages++;
-+	}
-+	iobuf->offset = 0;
-+
-+	err = 0;
-+
-+out:
-+	return err;
-+}
-+
-+
-+/* Add a new entry to the work list - in priority+FIFO order.
-+   The work_list_lock semaphore must be held */
-+static void add_to_work_list(struct copy_work *item)
-+{
-+	struct list_head *entry;
-+
-+	list_for_each(entry, &work_list) {
-+		struct copy_work *cw;
-+
-+		cw = list_entry(entry, struct copy_work, list);
-+		if (cw->priority > item->priority) {
-+			__list_add(&item->list, cw->list.prev, &cw->list);
-+			return;
-+		}
-+	}
-+	list_add_tail(&item->list, &work_list);
-+}
-+
-+/* Read in a chunk from the source device */
-+static int read_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, int nr_sectors)
-+{
-+	int i, sectors_per_block, nr_blocks;
-+	int blocksize = get_hardsect_size(dev);
-+	int status;
-+
-+	sectors_per_block = blocksize / SECTOR_SIZE;
-+
-+	nr_blocks = nr_sectors / sectors_per_block;
-+	start /= sectors_per_block;
-+
-+	for (i = 0; i < nr_blocks; i++)
-+		iobuf->blocks[i] = start++;
-+
-+	iobuf->length = nr_sectors << 9;
-+
-+	status = brw_kiovec(READ, 1, &iobuf, dev, iobuf->blocks, blocksize);
-+	return (status != (nr_sectors << 9));
-+}
-+
-+/* Write out blocks */
-+static int write_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, int nr_sectors)
-+{
-+	int i, sectors_per_block, nr_blocks;
-+	int blocksize = get_hardsect_size(dev);
-+	int status;
-+
-+	sectors_per_block = blocksize / SECTOR_SIZE;
-+
-+	nr_blocks = nr_sectors / sectors_per_block;
-+	start /= sectors_per_block;
-+
-+	for (i = 0; i < nr_blocks; i++)
-+		iobuf->blocks[i] = start++;
-+
-+	iobuf->length = nr_sectors << 9;
-+
-+	status = brw_kiovec(WRITE, 1, &iobuf, dev, iobuf->blocks, blocksize);
-+	return (status != (nr_sectors << 9));
-+}
-+
-+/* This is where all the real work happens */
-+static int copy_kthread(void *unused)
-+{
-+	daemonize();
-+	down(&run_lock);
-+
-+	strcpy(current->comm, "kcopyd");
-+	copy_task = current;
-+	wake_up_interruptible(&start_waitq);
-+
-+	do {
-+		DECLARE_WAITQUEUE(wq, current);
-+		struct task_struct *tsk = current;
-+
-+		down_write(&work_list_lock);
-+
-+		while (!list_empty(&work_list)) {
-+
-+			struct copy_work *work_item = list_entry(work_list.next, struct copy_work, list);
-+			int done_sps;
-+			copy_cb_reason_t callback_reason = COPY_CB_COMPLETE;
-+			int preempted = 0;
-+
-+			list_del(&work_item->list);
-+			up_write(&work_list_lock);
-+
-+			while (!preempted && work_item->done_sectors < work_item->nr_sectors) {
-+				long nr_sectors = min((unsigned long)KIO_MAX_SECTORS,
-+						      work_item->nr_sectors - work_item->done_sectors);
-+
-+				/* Read original blocks */
-+				if (read_blocks(iobuf, work_item->fromdev, work_item->fromsec + work_item->done_sectors,
-+						nr_sectors)) {
-+					DMERR("Read blocks from device %s failed", kdevname(work_item->fromdev));
-+
-+					/* Callback error */
-+					callback_reason = COPY_CB_FAILED_READ;
-+					goto done_copy;
-+				}
-+
-+				/* Write them out again */
-+				if (write_blocks(iobuf, work_item->todev, work_item->tosec + work_item->done_sectors,
-+						 nr_sectors)) {
-+					DMERR("Write blocks to %s failed", kdevname(work_item->todev));
-+
-+					/* Callback error */
-+					callback_reason = COPY_CB_FAILED_WRITE;
-+					goto done_copy;
-+				}
-+				work_item->done_sectors += nr_sectors;
-+
-+				/* If we have exceeded the throttle value (in sectors/second) then
-+				   sleep for a while */
-+				done_sps = nr_sectors*HZ/(jiffies-last_jiffies);
-+				if (work_item->throttle && done_sps > work_item->throttle && done_sps) {
-+					long start_jiffies = jiffies;
-+					do {
-+						schedule_timeout(done_sps - work_item->throttle * HZ);
-+					} while (jiffies <= start_jiffies+(done_sps - work_item->throttle * HZ));
-+				}
-+
-+				/* Do a progress callback */
-+				if (work_item->callback && work_item->done_sectors < work_item->nr_sectors)
-+					work_item->callback(COPY_CB_PROGRESS, work_item->context, work_item->done_sectors);
-+
-+				/* Look for higher priority work */
-+				down_write(&work_list_lock);
-+				if (!list_empty(&work_list)) {
-+					struct copy_work *peek_item = list_entry(work_list.next, struct copy_work, list);
-+
-+					if (peek_item->priority < work_item->priority) {
-+
-+						/* Put this back on the list and restart to get the new one */
-+						add_to_work_list(work_item);
-+						preempted = 1;
-+						goto restart;
-+					}
-+				}
-+				up_write(&work_list_lock);
-+			}
-+
-+		done_copy:
-+			/* Call the callback */
-+			if (work_item->callback)
-+				work_item->callback(callback_reason, work_item->context, work_item->done_sectors);
-+
-+			/* Add it back to the free list (if it came from there)
-+			   and notify anybody waiting for an entry */
-+			if (work_item->freelist) {
-+				down_write(&free_list_lock);
-+				list_add(&work_item->list, &free_list);
-+				up_write(&free_list_lock);
-+			}
-+			else {
-+				kmem_cache_free(entry_cachep, work_item);
-+			}
-+			wake_up_interruptible(&freelist_waitq);
-+
-+			/* Get the work lock again for the top of the while loop */
-+			down_write(&work_list_lock);
-+		restart:
-+		}
-+		up_write(&work_list_lock);
-+
-+		/* Wait for more work */
-+		set_task_state(tsk, TASK_INTERRUPTIBLE);
-+		add_wait_queue(&work_waitq, &wq);
-+
-+		if (list_empty(&work_list))
-+			schedule();
-+
-+		set_task_state(tsk, TASK_RUNNING);
-+		remove_wait_queue(&work_waitq, &wq);
-+
-+	} while (thread_exit == 0);
-+
-+	unmap_kiobuf(iobuf);
-+	free_kiovec(1, &iobuf);
-+
-+	up(&run_lock);
-+	return 0;
-+}
-+
-+/* API entry point */
-+int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_sectors,
-+		 kdev_t fromdev, kdev_t todev,
-+		 int priority, int throttle, void (*callback)(copy_cb_reason_t, void *, long), void *context)
-+{
-+	struct copy_work *newwork;
-+	static pid_t thread_pid = 0;
-+	long from_blocksize = get_hardsect_size(fromdev);
-+	long to_blocksize = get_hardsect_size(todev);
-+
-+	/* Make sure the start sectors are on physical block boundaries */
-+	if (fromsec % (from_blocksize/SECTOR_SIZE))
-+		return -EINVAL;
-+	if (tosec % (to_blocksize/SECTOR_SIZE))
-+		return -EINVAL;
-+
-+	/* Start the thread if we don't have one already */
-+	down(&start_lock);
-+	if (copy_task == NULL) {
-+		thread_pid = kernel_thread(copy_kthread, NULL, 0);
-+		if (thread_pid > 0) {
-+
-+			DECLARE_WAITQUEUE(wq, current);
-+			struct task_struct *tsk = current;
-+
-+			DMINFO("Started kcopyd thread");
-+
-+			/* Wait for it to complete it's startup initialisation */
-+			set_task_state(tsk, TASK_INTERRUPTIBLE);
-+			add_wait_queue(&start_waitq, &wq);
-+
-+			if (copy_task == NULL)
-+				schedule();
-+
-+			set_task_state(tsk, TASK_RUNNING);
-+			remove_wait_queue(&start_waitq, &wq);
-+		}
-+		else {
-+			DMERR("Failed to start kcopyd thread");
-+			up(&start_lock);
-+			return -EAGAIN;
-+		}
-+	}
-+	up(&start_lock);
-+
-+	/* This will wait until one is available */
-+	newwork = get_work_struct();
-+
-+	newwork->fromsec      = fromsec;
-+	newwork->tosec        = tosec;
-+	newwork->fromdev      = fromdev;
-+	newwork->todev        = todev;
-+	newwork->nr_sectors   = nr_sectors;
-+	newwork->done_sectors = 0;
-+	newwork->throttle     = throttle;
-+	newwork->priority     = priority;
-+	newwork->callback     = callback;
-+	newwork->context      = context;
-+
-+	down_write(&work_list_lock);
-+	add_to_work_list(newwork);
-+	up_write(&work_list_lock);
-+
-+	wake_up_interruptible(&work_waitq);
-+	return 0;
-+}
-+
-+
-+/* Pre-allocate some structures for the free list */
-+static int allocate_free_list(void)
++#define SECTOR_SHIFT 9
++static int wake_kcopyd(void);
++
++/*-----------------------------------------------------------------
++ * We reserve our own pool of preallocated pages that are
++ * only used for kcopyd io.
++ *---------------------------------------------------------------*/
++
++/*
++ * FIXME: This should be configurable.
++ */
++#define NUM_PAGES 512
++
++static DECLARE_MUTEX(_pages_lock);
++static int _num_free_pages;
++static struct page *_pages_array[NUM_PAGES];
++
++static __init int init_pages(void)
 +{
 +	int i;
-+	struct copy_work *newwork;
++	struct page *p;
 +
-+	for (i=0; i<FREE_LIST_SIZE; i++) {
-+		newwork = kmalloc(sizeof(struct copy_work), GFP_KERNEL);
-+		if (!newwork)
-+			return i;
-+		newwork->freelist = 1;
-+		list_add(&newwork->list, &free_list);
++	for (i = 0; i < NUM_PAGES; i++) {
++		p = alloc_page(GFP_KERNEL);
++		if (!p)
++			goto bad;
++
++		LockPage(p);
++		_pages_array[i] = p;
 +	}
-+	return i;
++
++	_num_free_pages = NUM_PAGES;
++	return 0;
++
++      bad:
++	while (i--)
++		__free_page(_pages_array[i]);
++	return -ENOMEM;
 +}
++
++static void exit_pages(void)
++{
++	int i;
++	struct page *p;
++
++	for (i = 0; i < NUM_PAGES; i++) {
++		p = _pages_array[i];
++		UnlockPage(p);
++		__free_page(p);
++	}
++
++	_num_free_pages = 0;
++}
++
++static int kcopyd_get_pages(int num, struct page **result)
++{
++	int i;
++
++	down(&_pages_lock);
++	if (_num_free_pages < num) {
++		up(&_pages_lock);
++		return -ENOMEM;
++	}
++
++	for (i = 0; i < num; i++) {
++		_num_free_pages--;
++		result[i] = _pages_array[_num_free_pages];
++	}
++	up(&_pages_lock);
++
++	return 0;
++}
++
++static void kcopyd_free_pages(int num, struct page **result)
++{
++	int i;
++
++	down(&_pages_lock);
++	for (i = 0; i < num; i++)
++		_pages_array[_num_free_pages++] = result[i];
++	up(&_pages_lock);
++}
++
++/*-----------------------------------------------------------------
++ * We keep our own private pool of buffer_heads.  These are just
++ * held in a list on the b_reqnext field.
++ *---------------------------------------------------------------*/
++
++/*
++ * Make sure we have enough buffers to always keep the pages
++ * occupied.  So we assume the worst case scenario where blocks
++ * are the size of a single sector.
++ */
++#define NUM_BUFFERS NUM_PAGES * (PAGE_SIZE / SECTOR_SIZE)
++
++static spinlock_t _buffer_lock = SPIN_LOCK_UNLOCKED;
++static struct buffer_head *_all_buffers;
++static struct buffer_head *_free_buffers;
++
++static __init int init_buffers(void)
++{
++	int i;
++	struct buffer_head *buffers;
++	size_t s = sizeof(struct buffer_head) * NUM_BUFFERS;
++
++	/*
++	 * FIXME: this should be a vmalloc.
++	 */
++	buffers = vmalloc(s);
++	if (!buffers) {
++		DMWARN("Couldn't allocate buffer heads.");
++		return -ENOMEM;
++	}
++
++	memset(buffers, 0, s);
++	for (i = 0; i < NUM_BUFFERS; i++) {
++		if (i < NUM_BUFFERS - 1)
++			buffers[i].b_reqnext = &buffers[i + 1];
++		init_waitqueue_head(&buffers[i].b_wait);
++		INIT_LIST_HEAD(&buffers[i].b_inode_buffers);
++	}
++
++	_all_buffers = _free_buffers = buffers;
++	return 0;
++}
++
++static void exit_buffers(void)
++{
++	vfree(_all_buffers);
++}
++
++static struct buffer_head *alloc_buffer(void)
++{
++	int state = current->state;
++	struct buffer_head *r;
++
++	set_current_state(TASK_UNINTERRUPTIBLE);
++	spin_lock(&_buffer_lock);
++
++	if (!_free_buffers)
++		r = NULL;
++	else {
++		r = _free_buffers;
++		_free_buffers = _free_buffers->b_reqnext;
++		r->b_reqnext = NULL;
++	}
++
++	spin_unlock(&_buffer_lock);
++	set_current_state(state);
++
++	return r;
++}
++
++/*
++ * Only called from interrupt context.
++ */
++static void free_buffer(struct buffer_head *bh)
++{
++	spin_lock(&_buffer_lock);
++	bh->b_reqnext = _free_buffers;
++	_free_buffers = bh;
++	spin_unlock(&_buffer_lock);
++}
++
++/*-----------------------------------------------------------------
++ * kcopyd_jobs need to be allocated by the *clients* of kcopyd,
++ * for this reason we use a mempool to prevent the client from
++ * ever having to do io (which could cause a
++ * deadlock).
++ *---------------------------------------------------------------*/
++#define MIN_JOBS NUM_PAGES
++
++static kmem_cache_t *_job_cache = NULL;
++static mempool_t *_job_pool = NULL;
++
++/*
++ * We maintain three lists of jobs:
++ *
++ * i)   jobs waiting for pages
++ * ii)  jobs that have pages, and are waiting for the io to be issued.
++ * iii) jobs that have completed.
++ *
++ * All three of these are protected by job_lock.
++ */
++
++static spinlock_t _job_lock = SPIN_LOCK_UNLOCKED;
++
++static LIST_HEAD(_complete_jobs);
++static LIST_HEAD(_io_jobs);
++static LIST_HEAD(_pages_jobs);
++
++static __init int init_jobs(void)
++{
++	INIT_LIST_HEAD(&_complete_jobs);
++	INIT_LIST_HEAD(&_io_jobs);
++	INIT_LIST_HEAD(&_pages_jobs);
++
++	_job_cache = kmem_cache_create("kcopyd-jobs", sizeof(struct kcopyd_job),
++				       __alignof__(struct kcopyd_job),
++				       0, NULL, NULL);
++	if (!_job_cache)
++		return -ENOMEM;
++
++	_job_pool = mempool_create(MIN_JOBS,
++				   mempool_alloc_slab,
++				   mempool_free_slab, _job_cache);
++	if (!_job_pool) {
++		kmem_cache_destroy(_job_cache);
++		return -ENOMEM;
++	}
++
++	return 0;
++}
++
++static void exit_jobs(void)
++{
++	mempool_destroy(_job_pool);
++	kmem_cache_destroy(_job_cache);
++}
++
++struct kcopyd_job *kcopyd_alloc_job(void)
++{
++	struct kcopyd_job *job;
++
++	job = mempool_alloc(_job_pool, GFP_KERNEL);;
++	if (!job)
++		return NULL;
++
++	memset(job, 0, sizeof(*job));
++	return job;
++}
++
++void kcopyd_free_job(struct kcopyd_job *job)
++{
++	mempool_free(job, _job_pool);
++}
++
++/*
++ * Functions to push and pop a job onto the head of a given job
++ * list.
++ */
++static inline struct kcopyd_job *__pop(struct list_head *jobs)
++{
++	struct kcopyd_job *job = NULL;
++
++	spin_lock(&_job_lock);
++	if (!list_empty(jobs)) {
++		job = list_entry(jobs->next, struct kcopyd_job, list);
++		list_del(&job->list);
++	}
++	spin_unlock(&_job_lock);
++
++	return job;
++}
++
++static struct kcopyd_job *pop(struct list_head *jobs)
++{
++	int state = current->state;
++	struct kcopyd_job *job;
++
++	set_current_state(TASK_UNINTERRUPTIBLE);
++	job = __pop(jobs);
++	set_current_state(state);
++	return job;
++}
++
++static inline void __push(struct list_head *jobs, struct kcopyd_job *job)
++{
++	spin_lock(&_job_lock);
++	list_add(&job->list, jobs);
++	spin_unlock(&_job_lock);
++}
++
++static void push(struct list_head *jobs, struct kcopyd_job *job)
++{
++	int state = current->state;
++
++	set_current_state(TASK_UNINTERRUPTIBLE);
++	__push(jobs, job);
++	set_current_state(state);
++}
++
++/*
++ * Completion function for one of our buffers.
++ */
++static void end_bh(struct buffer_head *bh, int uptodate)
++{
++	struct kcopyd_job *job = bh->b_private;
++
++	mark_buffer_uptodate(bh, uptodate);
++	unlock_buffer(bh);
++
++	if (!uptodate)
++		job->err = -EIO;
++
++	/* are we the last ? */
++	if (atomic_dec_and_test(&job->nr_incomplete)) {
++		__push(&_complete_jobs, job);
++		wake_kcopyd();
++	}
++
++	free_buffer(bh);
++}
++
++static void dispatch_bh(struct kcopyd_job *job,
++			struct buffer_head *bh, int block)
++{
++	int p;
++
++	/*
++	 * Add in the job offset
++	 */
++	block += job->offset >> job->block_shift;
++	bh->b_blocknr = (job->disk.sector >> job->block_shift) + block;
++
++	p = block >> job->bpp_shift;
++	block &= job->bpp_mask;
++
++	bh->b_dev = B_FREE;
++	bh->b_size = job->block_size;
++	set_bh_page(bh, job->pages[p],
++		    (block << job->block_shift) << SECTOR_SHIFT);
++	bh->b_this_page = bh;
++
++	init_buffer(bh, end_bh, job);
++
++	bh->b_dev = job->disk.dev;
++	bh->b_state = ((1 << BH_Mapped) | (1 << BH_Lock) | (1 << BH_Req));
++
++	set_bit(BH_Uptodate, &bh->b_state);
++	if (job->rw == WRITE)
++		clear_bit(BH_Dirty, &bh->b_state);
++
++	submit_bh(job->rw, bh);
++}
++
++/*
++ * These three functions process 1 item from the corresponding
++ * job list.
++ *
++ * They return:
++ * < 0: error
++ *   0: success
++ * > 0: can't process yet.
++ */
++static int run_complete_job(struct kcopyd_job *job)
++{
++	job->callback(job);
++	return 0;
++}
++
++/*
++ * Request io on as many buffer heads as we can currently get for
++ * a particular job.
++ */
++static int run_io_job(struct kcopyd_job *job)
++{
++	unsigned int block;
++	struct buffer_head *bh;
++
++	for (block = atomic_read(&job->nr_requested);
++	     block < job->nr_blocks; block++) {
++		bh = alloc_buffer();
++		if (!bh)
++			break;
++
++		atomic_inc(&job->nr_requested);
++		dispatch_bh(job, bh, block);
++	}
++
++	return (block == job->nr_blocks) ? 0 : 1;
++}
++
++static int run_pages_job(struct kcopyd_job *job)
++{
++	int r;
++
++	job->nr_pages = (job->disk.count + job->offset) /
++	    (PAGE_SIZE / SECTOR_SIZE);
++	r = kcopyd_get_pages(job->nr_pages, job->pages);
++	if (!r) {
++		/* this job is ready for io */
++		push(&_io_jobs, job);
++		return 0;
++	}
++
++	if (r == -ENOMEM)
++		/* can complete now */
++		return 1;
++
++	return r;
++}
++
++/*
++ * Run through a list for as long as possible.  Returns the count
++ * of successful jobs.
++ */
++static int process_jobs(struct list_head *jobs, int (*fn) (struct kcopyd_job *))
++{
++	struct kcopyd_job *job;
++	int r, count = 0;
++
++	while ((job = pop(jobs))) {
++
++		r = fn(job);
++
++		if (r < 0) {
++			/* error this rogue job */
++			job->err = r;
++			push(&_complete_jobs, job);
++			break;
++		}
++
++		if (r > 0) {
++			/*
++			 * We couldn't service this job ATM, so
++			 * push this job back onto the list.
++			 */
++			push(jobs, job);
++			break;
++		}
++
++		count++;
++	}
++
++	return count;
++}
++
++/*
++ * kcopyd does this every time it's woken up.
++ */
++static void do_work(void)
++{
++	int count;
++
++	/*
++	 * We loop round until there is no more work to do.
++	 */
++	do {
++		count = process_jobs(&_complete_jobs, run_complete_job);
++		count += process_jobs(&_io_jobs, run_io_job);
++		count += process_jobs(&_pages_jobs, run_pages_job);
++
++	} while (count);
++
++	run_task_queue(&tq_disk);
++}
++
++/*-----------------------------------------------------------------
++ * The daemon
++ *---------------------------------------------------------------*/
++static struct task_struct *_kcopyd_task;
++static atomic_t _kcopyd_must_die;
++static DECLARE_MUTEX(_run_lock);
++static DECLARE_WAIT_QUEUE_HEAD(_job_queue);
++
++/*
++ * A day in the life of a little daemon.
++ */
++static void kcopyd_cycle(void)
++{
++	DECLARE_WAITQUEUE(wq, current);
++
++	set_current_state(TASK_INTERRUPTIBLE);
++	add_wait_queue(&_job_queue, &wq);
++
++	do_work();
++	schedule();
++
++	set_current_state(TASK_RUNNING);
++	remove_wait_queue(&_job_queue, &wq);
++}
++
++static int kcopyd(void *start_lock)
++{
++	daemonize();
++	strcpy(current->comm, "kcopyd");
++	_kcopyd_task = current;
++	atomic_set(&_kcopyd_must_die, 0);
++	down(&_run_lock);
++	up((struct semaphore *) start_lock);
++
++	while (!atomic_read(&_kcopyd_must_die))
++		kcopyd_cycle();
++
++	up(&_run_lock);
++	DMINFO("kcopyd shutting down");
++	return 0;
++}
++
++static int start_daemon(void)
++{
++	static pid_t pid = 0;
++	DECLARE_MUTEX(start_lock);
++
++	down(&start_lock);
++	pid = kernel_thread(kcopyd, &start_lock, 0);
++	if (pid <= 0) {
++		DMERR("Failed to start kcopyd thread");
++		return -EAGAIN;
++	}
++
++	/*
++	 * wait for the daemon to up this mutex.
++	 */
++	down(&start_lock);
++	DMINFO("Started kcopyd thread");
++
++	return 0;
++}
++
++static int stop_daemon(void)
++{
++	if (_kcopyd_task) {
++		atomic_set(&_kcopyd_must_die, 1);
++		wake_kcopyd();
++		down(&_run_lock);
++	}
++
++	return 0;
++}
++
++static int wake_kcopyd(void)
++{
++	int r = 0;
++
++	/* Start the thread if we don't have one already */
++	if (!_kcopyd_task)
++		r = start_daemon();
++
++	if (!r)
++		wake_up_interruptible(&_job_queue);
++
++	return r;
++}
++
++static int calc_shift(unsigned int n)
++{
++	int s;
++
++	for (s = 0; n; s++, n >>= 1)
++		;
++
++	return --s;
++}
++
++static void calc_block_sizes(struct kcopyd_job *job)
++{
++	job->block_size = get_hardsect_size(job->disk.dev);
++	job->block_shift = calc_shift(job->block_size / SECTOR_SIZE);
++	job->bpp_shift = PAGE_SHIFT - job->block_shift - SECTOR_SHIFT;
++	job->bpp_mask = (1 << job->bpp_shift) - 1;
++	job->nr_blocks = job->disk.count >> job->block_shift;
++	atomic_set(&job->nr_requested, 0);
++	atomic_set(&job->nr_incomplete, job->nr_blocks);
++}
++
++int kcopyd_io(struct kcopyd_job *job)
++{
++	calc_block_sizes(job);
++	push(job->pages[0] ? &_io_jobs : &_pages_jobs, job);
++	wake_kcopyd();
++	return 0;
++}
++
++/*-----------------------------------------------------------------
++ * The copier is implemented on top of the simpler async io
++ * daemon above.
++ *---------------------------------------------------------------*/
++struct copy_info {
++	kcopyd_notify_fn notify;
++	void *notify_context;
++
++	struct kcopyd_region to;
++};
++
++#define MIN_INFOS 128
++static kmem_cache_t *_copy_cache = NULL;
++static mempool_t *_copy_pool = NULL;
++
++static __init int init_copier(void)
++{
++	_copy_cache = kmem_cache_create("kcopyd-info",
++					sizeof(struct copy_info),
++					__alignof__(struct copy_info),
++					0, NULL, NULL);
++	if (!_copy_cache)
++		return -ENOMEM;
++
++	_copy_pool = mempool_create(MIN_INFOS,
++				    mempool_alloc_slab,
++				    mempool_free_slab, _copy_cache);
++	if (!_copy_pool) {
++		kmem_cache_destroy(_copy_cache);
++		return -ENOMEM;
++	}
++
++	return 0;
++}
++
++static void exit_copier(void)
++{
++	if (_copy_pool)
++		mempool_destroy(_copy_pool);
++
++	if (_copy_cache)
++		kmem_cache_destroy(_copy_cache);
++}
++
++static inline struct copy_info *alloc_copy_info(void)
++{
++	return mempool_alloc(_copy_pool, GFP_KERNEL);
++}
++
++static inline void free_copy_info(struct copy_info *info)
++{
++	mempool_free(info, _copy_pool);
++}
++
++void copy_complete(struct kcopyd_job *job)
++{
++	struct copy_info *info = (struct copy_info *) job->context;
++
++	if (info->notify)
++		info->notify(job->err, info->notify_context);
++
++	free_copy_info(info);
++	kcopyd_free_pages(job->nr_pages, job->pages);
++	kcopyd_free_job(job);
++}
++
++/*
++ * These callback functions implement the state machine that copies regions.
++ * FIXME: handle large regions.
++ */
++void copy_write(struct kcopyd_job *job)
++{
++	struct copy_info *info = (struct copy_info *) job->context;
++
++	if (job->err && info->notify) {
++		info->notify(job->err, job->context);
++		kcopyd_free_job(job);
++		free_copy_info(info);
++		return;
++	}
++
++	job->rw = WRITE;
++	memcpy(&job->disk, &info->to, sizeof(job->disk));
++	job->callback = copy_complete;
++	job->context = info;
++
++	/*
++	 * Queue the write.
++	 */
++	kcopyd_io(job);
++}
++
++int kcopyd_copy(struct kcopyd_region *from,
++		struct kcopyd_region *to, kcopyd_notify_fn fn, void *context)
++{
++	struct copy_info *info;
++	struct kcopyd_job *job;
++
++	/*
++	 * Allocate a new copy_info.
++	 */
++	info = alloc_copy_info();
++	if (!info)
++		return -ENOMEM;
++
++	job = kcopyd_alloc_job();
++	if (!job) {
++		free_copy_info(info);
++		return -ENOMEM;
++	}
++
++	/*
++	 * set up for the read.
++	 */
++	info->notify = fn;
++	info->notify_context = context;
++	memcpy(&info->to, to, sizeof(*to));
++
++	job->rw = READ;
++	memcpy(&job->disk, from, sizeof(*from));
++
++	job->offset = 0;
++	calc_block_sizes(job);
++	job->callback = copy_write;
++	job->context = info;
++
++	/*
++	 * Trigger job.
++	 */
++	kcopyd_io(job);
++	return 0;
++}
++
++/*-----------------------------------------------------------------
++ * Unit setup
++ *---------------------------------------------------------------*/
++static struct {
++	int (*init) (void);
++	void (*exit) (void);
++
++} _inits[] = {
++#define xx(n) { init_ ## n, exit_ ## n}
++	xx(pages),
++	xx(buffers),
++	xx(jobs),
++	xx(copier)
++#undef xx
++};
++
++static int _has_initialised = 0;
 +
 +int __init kcopyd_init(void)
 +{
-+	init_rwsem(&work_list_lock);
-+	init_rwsem(&free_list_lock);
-+	init_MUTEX(&start_lock);
-+	init_MUTEX(&run_lock);
++	const int count = sizeof(_inits) / sizeof(*_inits);
 +
-+	if (alloc_kiovec(1, &iobuf)) {
-+		DMERR("Unable to allocate kiobuf for kcopyd");
-+		return -1;
++	int r, i;
++
++	if (_has_initialised)
++		return 0;
++
++	for (i = 0; i < count; i++) {
++		r = _inits[i].init();
++		if (r)
++			goto bad;
 +	}
 +
-+	if (alloc_iobuf_pages(iobuf, KIO_MAX_SECTORS)) {
-+		DMERR("Unable to allocate pages for kcopyd");
-+		free_kiovec(1, &iobuf);
-+		return -1;
-+	}
-+
-+	entry_cachep = kmem_cache_create("kcopyd",
-+					 sizeof(struct copy_work),
-+					 __alignof__(struct copy_work),
-+					 0, NULL, NULL);
-+	if (!entry_cachep) {
-+		unmap_kiobuf(iobuf);
-+		free_kiovec(1, &iobuf);
-+		DMERR("Unable to allocate slab cache for kcopyd");
-+		return -1;
-+	}
-+
-+	if (allocate_free_list() == 0) {
-+		unmap_kiobuf(iobuf);
-+		free_kiovec(1, &iobuf);
-+		kmem_cache_destroy(entry_cachep);
-+		DMERR("Unable to allocate any work structures for the free list");
-+		return -1;
-+	}
-+
++	_has_initialised = 1;
 +	return 0;
++
++      bad:
++	while (i--)
++		_inits[i].exit();
++
++	return r;
 +}
 +
 +void kcopyd_exit(void)
 +{
-+	struct list_head *entry, *temp;
++	int i = sizeof(_inits) / sizeof(*_inits);
 +
-+	thread_exit = 1;
-+	wake_up_interruptible(&work_waitq);
++	if (stop_daemon())
++		DMWARN("Couldn't stop kcopyd.");
 +
-+	/* Wait for the thread to finish */
-+	down(&run_lock);
-+	up(&run_lock);
++	while (i--)
++		_inits[i].exit();
 +
-+        /* Free the free list */
-+	list_for_each_safe(entry, temp, &free_list) {
-+		struct copy_work *cw;
-+		cw = list_entry(entry, struct copy_work, list);
-+		list_del(&cw->list);
-+		kfree(cw);
-+	}
-+
-+	if (entry_cachep)
-+		kmem_cache_destroy(entry_cachep);
++	_has_initialised = 0;
 +}
+diff -ruN linux-2.4.18/drivers/md/kcopyd.h linux/drivers/md/kcopyd.h
+--- linux-2.4.18/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
++++ linux/drivers/md/kcopyd.h	Tue Apr 23 22:23:30 2002
+@@ -0,0 +1,96 @@
++/*
++ * Copyright (C) 2001 Sistina Software
++ *
++ * This file is released under the GPL.
++ */
 +
-+EXPORT_SYMBOL(dm_blockcopy);
++#ifndef DM_KCOPYD_H
++#define DM_KCOPYD_H
 +
 +/*
-+ * Overrides for Emacs so that we follow Linus's tabbing style.
-+ * Emacs will notice this stuff at the end of the file and automatically
-+ * adjust the settings for this buffer only.  This must remain at the end
-+ * of the file.
-+ * ---------------------------------------------------------------------------
-+ * Local variables:
-+ * c-file-style: "linux"
-+ * End:
++ * Needed for the definition of offset_t.
 + */
++#include <linux/device-mapper.h>
++#include <linux/iobuf.h>
++
++struct kcopyd_region {
++	kdev_t dev;
++	offset_t sector;
++	offset_t count;
++};
++
++#define MAX_KCOPYD_PAGES 128
++
++struct kcopyd_job {
++	struct list_head list;
++
++	/*
++	 * Error state of the job.
++	 */
++	int err;
++
++	/*
++	 * Either READ or WRITE
++	 */
++	int rw;
++
++	/*
++	 * The source or destination for the transfer.
++	 */
++	struct kcopyd_region disk;
++
++	int nr_pages;
++	struct page *pages[MAX_KCOPYD_PAGES];
++
++	/*
++	 * Shifts and masks that will be useful when dispatching
++	 * each buffer_head.
++	 */
++	offset_t offset;
++	offset_t block_size;
++	offset_t block_shift;
++	offset_t bpp_shift;	/* blocks per page */
++	offset_t bpp_mask;
++
++	/*
++	 * nr_blocks is how many buffer heads will have to be
++	 * displatched to service this job, nr_requested is how
++	 * many have been dispatched and nr_complete is how many
++	 * have come back.
++	 */
++	unsigned int nr_blocks;
++	atomic_t nr_requested;
++	atomic_t nr_incomplete;
++
++	/*
++	 * Set this to ensure you are notified when the job has
++	 * completed.  'context' is for callback to use.
++	 */
++	void (*callback) (struct kcopyd_job *job);
++	void *context;
++};
++
++/*
++ * Low level async io routines.
++ */
++struct kcopyd_job *kcopyd_alloc_job(void);
++void kcopyd_free_job(struct kcopyd_job *job);
++
++int kcopyd_queue_job(struct kcopyd_job *job);
++
++/*
++ * Submit a copy job to kcopyd.  This is built on top of the
++ * previous three fns.
++ */
++typedef void (*kcopyd_notify_fn) (int err, void *context);
++
++int kcopyd_copy(struct kcopyd_region *from,
++		struct kcopyd_region *to, kcopyd_notify_fn fn, void *context);
++
++/*
++ * Setup/teardown.
++ */
++int kcopyd_init(void);
++void kcopyd_exit(void);
++
++#endif
 diff -ruN linux-2.4.18/include/linux/device-mapper.h linux/include/linux/device-mapper.h
 --- linux-2.4.18/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
 +++ linux/include/linux/device-mapper.h	Thu Mar  7 16:56:22 2002
@@ -5649,7 +6187,7 @@ diff -ruN linux-2.4.18/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.18/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 --- linux-2.4.18/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Thu Mar 14 16:32:58 2002
++++ linux/include/linux/dm-ioctl.h	Tue Apr 23 22:38:54 2002
 @@ -0,0 +1,103 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -5745,7 +6283,7 @@ diff -ruN linux-2.4.18/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +#define DM_REMOVE_ALL	_IOR(DM_IOCTL, DM_REMOVE_ALL_CMD, struct dm_ioctl)
 +
 +#define DM_IOCTL_VERSION "0.94"
-+#define DM_DRIVER_VERSION "0.94.08-ioctl-cvs (2002-03-14)"
++#define DM_DRIVER_VERSION "0.94.10-ioctl (2002-04-23)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	0x00000001
@@ -5756,7 +6294,7 @@ diff -ruN linux-2.4.18/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 +#endif				/* _LINUX_DM_IOCTL_H */
 diff -ruN linux-2.4.18/include/linux/fs.h linux/include/linux/fs.h
 --- linux-2.4.18/include/linux/fs.h	Mon Mar  4 17:42:19 2002
-+++ linux/include/linux/fs.h	Thu Mar 14 16:33:11 2002
++++ linux/include/linux/fs.h	Tue Apr 23 22:39:09 2002
 @@ -258,7 +258,10 @@
  	char * b_data;			/* pointer to data block */
  	struct page *b_page;		/* the page this bh is mapped to */
@@ -5769,3 +6307,365 @@ diff -ruN linux-2.4.18/include/linux/fs.h linux/include/linux/fs.h
  
  	unsigned long b_rsector;	/* Real buffer location on disk */
  	wait_queue_head_t b_wait;
+diff -ruN linux-2.4.18/include/linux/mempool.h linux/include/linux/mempool.h
+--- linux-2.4.18/include/linux/mempool.h	Thu Jan  1 01:00:00 1970
++++ linux/include/linux/mempool.h	Tue Apr 23 22:39:09 2002
+@@ -0,0 +1,41 @@
++/*
++ * memory buffer pool support
++ */
++#ifndef _LINUX_MEMPOOL_H
++#define _LINUX_MEMPOOL_H
++
++#include <linux/list.h>
++#include <linux/wait.h>
++
++struct mempool_s;
++typedef struct mempool_s mempool_t;
++
++typedef void * (mempool_alloc_t)(int gfp_mask, void *pool_data);
++typedef void (mempool_free_t)(void *element, void *pool_data);
++
++struct mempool_s {
++	spinlock_t lock;
++	int min_nr, curr_nr;
++	struct list_head elements;
++
++	void *pool_data;
++	mempool_alloc_t *alloc;
++	mempool_free_t *free;
++	wait_queue_head_t wait;
++};
++extern mempool_t * mempool_create(int min_nr, mempool_alloc_t *alloc_fn,
++				 mempool_free_t *free_fn, void *pool_data);
++extern void mempool_resize(mempool_t *pool, int new_min_nr, int gfp_mask);
++extern void mempool_destroy(mempool_t *pool);
++extern void * mempool_alloc(mempool_t *pool, int gfp_mask);
++extern void mempool_free(void *element, mempool_t *pool);
++
++
++/*
++ * A mempool_alloc_t and mempool_free_t that get the memory from
++ * a slab that is passed in through pool_data.
++ */
++void *mempool_alloc_slab(int gfp_mask, void *pool_data);
++void mempool_free_slab(void *element, void *pool_data);
++
++#endif /* _LINUX_MEMPOOL_H */
+diff -ruN linux-2.4.18/mm/Makefile linux/mm/Makefile
+--- linux-2.4.18/mm/Makefile	Wed Oct 24 23:21:18 2001
++++ linux/mm/Makefile	Tue Apr 23 22:39:09 2002
+@@ -9,12 +9,12 @@
+ 
+ O_TARGET := mm.o
+ 
+-export-objs := shmem.o filemap.o
++export-objs := shmem.o filemap.o memory.o page_alloc.o mempool.o
+ 
+ obj-y	 := memory.o mmap.o filemap.o mprotect.o mlock.o mremap.o \
+ 	    vmalloc.o slab.o bootmem.o swap.o vmscan.o page_io.o \
+ 	    page_alloc.o swap_state.o swapfile.o numa.o oom_kill.o \
+-	    shmem.o
++	    shmem.o mempool.o
+ 
+ obj-$(CONFIG_HIGHMEM) += highmem.o
+ 
+diff -ruN linux-2.4.18/mm/mempool.c linux/mm/mempool.c
+--- linux-2.4.18/mm/mempool.c	Thu Jan  1 01:00:00 1970
++++ linux/mm/mempool.c	Tue Apr 23 22:39:09 2002
+@@ -0,0 +1,295 @@
++/*
++ *  linux/mm/mempool.c
++ *
++ *  memory buffer pool support. Such pools are mostly used
++ *  for guaranteed, deadlock-free memory allocations during
++ *  extreme VM load.
++ *
++ *  started by Ingo Molnar, Copyright (C) 2001
++ */
++
++#include <linux/mm.h>
++#include <linux/slab.h>
++#include <linux/module.h>
++#include <linux/mempool.h>
++#include <linux/compiler.h>
++
++/**
++ * mempool_create - create a memory pool
++ * @min_nr:    the minimum number of elements guaranteed to be
++ *             allocated for this pool.
++ * @alloc_fn:  user-defined element-allocation function.
++ * @free_fn:   user-defined element-freeing function.
++ * @pool_data: optional private data available to the user-defined functions.
++ *
++ * this function creates and allocates a guaranteed size, preallocated
++ * memory pool. The pool can be used from the mempool_alloc and mempool_free
++ * functions. This function might sleep. Both the alloc_fn() and the free_fn()
++ * functions might sleep - as long as the mempool_alloc function is not called
++ * from IRQ contexts. The element allocated by alloc_fn() must be able to
++ * hold a struct list_head. (8 bytes on x86.)
++ */
++mempool_t * mempool_create(int min_nr, mempool_alloc_t *alloc_fn,
++				mempool_free_t *free_fn, void *pool_data)
++{
++	mempool_t *pool;
++	int i;
++
++	pool = kmalloc(sizeof(*pool), GFP_KERNEL);
++	if (!pool)
++		return NULL;
++	memset(pool, 0, sizeof(*pool));
++
++	spin_lock_init(&pool->lock);
++	pool->min_nr = min_nr;
++	pool->pool_data = pool_data;
++	INIT_LIST_HEAD(&pool->elements);
++	init_waitqueue_head(&pool->wait);
++	pool->alloc = alloc_fn;
++	pool->free = free_fn;
++
++	/*
++	 * First pre-allocate the guaranteed number of buffers.
++	 */
++	for (i = 0; i < min_nr; i++) {
++		void *element;
++		struct list_head *tmp;
++		element = pool->alloc(GFP_KERNEL, pool->pool_data);
++
++		if (unlikely(!element)) {
++			/*
++			 * Not enough memory - free the allocated ones
++			 * and return:
++			 */
++			list_for_each(tmp, &pool->elements) {
++				element = tmp;
++				pool->free(element, pool->pool_data);
++			}
++			kfree(pool);
++
++			return NULL;
++		}
++		tmp = element;
++		list_add(tmp, &pool->elements);
++		pool->curr_nr++;
++	}
++	return pool;
++}
++
++/**
++ * mempool_resize - resize an existing memory pool
++ * @pool:       pointer to the memory pool which was allocated via
++ *              mempool_create().
++ * @new_min_nr: the new minimum number of elements guaranteed to be
++ *              allocated for this pool.
++ * @gfp_mask:   the usual allocation bitmask.
++ *
++ * This function shrinks/grows the pool. In the case of growing,
++ * it cannot be guaranteed that the pool will be grown to the new
++ * size immediately, but new mempool_free() calls will refill it.
++ *
++ * Note, the caller must guarantee that no mempool_destroy is called
++ * while this function is running. mempool_alloc() & mempool_free()
++ * might be called (eg. from IRQ contexts) while this function executes.
++ */
++void mempool_resize(mempool_t *pool, int new_min_nr, int gfp_mask)
++{
++	int delta;
++	void *element;
++	unsigned long flags;
++	struct list_head *tmp;
++
++	if (new_min_nr <= 0)
++		BUG();
++
++	spin_lock_irqsave(&pool->lock, flags);
++	if (new_min_nr < pool->min_nr) {
++		pool->min_nr = new_min_nr;
++		/*
++		 * Free possible excess elements.
++		 */
++		while (pool->curr_nr > pool->min_nr) {
++			tmp = pool->elements.next;
++			if (tmp == &pool->elements)
++				BUG();
++			list_del(tmp);
++			element = tmp;
++			pool->curr_nr--;
++			spin_unlock_irqrestore(&pool->lock, flags);
++
++			pool->free(element, pool->pool_data);
++
++			spin_lock_irqsave(&pool->lock, flags);
++		}
++		spin_unlock_irqrestore(&pool->lock, flags);
++		return;
++	}
++	delta = new_min_nr - pool->min_nr;
++	pool->min_nr = new_min_nr;
++	spin_unlock_irqrestore(&pool->lock, flags);
++
++	/*
++	 * We refill the pool up to the new treshold - but we dont
++	 * (cannot) guarantee that the refill succeeds.
++	 */
++	while (delta) {
++		element = pool->alloc(gfp_mask, pool->pool_data);
++		if (!element)
++			break;
++		mempool_free(element, pool);
++		delta--;
++	}
++}
++
++/**
++ * mempool_destroy - deallocate a memory pool
++ * @pool:      pointer to the memory pool which was allocated via
++ *             mempool_create().
++ *
++ * this function only sleeps if the free_fn() function sleeps. The caller
++ * has to guarantee that no mempool_alloc() nor mempool_free() happens in
++ * this pool when calling this function.
++ */
++void mempool_destroy(mempool_t *pool)
++{
++	void *element;
++	struct list_head *head, *tmp;
++
++	if (!pool)
++		return;
++
++	head = &pool->elements;
++	for (tmp = head->next; tmp != head; ) {
++		element = tmp;
++		tmp = tmp->next;
++		pool->free(element, pool->pool_data);
++		pool->curr_nr--;
++	}
++	if (pool->curr_nr)
++		BUG();
++	kfree(pool);
++}
++
++/**
++ * mempool_alloc - allocate an element from a specific memory pool
++ * @pool:      pointer to the memory pool which was allocated via
++ *             mempool_create().
++ * @gfp_mask:  the usual allocation bitmask.
++ *
++ * this function only sleeps if the alloc_fn function sleeps or
++ * returns NULL. Note that due to preallocation, this function
++ * *never* fails when called from process contexts. (it might
++ * fail if called from an IRQ context.)
++ */
++void * mempool_alloc(mempool_t *pool, int gfp_mask)
++{
++	void *element;
++	unsigned long flags;
++	struct list_head *tmp;
++	int curr_nr;
++	DECLARE_WAITQUEUE(wait, current);
++	int gfp_nowait = gfp_mask & ~(__GFP_WAIT | __GFP_IO);
++
++repeat_alloc:
++	element = pool->alloc(gfp_nowait, pool->pool_data);
++	if (likely(element != NULL))
++		return element;
++
++	/*
++	 * If the pool is less than 50% full then try harder
++	 * to allocate an element:
++	 */
++	if ((gfp_mask != gfp_nowait) && (pool->curr_nr <= pool->min_nr/2)) {
++		element = pool->alloc(gfp_mask, pool->pool_data);
++		if (likely(element != NULL))
++			return element;
++	}
++
++	/*
++	 * Kick the VM at this point.
++	 */
++	wakeup_bdflush();
++
++	spin_lock_irqsave(&pool->lock, flags);
++	if (likely(pool->curr_nr)) {
++		tmp = pool->elements.next;
++		list_del(tmp);
++		element = tmp;
++		pool->curr_nr--;
++		spin_unlock_irqrestore(&pool->lock, flags);
++		return element;
++	}
++	spin_unlock_irqrestore(&pool->lock, flags);
++
++	/* We must not sleep in the GFP_ATOMIC case */
++	if (gfp_mask == gfp_nowait)
++		return NULL;
++
++	run_task_queue(&tq_disk);
++
++	add_wait_queue_exclusive(&pool->wait, &wait);
++	set_task_state(current, TASK_UNINTERRUPTIBLE);
++
++	spin_lock_irqsave(&pool->lock, flags);
++	curr_nr = pool->curr_nr;
++	spin_unlock_irqrestore(&pool->lock, flags);
++
++	if (!curr_nr)
++		schedule();
++
++	current->state = TASK_RUNNING;
++	remove_wait_queue(&pool->wait, &wait);
++
++	goto repeat_alloc;
++}
++
++/**
++ * mempool_free - return an element to the pool.
++ * @element:   pool element pointer.
++ * @pool:      pointer to the memory pool which was allocated via
++ *             mempool_create().
++ *
++ * this function only sleeps if the free_fn() function sleeps.
++ */
++void mempool_free(void *element, mempool_t *pool)
++{
++	unsigned long flags;
++
++	if (pool->curr_nr < pool->min_nr) {
++		spin_lock_irqsave(&pool->lock, flags);
++		if (pool->curr_nr < pool->min_nr) {
++			list_add(element, &pool->elements);
++			pool->curr_nr++;
++			spin_unlock_irqrestore(&pool->lock, flags);
++			wake_up(&pool->wait);
++			return;
++		}
++		spin_unlock_irqrestore(&pool->lock, flags);
++	}
++	pool->free(element, pool->pool_data);
++}
++
++/*
++ * A commonly used alloc and free fn.
++ */
++void *mempool_alloc_slab(int gfp_mask, void *pool_data)
++{
++	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
++	return kmem_cache_alloc(mem, gfp_mask);
++}
++
++void mempool_free_slab(void *element, void *pool_data)
++{
++	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
++	kmem_cache_free(mem, element);
++}
++
++
++EXPORT_SYMBOL(mempool_create);
++EXPORT_SYMBOL(mempool_resize);
++EXPORT_SYMBOL(mempool_destroy);
++EXPORT_SYMBOL(mempool_alloc);
++EXPORT_SYMBOL(mempool_free);
++EXPORT_SYMBOL(mempool_alloc_slab);
++EXPORT_SYMBOL(mempool_free_slab);
++

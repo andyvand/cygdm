@@ -172,22 +172,6 @@ int dm_table_add_target(struct dm_table *t, offset_t highs,
 			struct target_type *type, void *private);
 int dm_table_complete(struct dm_table *t);
 
-/* kcopyd.c */
-typedef enum {
-	COPY_CB_COMPLETE,
-	COPY_CB_FAILED_READ,
-	COPY_CB_FAILED_WRITE,
-	COPY_CB_PROGRESS
-} copy_cb_reason_t;
-
-int dm_blockcopy(unsigned long fromsec, unsigned long tosec,
-		 unsigned long nr_sectors, kdev_t fromdev, kdev_t todev,
-		 int priority, int throttle,
-		 void (*callback) (copy_cb_reason_t, void *, long),
-		 void *context);
-int kcopyd_init(void);
-void kcopyd_exit(void);
-
 /* Snapshots */
 int dm_snapshot_init(void);
 void dm_snapshot_exit(void);
@@ -220,12 +204,8 @@ static inline offset_t *get_node(struct dm_table *t, int l, int n)
  * The device-mapper can be driven through one of two interfaces;
  * ioctl or filesystem, depending which patch you have applied.
  */
-
 int __init dm_interface_init(void);
 void dm_interface_exit(void);
-
-/* Code in dm-snapshot called by dm-origin to do snapshot COW */
-int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh);
 
 /*
  * Targets for linear and striped mappings

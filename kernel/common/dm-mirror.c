@@ -5,6 +5,7 @@
  */
 
 #include "dm.h"
+#include "kcopyd.h"
 
 #include <linux/module.h>
 #include <linux/init.h>
@@ -34,7 +35,6 @@ struct mirror_c {
 	int error;
 };
 
-
 /* Called when a duplicating I/O has finished */
 static void mirror_end_io(struct buffer_head *bh, int uptodate)
 {
@@ -55,8 +55,7 @@ static void mirror_bh(struct mirror_c *mc, struct buffer_head *bh)
 	if (dbh) {
 		*dbh = *bh;
 		dbh->b_rdev = mc->todev->dev;
-		dbh->b_rsector = bh->b_rsector - mc->from_delta
-			+ mc->to_delta;
+		dbh->b_rsector = bh->b_rsector - mc->from_delta + mc->to_delta;
 		dbh->b_end_io = mirror_end_io;
 		dbh->b_private = mc;
 
@@ -120,6 +119,7 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	char *value;
 	int priority = MIRROR_COPY_PRIORITY;
 	int throttle;
+	struct kcopyd_region src, dest;
 
 	if (argc <= 4) {
 		*context = "dm-mirror: Not enough arguments";
@@ -180,10 +180,15 @@ static int mirror_ctr(struct dm_table *t, offset_t b, offset_t l,
 	*context = lc;
 
 	/* Tell kcopyd to do the biz */
-	if (dm_blockcopy(offset1, offset2,
-			 l - offset1,
-			 lc->fromdev->dev, lc->todev->dev,
-			 priority, 0, copy_callback, lc)) {
+	src.dev = lc->fromdev->dev;
+	src.sector = offset1;
+	src.count = l - offset1;
+
+	dest.dev = lc->todev->dev;
+	dest.sector = offset2;
+	dest.count = l - offset1;
+
+	if (kcopyd_copy(&src, &dest, priority, 0, copy_callback, lc)) {
 		DMERR("block copy call failed");
 		dm_table_put_device(t, lc->fromdev);
 		dm_table_put_device(t, lc->todev);
@@ -263,7 +268,6 @@ int __init dm_mirror_init(void)
 	if (!bh_cachep) {
 		return -1;
 	}
-
 
 	r = dm_register_target(&mirror_target);
 	if (r < 0) {

@@ -1,6 +1,4 @@
 /*
- * kcopyd.c
- *
  * Copyright (C) 2002 Sistina Software (UK) Limited.
  *
  * This file is released under the GPL.
@@ -14,466 +12,768 @@
 #include <linux/fs.h>
 #include <linux/blkdev.h>
 #include <linux/device-mapper.h>
+#include <linux/mempool.h>
+#include <asm/atomic.h>
 
+#include "kcopyd.h"
+
+/* FIXME: this is only needed for the DMERR macros */
 #include "dm.h"
 
-/* Hard sector size used all over the kernel */
+/*
+ * Hard sector size used all over the kernel.
+ */
 #define SECTOR_SIZE 512
-
-/* Number of entries in the free list to start with */
-#define FREE_LIST_SIZE 32
-
-/* Slab cache for work entries when the freelist runs out */
-static kmem_cache_t *entry_cachep;
-
-/* Structure of work to do in the list */
-struct copy_work
-{
-	unsigned long fromsec;
-	unsigned long tosec;
-	unsigned long nr_sectors;
-	unsigned long done_sectors;
-	kdev_t fromdev;
-	kdev_t todev;
-	int    throttle;
-	int    priority; /* 0=highest */
-	void   (*callback)(copy_cb_reason_t, void *, long);
-	void   *context;
-	int    freelist;      /* Whether we came from the free list */
-	struct list_head list;
-};
-
-static LIST_HEAD(work_list);
-static LIST_HEAD(free_list);
-static struct task_struct *copy_task = NULL;
-static struct rw_semaphore work_list_lock;
-static struct rw_semaphore free_list_lock;
-static DECLARE_MUTEX(start_lock);
-static DECLARE_MUTEX(run_lock);
-static DECLARE_WAIT_QUEUE_HEAD(start_waitq);
-static DECLARE_WAIT_QUEUE_HEAD(work_waitq);
-static DECLARE_WAIT_QUEUE_HEAD(freelist_waitq);
-static struct kiobuf *iobuf;
-static int thread_exit = 0;
-static long last_jiffies = 0;
-
-/* Find a free entry from the free-list or allocate a new one.
-   This routine always returns a valid pointer even if it has to wait
-   for it */
-static struct copy_work *get_work_struct(void)
-{
-	struct copy_work *entry = NULL;
-
-	while (!entry) {
-
-		down_write(&free_list_lock);
-		if (!list_empty(&free_list)) {
-			entry = list_entry(free_list.next, struct copy_work, list);
-			list_del(&entry->list);
-		}
-		up_write(&free_list_lock);
-
-		if (!entry) {
-			/* Nothing on the free-list - try to allocate one without doing IO */
-			entry = kmem_cache_alloc(entry_cachep, GFP_NOIO);
-
-			/* Make sure we know it didn't come from the free list */
-			if (entry) {
-				entry->freelist = 0;
-			}
-		}
-
-		/* Failed...wait for IO to finish */
-		if (!entry) {
-			DECLARE_WAITQUEUE(wq, current);
-
-			set_task_state(current, TASK_INTERRUPTIBLE);
-			add_wait_queue(&freelist_waitq, &wq);
-
-			if (list_empty(&free_list))
-				schedule();
-
-			set_task_state(current, TASK_RUNNING);
-			remove_wait_queue(&freelist_waitq, &wq);
-		}
-	}
-
-	return entry;
-}
-
-/* Allocate pages for a kiobuf. */
-static int alloc_iobuf_pages(struct kiobuf *iobuf, int nr_sectors)
-{
-	int nr_pages, err, i;
-
-	if (nr_sectors > KIO_MAX_SECTORS)
-		return -1;
-
-	nr_pages = nr_sectors / (PAGE_SIZE/SECTOR_SIZE);
-	err = expand_kiobuf(iobuf, nr_pages);
-	if (err) goto out;
-
-	err = -ENOMEM;
-	iobuf->locked = 1;
-	iobuf->nr_pages = 0;
-	for (i = 0; i < nr_pages; i++) {
-		struct page * page;
-
-		page = alloc_page(GFP_KERNEL);
-		if (!page) goto out;
-
-		iobuf->maplist[i] = page;
-		LockPage(page);
-		iobuf->nr_pages++;
-	}
-	iobuf->offset = 0;
-
-	err = 0;
-
-out:
-	return err;
-}
-
-
-/* Add a new entry to the work list - in priority+FIFO order.
-   The work_list_lock semaphore must be held */
-static void add_to_work_list(struct copy_work *item)
-{
-	struct list_head *entry;
-
-	list_for_each(entry, &work_list) {
-		struct copy_work *cw;
-
-		cw = list_entry(entry, struct copy_work, list);
-		if (cw->priority > item->priority) {
-			__list_add(&item->list, cw->list.prev, &cw->list);
-			return;
-		}
-	}
-	list_add_tail(&item->list, &work_list);
-}
-
-/* Read in a chunk from the source device */
-static int read_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, int nr_sectors)
-{
-	int i, sectors_per_block, nr_blocks;
-	int blocksize = get_hardsect_size(dev);
-	int status;
-
-	sectors_per_block = blocksize / SECTOR_SIZE;
-
-	nr_blocks = nr_sectors / sectors_per_block;
-	start /= sectors_per_block;
-
-	for (i = 0; i < nr_blocks; i++)
-		iobuf->blocks[i] = start++;
-
-	iobuf->length = nr_sectors << 9;
-
-	status = brw_kiovec(READ, 1, &iobuf, dev, iobuf->blocks, blocksize);
-	return (status != (nr_sectors << 9));
-}
-
-/* Write out blocks */
-static int write_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, int nr_sectors)
-{
-	int i, sectors_per_block, nr_blocks;
-	int blocksize = get_hardsect_size(dev);
-	int status;
-
-	sectors_per_block = blocksize / SECTOR_SIZE;
-
-	nr_blocks = nr_sectors / sectors_per_block;
-	start /= sectors_per_block;
-
-	for (i = 0; i < nr_blocks; i++)
-		iobuf->blocks[i] = start++;
-
-	iobuf->length = nr_sectors << 9;
-
-	status = brw_kiovec(WRITE, 1, &iobuf, dev, iobuf->blocks, blocksize);
-	return (status != (nr_sectors << 9));
-}
-
-/* This is where all the real work happens */
-static int copy_kthread(void *unused)
-{
-	daemonize();
-	down(&run_lock);
-
-	strcpy(current->comm, "kcopyd");
-	copy_task = current;
-	wake_up_interruptible(&start_waitq);
-
-	do {
-		DECLARE_WAITQUEUE(wq, current);
-		struct task_struct *tsk = current;
-
-		down_write(&work_list_lock);
-
-		while (!list_empty(&work_list)) {
-
-			struct copy_work *work_item = list_entry(work_list.next, struct copy_work, list);
-			int done_sps;
-			copy_cb_reason_t callback_reason = COPY_CB_COMPLETE;
-			int preempted = 0;
-
-			list_del(&work_item->list);
-			up_write(&work_list_lock);
-
-			while (!preempted && work_item->done_sectors < work_item->nr_sectors) {
-				long nr_sectors = min((unsigned long)KIO_MAX_SECTORS,
-						      work_item->nr_sectors - work_item->done_sectors);
-
-				/* Read original blocks */
-				if (read_blocks(iobuf, work_item->fromdev, work_item->fromsec + work_item->done_sectors,
-						nr_sectors)) {
-					DMERR("Read blocks from device %s failed", kdevname(work_item->fromdev));
-
-					/* Callback error */
-					callback_reason = COPY_CB_FAILED_READ;
-					goto done_copy;
-				}
-
-				/* Write them out again */
-				if (write_blocks(iobuf, work_item->todev, work_item->tosec + work_item->done_sectors,
-						 nr_sectors)) {
-					DMERR("Write blocks to %s failed", kdevname(work_item->todev));
-
-					/* Callback error */
-					callback_reason = COPY_CB_FAILED_WRITE;
-					goto done_copy;
-				}
-				work_item->done_sectors += nr_sectors;
-
-				/* If we have exceeded the throttle value (in sectors/second) then
-				   sleep for a while */
-				done_sps = nr_sectors*HZ/(jiffies-last_jiffies);
-				if (work_item->throttle && done_sps > work_item->throttle && done_sps) {
-					long start_jiffies = jiffies;
-					do {
-						schedule_timeout(done_sps - work_item->throttle * HZ);
-					} while (jiffies <= start_jiffies+(done_sps - work_item->throttle * HZ));
-				}
-
-				/* Do a progress callback */
-				if (work_item->callback && work_item->done_sectors < work_item->nr_sectors)
-					work_item->callback(COPY_CB_PROGRESS, work_item->context, work_item->done_sectors);
-
-				/* Look for higher priority work */
-				down_write(&work_list_lock);
-				if (!list_empty(&work_list)) {
-					struct copy_work *peek_item = list_entry(work_list.next, struct copy_work, list);
-
-					if (peek_item->priority < work_item->priority) {
-
-						/* Put this back on the list and restart to get the new one */
-						add_to_work_list(work_item);
-						preempted = 1;
-						goto restart;
-					}
-				}
-				up_write(&work_list_lock);
-			}
-
-		done_copy:
-			/* Call the callback */
-			if (work_item->callback)
-				work_item->callback(callback_reason, work_item->context, work_item->done_sectors);
-
-			/* Add it back to the free list (if it came from there)
-			   and notify anybody waiting for an entry */
-			if (work_item->freelist) {
-				down_write(&free_list_lock);
-				list_add(&work_item->list, &free_list);
-				up_write(&free_list_lock);
-			}
-			else {
-				kmem_cache_free(entry_cachep, work_item);
-			}
-			wake_up_interruptible(&freelist_waitq);
-
-			/* Get the work lock again for the top of the while loop */
-			down_write(&work_list_lock);
-		restart:
-		}
-		up_write(&work_list_lock);
-
-		/* Wait for more work */
-		set_task_state(tsk, TASK_INTERRUPTIBLE);
-		add_wait_queue(&work_waitq, &wq);
-
-		if (list_empty(&work_list))
-			schedule();
-
-		set_task_state(tsk, TASK_RUNNING);
-		remove_wait_queue(&work_waitq, &wq);
-
-	} while (thread_exit == 0);
-
-	unmap_kiobuf(iobuf);
-	free_kiovec(1, &iobuf);
-
-	up(&run_lock);
-	return 0;
-}
-
-/* API entry point */
-int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_sectors,
-		 kdev_t fromdev, kdev_t todev,
-		 int priority, int throttle, void (*callback)(copy_cb_reason_t, void *, long), void *context)
-{
-	struct copy_work *newwork;
-	static pid_t thread_pid = 0;
-	long from_blocksize = get_hardsect_size(fromdev);
-	long to_blocksize = get_hardsect_size(todev);
-
-	/* Make sure the start sectors are on physical block boundaries */
-	if (fromsec % (from_blocksize/SECTOR_SIZE))
-		return -EINVAL;
-	if (tosec % (to_blocksize/SECTOR_SIZE))
-		return -EINVAL;
-
-	/* Start the thread if we don't have one already */
-	down(&start_lock);
-	if (copy_task == NULL) {
-		thread_pid = kernel_thread(copy_kthread, NULL, 0);
-		if (thread_pid > 0) {
-
-			DECLARE_WAITQUEUE(wq, current);
-			struct task_struct *tsk = current;
-
-			DMINFO("Started kcopyd thread");
-
-			/* Wait for it to complete it's startup initialisation */
-			set_task_state(tsk, TASK_INTERRUPTIBLE);
-			add_wait_queue(&start_waitq, &wq);
-
-			if (copy_task == NULL)
-				schedule();
-
-			set_task_state(tsk, TASK_RUNNING);
-			remove_wait_queue(&start_waitq, &wq);
-		}
-		else {
-			DMERR("Failed to start kcopyd thread");
-			up(&start_lock);
-			return -EAGAIN;
-		}
-	}
-	up(&start_lock);
-
-	/* This will wait until one is available */
-	newwork = get_work_struct();
-
-	newwork->fromsec      = fromsec;
-	newwork->tosec        = tosec;
-	newwork->fromdev      = fromdev;
-	newwork->todev        = todev;
-	newwork->nr_sectors   = nr_sectors;
-	newwork->done_sectors = 0;
-	newwork->throttle     = throttle;
-	newwork->priority     = priority;
-	newwork->callback     = callback;
-	newwork->context      = context;
-
-	down_write(&work_list_lock);
-	add_to_work_list(newwork);
-	up_write(&work_list_lock);
-
-	wake_up_interruptible(&work_waitq);
-	return 0;
-}
-
-
-/* Pre-allocate some structures for the free list */
-static int allocate_free_list(void)
+#define SECTOR_SHIFT 9
+static int wake_kcopyd(void);
+
+/*-----------------------------------------------------------------
+ * We reserve our own pool of preallocated pages that are
+ * only used for kcopyd io.
+ *---------------------------------------------------------------*/
+
+/*
+ * FIXME: This should be configurable.
+ */
+#define NUM_PAGES 512
+
+static DECLARE_MUTEX(_pages_lock);
+static int _num_free_pages;
+static struct page *_pages_array[NUM_PAGES];
+
+static __init int init_pages(void)
 {
 	int i;
-	struct copy_work *newwork;
+	struct page *p;
 
-	for (i=0; i<FREE_LIST_SIZE; i++) {
-		newwork = kmalloc(sizeof(struct copy_work), GFP_KERNEL);
-		if (!newwork)
-			return i;
-		newwork->freelist = 1;
-		list_add(&newwork->list, &free_list);
+	for (i = 0; i < NUM_PAGES; i++) {
+		p = alloc_page(GFP_KERNEL);
+		if (!p)
+			goto bad;
+
+		LockPage(p);
+		_pages_array[i] = p;
 	}
-	return i;
+
+	_num_free_pages = NUM_PAGES;
+	return 0;
+
+      bad:
+	while (i--)
+		__free_page(_pages_array[i]);
+	return -ENOMEM;
 }
+
+static void exit_pages(void)
+{
+	int i;
+	struct page *p;
+
+	for (i = 0; i < NUM_PAGES; i++) {
+		p = _pages_array[i];
+		UnlockPage(p);
+		__free_page(p);
+	}
+
+	_num_free_pages = 0;
+}
+
+static int kcopyd_get_pages(int num, struct page **result)
+{
+	int i;
+
+	down(&_pages_lock);
+	if (_num_free_pages < num) {
+		up(&_pages_lock);
+		return -ENOMEM;
+	}
+
+	for (i = 0; i < num; i++) {
+		_num_free_pages--;
+		result[i] = _pages_array[_num_free_pages];
+	}
+	up(&_pages_lock);
+
+	return 0;
+}
+
+static void kcopyd_free_pages(int num, struct page **result)
+{
+	int i;
+
+	down(&_pages_lock);
+	for (i = 0; i < num; i++)
+		_pages_array[_num_free_pages++] = result[i];
+	up(&_pages_lock);
+}
+
+/*-----------------------------------------------------------------
+ * We keep our own private pool of buffer_heads.  These are just
+ * held in a list on the b_reqnext field.
+ *---------------------------------------------------------------*/
+
+/*
+ * Make sure we have enough buffers to always keep the pages
+ * occupied.  So we assume the worst case scenario where blocks
+ * are the size of a single sector.
+ */
+#define NUM_BUFFERS NUM_PAGES * (PAGE_SIZE / SECTOR_SIZE)
+
+static spinlock_t _buffer_lock = SPIN_LOCK_UNLOCKED;
+static struct buffer_head *_all_buffers;
+static struct buffer_head *_free_buffers;
+
+static __init int init_buffers(void)
+{
+	int i;
+	struct buffer_head *buffers;
+	size_t s = sizeof(struct buffer_head) * NUM_BUFFERS;
+
+	/*
+	 * FIXME: this should be a vmalloc.
+	 */
+	buffers = vmalloc(s);
+	if (!buffers) {
+		DMWARN("Couldn't allocate buffer heads.");
+		return -ENOMEM;
+	}
+
+	memset(buffers, 0, s);
+	for (i = 0; i < NUM_BUFFERS; i++) {
+		if (i < NUM_BUFFERS - 1)
+			buffers[i].b_reqnext = &buffers[i + 1];
+		init_waitqueue_head(&buffers[i].b_wait);
+		INIT_LIST_HEAD(&buffers[i].b_inode_buffers);
+	}
+
+	_all_buffers = _free_buffers = buffers;
+	return 0;
+}
+
+static void exit_buffers(void)
+{
+	vfree(_all_buffers);
+}
+
+static struct buffer_head *alloc_buffer(void)
+{
+	int state = current->state;
+	struct buffer_head *r;
+
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	spin_lock(&_buffer_lock);
+
+	if (!_free_buffers)
+		r = NULL;
+	else {
+		r = _free_buffers;
+		_free_buffers = _free_buffers->b_reqnext;
+		r->b_reqnext = NULL;
+	}
+
+	spin_unlock(&_buffer_lock);
+	set_current_state(state);
+
+	return r;
+}
+
+/*
+ * Only called from interrupt context.
+ */
+static void free_buffer(struct buffer_head *bh)
+{
+	spin_lock(&_buffer_lock);
+	bh->b_reqnext = _free_buffers;
+	_free_buffers = bh;
+	spin_unlock(&_buffer_lock);
+}
+
+/*-----------------------------------------------------------------
+ * kcopyd_jobs need to be allocated by the *clients* of kcopyd,
+ * for this reason we use a mempool to prevent the client from
+ * ever having to do io (which could cause a
+ * deadlock).
+ *---------------------------------------------------------------*/
+#define MIN_JOBS NUM_PAGES
+
+static kmem_cache_t *_job_cache = NULL;
+static mempool_t *_job_pool = NULL;
+
+/*
+ * We maintain three lists of jobs:
+ *
+ * i)   jobs waiting for pages
+ * ii)  jobs that have pages, and are waiting for the io to be issued.
+ * iii) jobs that have completed.
+ *
+ * All three of these are protected by job_lock.
+ */
+
+static spinlock_t _job_lock = SPIN_LOCK_UNLOCKED;
+
+static LIST_HEAD(_complete_jobs);
+static LIST_HEAD(_io_jobs);
+static LIST_HEAD(_pages_jobs);
+
+static __init int init_jobs(void)
+{
+	INIT_LIST_HEAD(&_complete_jobs);
+	INIT_LIST_HEAD(&_io_jobs);
+	INIT_LIST_HEAD(&_pages_jobs);
+
+	_job_cache = kmem_cache_create("kcopyd-jobs", sizeof(struct kcopyd_job),
+				       __alignof__(struct kcopyd_job),
+				       0, NULL, NULL);
+	if (!_job_cache)
+		return -ENOMEM;
+
+	_job_pool = mempool_create(MIN_JOBS,
+				   mempool_alloc_slab,
+				   mempool_free_slab, _job_cache);
+	if (!_job_pool) {
+		kmem_cache_destroy(_job_cache);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static void exit_jobs(void)
+{
+	mempool_destroy(_job_pool);
+	kmem_cache_destroy(_job_cache);
+}
+
+struct kcopyd_job *kcopyd_alloc_job(void)
+{
+	struct kcopyd_job *job;
+
+	job = mempool_alloc(_job_pool, GFP_KERNEL);;
+	if (!job)
+		return NULL;
+
+	memset(job, 0, sizeof(*job));
+	return job;
+}
+
+void kcopyd_free_job(struct kcopyd_job *job)
+{
+	mempool_free(job, _job_pool);
+}
+
+/*
+ * Functions to push and pop a job onto the head of a given job
+ * list.
+ */
+static inline struct kcopyd_job *__pop(struct list_head *jobs)
+{
+	struct kcopyd_job *job = NULL;
+
+	spin_lock(&_job_lock);
+	if (!list_empty(jobs)) {
+		job = list_entry(jobs->next, struct kcopyd_job, list);
+		list_del(&job->list);
+	}
+	spin_unlock(&_job_lock);
+
+	return job;
+}
+
+static struct kcopyd_job *pop(struct list_head *jobs)
+{
+	int state = current->state;
+	struct kcopyd_job *job;
+
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	job = __pop(jobs);
+	set_current_state(state);
+	return job;
+}
+
+static inline void __push(struct list_head *jobs, struct kcopyd_job *job)
+{
+	spin_lock(&_job_lock);
+	list_add(&job->list, jobs);
+	spin_unlock(&_job_lock);
+}
+
+static void push(struct list_head *jobs, struct kcopyd_job *job)
+{
+	int state = current->state;
+
+	set_current_state(TASK_UNINTERRUPTIBLE);
+	__push(jobs, job);
+	set_current_state(state);
+}
+
+/*
+ * Completion function for one of our buffers.
+ */
+static void end_bh(struct buffer_head *bh, int uptodate)
+{
+	struct kcopyd_job *job = bh->b_private;
+
+	mark_buffer_uptodate(bh, uptodate);
+	unlock_buffer(bh);
+
+	if (!uptodate)
+		job->err = -EIO;
+
+	/* are we the last ? */
+	if (atomic_dec_and_test(&job->nr_incomplete)) {
+		__push(&_complete_jobs, job);
+		wake_kcopyd();
+	}
+
+	free_buffer(bh);
+}
+
+static void dispatch_bh(struct kcopyd_job *job,
+			struct buffer_head *bh, int block)
+{
+	int p;
+
+	/*
+	 * Add in the job offset
+	 */
+	block += job->offset >> job->block_shift;
+	bh->b_blocknr = (job->disk.sector >> job->block_shift) + block;
+
+	p = block >> job->bpp_shift;
+	block &= job->bpp_mask;
+
+	bh->b_dev = B_FREE;
+	bh->b_size = job->block_size;
+	set_bh_page(bh, job->pages[p],
+		    (block << job->block_shift) << SECTOR_SHIFT);
+	bh->b_this_page = bh;
+
+	init_buffer(bh, end_bh, job);
+
+	bh->b_dev = job->disk.dev;
+	bh->b_state = ((1 << BH_Mapped) | (1 << BH_Lock) | (1 << BH_Req));
+
+	set_bit(BH_Uptodate, &bh->b_state);
+	if (job->rw == WRITE)
+		clear_bit(BH_Dirty, &bh->b_state);
+
+	submit_bh(job->rw, bh);
+}
+
+/*
+ * These three functions process 1 item from the corresponding
+ * job list.
+ *
+ * They return:
+ * < 0: error
+ *   0: success
+ * > 0: can't process yet.
+ */
+static int run_complete_job(struct kcopyd_job *job)
+{
+	job->callback(job);
+	return 0;
+}
+
+/*
+ * Request io on as many buffer heads as we can currently get for
+ * a particular job.
+ */
+static int run_io_job(struct kcopyd_job *job)
+{
+	unsigned int block;
+	struct buffer_head *bh;
+
+	for (block = atomic_read(&job->nr_requested);
+	     block < job->nr_blocks; block++) {
+		bh = alloc_buffer();
+		if (!bh)
+			break;
+
+		atomic_inc(&job->nr_requested);
+		dispatch_bh(job, bh, block);
+	}
+
+	return (block == job->nr_blocks) ? 0 : 1;
+}
+
+static int run_pages_job(struct kcopyd_job *job)
+{
+	int r;
+
+	job->nr_pages = (job->disk.count + job->offset) /
+	    (PAGE_SIZE / SECTOR_SIZE);
+	r = kcopyd_get_pages(job->nr_pages, job->pages);
+	if (!r) {
+		/* this job is ready for io */
+		push(&_io_jobs, job);
+		return 0;
+	}
+
+	if (r == -ENOMEM)
+		/* can complete now */
+		return 1;
+
+	return r;
+}
+
+/*
+ * Run through a list for as long as possible.  Returns the count
+ * of successful jobs.
+ */
+static int process_jobs(struct list_head *jobs, int (*fn) (struct kcopyd_job *))
+{
+	struct kcopyd_job *job;
+	int r, count = 0;
+
+	while ((job = pop(jobs))) {
+
+		r = fn(job);
+
+		if (r < 0) {
+			/* error this rogue job */
+			job->err = r;
+			push(&_complete_jobs, job);
+			break;
+		}
+
+		if (r > 0) {
+			/*
+			 * We couldn't service this job ATM, so
+			 * push this job back onto the list.
+			 */
+			push(jobs, job);
+			break;
+		}
+
+		count++;
+	}
+
+	return count;
+}
+
+/*
+ * kcopyd does this every time it's woken up.
+ */
+static void do_work(void)
+{
+	int count;
+
+	/*
+	 * We loop round until there is no more work to do.
+	 */
+	do {
+		count = process_jobs(&_complete_jobs, run_complete_job);
+		count += process_jobs(&_io_jobs, run_io_job);
+		count += process_jobs(&_pages_jobs, run_pages_job);
+
+	} while (count);
+
+	run_task_queue(&tq_disk);
+}
+
+/*-----------------------------------------------------------------
+ * The daemon
+ *---------------------------------------------------------------*/
+static struct task_struct *_kcopyd_task;
+static atomic_t _kcopyd_must_die;
+static DECLARE_MUTEX(_run_lock);
+static DECLARE_WAIT_QUEUE_HEAD(_job_queue);
+
+/*
+ * A day in the life of a little daemon.
+ */
+static void kcopyd_cycle(void)
+{
+	DECLARE_WAITQUEUE(wq, current);
+
+	set_current_state(TASK_INTERRUPTIBLE);
+	add_wait_queue(&_job_queue, &wq);
+
+	do_work();
+	schedule();
+
+	set_current_state(TASK_RUNNING);
+	remove_wait_queue(&_job_queue, &wq);
+}
+
+static int kcopyd(void *start_lock)
+{
+	daemonize();
+	strcpy(current->comm, "kcopyd");
+	_kcopyd_task = current;
+	atomic_set(&_kcopyd_must_die, 0);
+	down(&_run_lock);
+	up((struct semaphore *) start_lock);
+
+	while (!atomic_read(&_kcopyd_must_die))
+		kcopyd_cycle();
+
+	up(&_run_lock);
+	DMINFO("kcopyd shutting down");
+	return 0;
+}
+
+static int start_daemon(void)
+{
+	static pid_t pid = 0;
+	DECLARE_MUTEX(start_lock);
+
+	down(&start_lock);
+	pid = kernel_thread(kcopyd, &start_lock, 0);
+	if (pid <= 0) {
+		DMERR("Failed to start kcopyd thread");
+		return -EAGAIN;
+	}
+
+	/*
+	 * wait for the daemon to up this mutex.
+	 */
+	down(&start_lock);
+	DMINFO("Started kcopyd thread");
+
+	return 0;
+}
+
+static int stop_daemon(void)
+{
+	if (_kcopyd_task) {
+		atomic_set(&_kcopyd_must_die, 1);
+		wake_kcopyd();
+		down(&_run_lock);
+	}
+
+	return 0;
+}
+
+static int wake_kcopyd(void)
+{
+	int r = 0;
+
+	/* Start the thread if we don't have one already */
+	if (!_kcopyd_task)
+		r = start_daemon();
+
+	if (!r)
+		wake_up_interruptible(&_job_queue);
+
+	return r;
+}
+
+static int calc_shift(unsigned int n)
+{
+	int s;
+
+	for (s = 0; n; s++, n >>= 1)
+		;
+
+	return --s;
+}
+
+static void calc_block_sizes(struct kcopyd_job *job)
+{
+	job->block_size = get_hardsect_size(job->disk.dev);
+	job->block_shift = calc_shift(job->block_size / SECTOR_SIZE);
+	job->bpp_shift = PAGE_SHIFT - job->block_shift - SECTOR_SHIFT;
+	job->bpp_mask = (1 << job->bpp_shift) - 1;
+	job->nr_blocks = job->disk.count >> job->block_shift;
+	atomic_set(&job->nr_requested, 0);
+	atomic_set(&job->nr_incomplete, job->nr_blocks);
+}
+
+int kcopyd_io(struct kcopyd_job *job)
+{
+	calc_block_sizes(job);
+	push(job->pages[0] ? &_io_jobs : &_pages_jobs, job);
+	wake_kcopyd();
+	return 0;
+}
+
+/*-----------------------------------------------------------------
+ * The copier is implemented on top of the simpler async io
+ * daemon above.
+ *---------------------------------------------------------------*/
+struct copy_info {
+	kcopyd_notify_fn notify;
+	void *notify_context;
+
+	struct kcopyd_region to;
+};
+
+#define MIN_INFOS 128
+static kmem_cache_t *_copy_cache = NULL;
+static mempool_t *_copy_pool = NULL;
+
+static __init int init_copier(void)
+{
+	_copy_cache = kmem_cache_create("kcopyd-info",
+					sizeof(struct copy_info),
+					__alignof__(struct copy_info),
+					0, NULL, NULL);
+	if (!_copy_cache)
+		return -ENOMEM;
+
+	_copy_pool = mempool_create(MIN_INFOS,
+				    mempool_alloc_slab,
+				    mempool_free_slab, _copy_cache);
+	if (!_copy_pool) {
+		kmem_cache_destroy(_copy_cache);
+		return -ENOMEM;
+	}
+
+	return 0;
+}
+
+static void exit_copier(void)
+{
+	if (_copy_pool)
+		mempool_destroy(_copy_pool);
+
+	if (_copy_cache)
+		kmem_cache_destroy(_copy_cache);
+}
+
+static inline struct copy_info *alloc_copy_info(void)
+{
+	return mempool_alloc(_copy_pool, GFP_KERNEL);
+}
+
+static inline void free_copy_info(struct copy_info *info)
+{
+	mempool_free(info, _copy_pool);
+}
+
+void copy_complete(struct kcopyd_job *job)
+{
+	struct copy_info *info = (struct copy_info *) job->context;
+
+	if (info->notify)
+		info->notify(job->err, info->notify_context);
+
+	free_copy_info(info);
+	kcopyd_free_pages(job->nr_pages, job->pages);
+	kcopyd_free_job(job);
+}
+
+/*
+ * These callback functions implement the state machine that copies regions.
+ * FIXME: handle large regions.
+ */
+void copy_write(struct kcopyd_job *job)
+{
+	struct copy_info *info = (struct copy_info *) job->context;
+
+	if (job->err && info->notify) {
+		info->notify(job->err, job->context);
+		kcopyd_free_job(job);
+		free_copy_info(info);
+		return;
+	}
+
+	job->rw = WRITE;
+	memcpy(&job->disk, &info->to, sizeof(job->disk));
+	job->callback = copy_complete;
+	job->context = info;
+
+	/*
+	 * Queue the write.
+	 */
+	kcopyd_io(job);
+}
+
+int kcopyd_copy(struct kcopyd_region *from,
+		struct kcopyd_region *to, kcopyd_notify_fn fn, void *context)
+{
+	struct copy_info *info;
+	struct kcopyd_job *job;
+
+	/*
+	 * Allocate a new copy_info.
+	 */
+	info = alloc_copy_info();
+	if (!info)
+		return -ENOMEM;
+
+	job = kcopyd_alloc_job();
+	if (!job) {
+		free_copy_info(info);
+		return -ENOMEM;
+	}
+
+	/*
+	 * set up for the read.
+	 */
+	info->notify = fn;
+	info->notify_context = context;
+	memcpy(&info->to, to, sizeof(*to));
+
+	job->rw = READ;
+	memcpy(&job->disk, from, sizeof(*from));
+
+	job->offset = 0;
+	calc_block_sizes(job);
+	job->callback = copy_write;
+	job->context = info;
+
+	/*
+	 * Trigger job.
+	 */
+	kcopyd_io(job);
+	return 0;
+}
+
+/*-----------------------------------------------------------------
+ * Unit setup
+ *---------------------------------------------------------------*/
+static struct {
+	int (*init) (void);
+	void (*exit) (void);
+
+} _inits[] = {
+#define xx(n) { init_ ## n, exit_ ## n}
+	xx(pages),
+	xx(buffers),
+	xx(jobs),
+	xx(copier)
+#undef xx
+};
+
+static int _has_initialised = 0;
 
 int __init kcopyd_init(void)
 {
-	init_rwsem(&work_list_lock);
-	init_rwsem(&free_list_lock);
-	init_MUTEX(&start_lock);
-	init_MUTEX(&run_lock);
+	const int count = sizeof(_inits) / sizeof(*_inits);
 
-	if (alloc_kiovec(1, &iobuf)) {
-		DMERR("Unable to allocate kiobuf for kcopyd");
-		return -1;
+	int r, i;
+
+	if (_has_initialised)
+		return 0;
+
+	for (i = 0; i < count; i++) {
+		r = _inits[i].init();
+		if (r)
+			goto bad;
 	}
 
-	if (alloc_iobuf_pages(iobuf, KIO_MAX_SECTORS)) {
-		DMERR("Unable to allocate pages for kcopyd");
-		free_kiovec(1, &iobuf);
-		return -1;
-	}
-
-	entry_cachep = kmem_cache_create("kcopyd",
-					 sizeof(struct copy_work),
-					 __alignof__(struct copy_work),
-					 0, NULL, NULL);
-	if (!entry_cachep) {
-		unmap_kiobuf(iobuf);
-		free_kiovec(1, &iobuf);
-		DMERR("Unable to allocate slab cache for kcopyd");
-		return -1;
-	}
-
-	if (allocate_free_list() == 0) {
-		unmap_kiobuf(iobuf);
-		free_kiovec(1, &iobuf);
-		kmem_cache_destroy(entry_cachep);
-		DMERR("Unable to allocate any work structures for the free list");
-		return -1;
-	}
-
+	_has_initialised = 1;
 	return 0;
+
+      bad:
+	while (i--)
+		_inits[i].exit();
+
+	return r;
 }
 
 void kcopyd_exit(void)
 {
-	struct list_head *entry, *temp;
+	int i = sizeof(_inits) / sizeof(*_inits);
 
-	thread_exit = 1;
-	wake_up_interruptible(&work_waitq);
+	if (stop_daemon())
+		DMWARN("Couldn't stop kcopyd.");
 
-	/* Wait for the thread to finish */
-	down(&run_lock);
-	up(&run_lock);
+	while (i--)
+		_inits[i].exit();
 
-        /* Free the free list */
-	list_for_each_safe(entry, temp, &free_list) {
-		struct copy_work *cw;
-		cw = list_entry(entry, struct copy_work, list);
-		list_del(&cw->list);
-		kfree(cw);
-	}
-
-	if (entry_cachep)
-		kmem_cache_destroy(entry_cachep);
+	_has_initialised = 0;
 }
-
-EXPORT_SYMBOL(dm_blockcopy);
-
-/*
- * Overrides for Emacs so that we follow Linus's tabbing style.
- * Emacs will notice this stuff at the end of the file and automatically
- * adjust the settings for this buffer only.  This must remain at the end
- * of the file.
- * ---------------------------------------------------------------------------
- * Local variables:
- * c-file-style: "linux"
- * End:
- */

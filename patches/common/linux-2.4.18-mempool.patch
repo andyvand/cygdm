@@ -1,7 +1,7 @@
 diff -Nru a/include/linux/mempool.h b/include/linux/mempool.h
 --- /dev/null	Wed Dec 31 16:00:00 1969
-+++ b/include/linux/mempool.h	Mon Mar 25 14:40:15 2002
-@@ -0,0 +1,33 @@
++++ b/include/linux/mempool.h	Tue Apr 23 20:55:52 2002
+@@ -0,0 +1,41 @@
 +/*
 + * memory buffer pool support
 + */
@@ -34,6 +34,14 @@ diff -Nru a/include/linux/mempool.h b/include/linux/mempool.h
 +extern void * mempool_alloc(mempool_t *pool, int gfp_mask);
 +extern void mempool_free(void *element, mempool_t *pool);
 +
++
++/*
++ * A mempool_alloc_t and mempool_free_t that get the memory from
++ * a slab that is passed in through pool_data.
++ */
++void *mempool_alloc_slab(int gfp_mask, void *pool_data);
++void mempool_free_slab(void *element, void *pool_data);
++
 +#endif /* _LINUX_MEMPOOL_H */
 diff -Nru a/mm/Makefile b/mm/Makefile
 --- a/mm/Makefile	Mon Mar 25 14:40:15 2002
@@ -55,8 +63,8 @@ diff -Nru a/mm/Makefile b/mm/Makefile
  
 diff -Nru a/mm/mempool.c b/mm/mempool.c
 --- /dev/null	Wed Dec 31 16:00:00 1969
-+++ b/mm/mempool.c	Mon Mar 25 14:40:15 2002
-@@ -0,0 +1,277 @@
++++ b/mm/mempool.c	Tue Apr 23 20:55:52 2002
+@@ -0,0 +1,295 @@
 +/*
 + *  linux/mm/mempool.c
 + *
@@ -328,9 +336,27 @@ diff -Nru a/mm/mempool.c b/mm/mempool.c
 +	pool->free(element, pool->pool_data);
 +}
 +
++/*
++ * A commonly used alloc and free fn.
++ */
++void *mempool_alloc_slab(int gfp_mask, void *pool_data)
++{
++	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
++	return kmem_cache_alloc(mem, gfp_mask);
++}
++
++void mempool_free_slab(void *element, void *pool_data)
++{
++	kmem_cache_t *mem = (kmem_cache_t *) pool_data;
++	kmem_cache_free(mem, element);
++}
++
++
 +EXPORT_SYMBOL(mempool_create);
 +EXPORT_SYMBOL(mempool_resize);
 +EXPORT_SYMBOL(mempool_destroy);
 +EXPORT_SYMBOL(mempool_alloc);
 +EXPORT_SYMBOL(mempool_free);
++EXPORT_SYMBOL(mempool_alloc_slab);
++EXPORT_SYMBOL(mempool_free_slab);
 +
