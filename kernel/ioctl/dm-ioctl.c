@@ -802,7 +802,7 @@ static void retrieve_status(struct dm_table *table, struct dm_ioctl *param,
 		struct dm_target *ti = dm_table_get_target(table, i);
 
 		remaining = len - (outptr - outbuf);
-		if (remaining < sizeof(struct dm_target_spec)) {
+		if (remaining <= sizeof(struct dm_target_spec)) {
 			param->flags |= DM_BUFFER_FULL_FLAG;
 			break;
 		}
