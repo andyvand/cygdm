@@ -13,6 +13,6 @@ TARGETS=dmsetup
 
 include ../make.tmpl
 
-dmsetup: dmsetup.o ../lib/libdevmapper.so
-	$(CC) -o dmsetup dmsetup.o $(LD_FLAGS) -L../lib -ldevmapper
+dmsetup: dmsetup.o $(interfacedir)/libdevmapper.so
+	$(CC) -o dmsetup dmsetup.o $(LD_FLAGS) -ldevmapper
 

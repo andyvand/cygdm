@@ -38,6 +38,7 @@ sbindir = @sbindir@
 infodir = @infodir@
 mandir = @mandir@
 kerneldir = @kerneldir@
+interfacedir=$(top_srcdir)/lib/@interface@
 
 # setup misc variables
 # define the ownership variables for the binaries and man pages
@@ -66,6 +67,8 @@ STRIP=
 
 INCLUDES+=-I. -I$(top_srcdir)/include -I$(kerneldir)/include
 INC_LNS=$(top_srcdir)/include/.symlinks_created
+
+LD_FLAGS+=-L$(interfacedir)
 
 DEPS=$(top_srcdir)/make.tmpl Makefile $(INC_LNS)
 
