@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.17/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Wed Jan  2 19:59:35 2002
++++ linux/drivers/md/Config.in	Thu Jan  3 19:32:20 2002
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.17/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.17/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.17/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Wed Jan  2 19:59:35 2002
++++ linux/drivers/md/Makefile	Thu Jan  3 19:32:20 2002
 @@ -4,9 +4,11 @@
  
  O_TARGET	:= mddev.o
@@ -101,7 +101,7 @@ diff -ruN linux-2.4.17/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 --- linux-2.4.17/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Wed Jan  2 17:17:27 2002
++++ linux/drivers/md/dm-ioctl.c	Thu Jan  3 18:52:03 2002
 @@ -0,0 +1,344 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -168,7 +168,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +void dm_error(const char *message)
 +{
-+	WARN("%s", message);
++	DMWARN("%s", message);
 +}
 +
 +/*
@@ -196,7 +196,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	offset_t high = 0;
 +
 +	if (!args->target_count) {
-+		WARN("No targets specified");
++		DMWARN("populate_table: no targets specified");
 +		return -EINVAL;
 +	}
 +
@@ -377,7 +377,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		return r;
 +
 +	if (strcmp(DM_IOCTL_VERSION, p->version)) {
-+		WARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
++		DMWARN("dm_ctl_ioctl: struct dm_ioctl version incompatible");
 +		r = -EINVAL;
 +		goto out;
 +	}
@@ -404,7 +404,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +		break;
 +
 +	default:
-+		WARN("dm_ctl_ioctl: unknown command 0x%x\n", command);
++		DMWARN("dm_ctl_ioctl: unknown command 0x%x", command);
 +		r = -EINVAL;
 +	}
 +
@@ -428,7 +428,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +
 +	r = devfs_register_chrdev(DM_CHAR_MAJOR, DM_DIR, &_ctl_fops);
 +	if (r < 0) {
-+		WARN("devfs_register_chrdev failed for dm control dev");
++		DMERR("devfs_register_chrdev failed for control device");
 +		return -EIO;
 +	}
 +
@@ -445,27 +445,23 @@ diff -ruN linux-2.4.17/drivers/md/dm-ioctl.c linux/drivers/md/dm-ioctl.c
 +	// FIXME: remove control device
 +
 +	if (devfs_unregister_chrdev(DM_CHAR_MAJOR, DM_DIR) < 0)
-+		WARN("devfs_unregister_chrdev failed for dm control device");
++		DMERR("devfs_unregister_chrdev failed for control device");
 +}
 diff -ruN linux-2.4.17/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 --- linux-2.4.17/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Fri Dec 21 19:38:40 2001
-@@ -0,0 +1,117 @@
++++ linux/drivers/md/dm-linear.c	Thu Jan  3 18:56:02 2002
+@@ -0,0 +1,111 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
 + * This file is released under the GPL.
 + */
 +
-+#include <linux/config.h>
++#include "dm.h"
++
 +#include <linux/module.h>
 +#include <linux/init.h>
-+#include <linux/slab.h>
-+#include <linux/fs.h>
 +#include <linux/blkdev.h>
-+#include <linux/device-mapper.h>
-+
-+#include "dm.h"
 +
 +/*
 + * Linear: maps a linear range of a device.
@@ -547,8 +543,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +	int r = dm_register_target(&linear_target);
 +
 +	if (r < 0)
-+		printk(KERN_ERR "Device mapper: Linear: "
-+		       "register failed %d\n", r);
++		DMERR("linear: register failed %d", r);
 +
 +	return r;
 +}
@@ -558,35 +553,30 @@ diff -ruN linux-2.4.17/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
 +	int r = dm_unregister_target(&linear_target);
 +
 +	if (r < 0)
-+		printk(KERN_ERR "Device mapper: Linear: "
-+		       "unregister failed %d\n", r);
++		DMERR("linear: unregister failed %d", r);
 +}
 +
 +module_init(linear_init);
 +module_exit(linear_exit);
 +
 +MODULE_AUTHOR("Joe Thornber <thornber@uk.sistina.com>");
-+MODULE_DESCRIPTION("Device Mapper: Linear mapping");
++MODULE_DESCRIPTION(DM_NAME ": linear mapping");
 +MODULE_LICENSE("GPL");
 diff -ruN linux-2.4.17/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 --- linux-2.4.17/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Fri Dec 21 19:09:00 2001
-@@ -0,0 +1,210 @@
++++ linux/drivers/md/dm-stripe.c	Thu Jan  3 18:50:25 2002
+@@ -0,0 +1,206 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
 + * This file is released under the GPL.
 + */
 +
-+#include <linux/config.h>
++#include "dm.h"
++
 +#include <linux/module.h>
 +#include <linux/init.h>
-+#include <linux/slab.h>
-+#include <linux/fs.h>
 +#include <linux/blkdev.h>
-+#include <linux/device-mapper.h>
-+
-+#include "dm.h"
 +
 +struct stripe {
 +	struct dm_dev *dev;
@@ -763,7 +753,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +
 +	r = dm_register_target(&stripe_target);
 +	if (r < 0)
-+		WARN("linear target register failed");
++		DMWARN("striped target registration failed");
 +
 +	return r;
 +}
@@ -771,7 +761,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +static void __exit stripe_exit(void)
 +{
 +	if (dm_unregister_target(&stripe_target))
-+		WARN("striped target unregister failed");
++		DMWARN("striped target unregistration failed");
 +
 +	return;
 +}
@@ -780,11 +770,11 @@ diff -ruN linux-2.4.17/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
 +module_exit(stripe_exit);
 +
 +MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
-+MODULE_DESCRIPTION("Device Mapper: Striped mapping");
++MODULE_DESCRIPTION(DM_NAME ": striped mapping");
 +MODULE_LICENSE("GPL");
 diff -ruN linux-2.4.17/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 --- linux-2.4.17/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-table.c	Wed Dec 19 19:40:07 2001
++++ linux/drivers/md/dm-table.c	Thu Jan  3 18:48:50 2002
 @@ -0,0 +1,400 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -942,8 +932,8 @@ diff -ruN linux-2.4.17/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +
 +	/* free the device list */
 +	if (t->devices.next != &t->devices) {
-+		WARN("there are still devices present: someone isn't "
-+		     "calling dm_table_remove_device");
++		DMWARN("devices still present during destroy: "
++			"dm_table_remove_device calls missing");
 +
 +		free_devices(&t->devices);
 +	}
@@ -1098,7 +1088,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +	atomic_inc(&dd->count);
 +
 +	if (!check_device_area(dd->dev, start, len)) {
-+		WARN("device '%s' not large enough for target", path);
++		DMWARN("device %s too small for target", path);
 +		dm_table_put_device(t, dd);
 +		return -EINVAL;
 +	}
@@ -1188,8 +1178,8 @@ diff -ruN linux-2.4.17/drivers/md/dm-table.c linux/drivers/md/dm-table.c
 +EXPORT_SYMBOL(dm_table_put_device);
 diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 --- linux-2.4.17/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-target.c	Fri Dec 21 19:29:01 2001
-@@ -0,0 +1,237 @@
++++ linux/drivers/md/dm-target.c	Thu Jan  3 18:48:56 2002
+@@ -0,0 +1,238 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
 + *
@@ -1197,6 +1187,7 @@ diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 + */
 +
 +#include "dm.h"
++
 +#include <linux/kmod.h>
 +
 +struct tt_internal {
@@ -1422,15 +1413,15 @@ diff -ruN linux-2.4.17/drivers/md/dm-target.c linux/drivers/md/dm-target.c
 +void dm_target_exit(void)
 +{
 +	if (dm_unregister_target(&error_target))
-+		WARN("unregister of error target failed.");
++		DMWARN("error target unregistration failed");
 +}
 +
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
 diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 --- linux-2.4.17/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Wed Jan  2 19:59:08 2002
-@@ -0,0 +1,932 @@
++++ linux/drivers/md/dm.c	Thu Jan  3 19:31:49 2002
+@@ -0,0 +1,931 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -1447,10 +1438,9 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +
 +#define MAX_DEVICES 64
 +#define DEFAULT_READ_AHEAD 64
-+#define DEVICE_NAME "device-mapper"	/* Name for messaging */
 +
-+static const char *_name = DEVICE_NAME;
-+static const char *_version = "0.91.00-ioctl (2002-01-02)";
++static const char *_name = DM_NAME;
++static const char *_version = "0.91.01-ioctl (2002-01-02)";
 +static const char *_email = "lvm-devel@lists.sistina.com";
 +
 +static int _major = 0;
@@ -1517,7 +1507,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +
 +	r = devfs_register_blkdev(_major, _name, &dm_blk_dops);
 +	if (r < 0) {
-+		printk(KERN_ERR "%s -- register_blkdev failed\n", _name);
++		DMERR("register_blkdev failed");
 +		kmem_cache_destroy(_io_hook_cache);
 +		return r;
 +	}
@@ -1535,25 +1525,25 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +
 +	_dev_dir = devfs_mk_dir(0, DM_DIR, NULL);
 +
-+	printk(KERN_INFO "%s %s initialised, %s\n", _name, _version, _email);
++	DMINFO("%s initialised: %s", _version, _email);
 +	return 0;
 +}
 +
 +static void local_exit(void)
 +{
 +	if (kmem_cache_destroy(_io_hook_cache))
-+		WARN("it looks like there are still some io_hooks allocated");
++		DMWARN("io_hooks still allocated during unregistration");
 +	_io_hook_cache = NULL;
 +
 +	if (devfs_unregister_blkdev(_major, _name) < 0)
-+		printk(KERN_ERR "%s -- unregister_blkdev failed\n", _name);
++		DMERR("devfs_unregister_blkdev failed");
 +
 +	read_ahead[_major] = 0;
 +	blk_size[_major] = NULL;
 +	blksize_size[_major] = NULL;
 +	hardsect_size[_major] = NULL;
 +
-+	printk(KERN_INFO "%s %s cleaned up\n", _name, _version);
++	DMINFO("%s cleaned up", _version);
 +}
 +
 +static int __init dm_init(void)
@@ -1623,7 +1613,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	dm_lock_w();
 +	md = _devs[minor];
 +	if (!md || md->use_count < 1) {
-+		WARN("reference count in mapped_device incorrect");
++		DMWARN("incorrect reference count found in mapped_device");
 +		dm_unlock_w();
 +		return -ENXIO;
 +	}
@@ -1680,7 +1670,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +		return dm_user_bmap(inode, (struct lv_bmap *) a);
 +
 +	default:
-+		WARN("unknown block ioctl %d", command);
++		DMWARN("unknown block ioctl 0x%x", command);
 +		return -EINVAL;
 +	}
 +
@@ -1969,7 +1959,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +static inline int __specific_dev(int minor)
 +{
 +	if (minor > MAX_DEVICES) {
-+		WARN("request for a mapped_device > than MAX_DEVICES");
++		DMWARN("request for a mapped_device beyond MAX_DEVICES");
 +		return 0;
 +	}
 +
@@ -2009,7 +1999,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +	minor = (minor < 0) ? __any_old_dev() : __specific_dev(minor);
 +
 +	if (minor < 0) {
-+		WARN("no free devices available");
++		DMWARN("no free devices available");
 +		dm_unlock_w();
 +		kfree(md);
 +		return 0;
@@ -2119,12 +2109,12 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +static int check_name(const char *name)
 +{
 +	if (strchr(name, '/')) {
-+		WARN("invalid device name");
++		DMWARN("invalid device name");
 +		return -1;
 +	}
 +
 +	if (__get_by_name(name)) {
-+		WARN("device name already in use");
++		DMWARN("device name already in use");
 +		return -1;
 +	}
 +
@@ -2360,13 +2350,13 @@ diff -ruN linux-2.4.17/drivers/md/dm.c linux/drivers/md/dm.c
 +
 +MODULE_PARM(_major, "i");
 +MODULE_PARM_DESC(_major, "The major number of the device mapper");
-+MODULE_DESCRIPTION("device-mapper driver");
++MODULE_DESCRIPTION(DM_NAME " driver");
 +MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 +MODULE_LICENSE("GPL");
 diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 --- linux-2.4.17/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Wed Jan  2 16:07:33 2002
-@@ -0,0 +1,166 @@
++++ linux/drivers/md/dm.h	Thu Jan  3 18:49:35 2002
+@@ -0,0 +1,170 @@
 +/*
 + * Internal header file for device mapper
 + *
@@ -2378,6 +2368,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 +#ifndef DM_INTERNAL_H
 +#define DM_INTERNAL_H
 +
++#include <linux/config.h>
 +#include <linux/version.h>
 +#include <linux/major.h>
 +#include <linux/iobuf.h>
@@ -2392,6 +2383,7 @@ diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 +#include <linux/device-mapper.h>
 +#include <linux/list.h>
 +
++#define DM_NAME "device-mapper"	/* Name for messaging */
 +#define MAX_DEPTH 16
 +#define NODE_SIZE L1_CACHE_BYTES
 +#define KEYS_PER_NODE (NODE_SIZE / sizeof(offset_t))
@@ -2506,7 +2498,9 @@ diff -ruN linux-2.4.17/drivers/md/dm.h linux/drivers/md/dm.h
 +			struct target_type *type, void *private);
 +int dm_table_complete(struct dm_table *t);
 +
-+#define WARN(f, x...) printk(KERN_WARNING "device-mapper: " f "\n" , ## x)
++#define DMWARN(f, x...) printk(KERN_WARNING DM_NAME ": " f "\n" , ## x)
++#define DMERR(f, x...) printk(KERN_ERR DM_NAME ": " f "\n" , ## x)
++#define DMINFO(f, x...) printk(KERN_INFO DM_NAME ": " f "\n" , ## x)
 +
 +/*
 + * Calculate the index of the child node of the n'th node k'th key.
@@ -2597,7 +2591,7 @@ diff -ruN linux-2.4.17/include/linux/device-mapper.h linux/include/linux/device-
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 diff -ruN linux-2.4.17/include/linux/dm-ioctl.h linux/include/linux/dm-ioctl.h
 --- linux-2.4.17/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Wed Jan  2 19:59:08 2002
++++ linux/include/linux/dm-ioctl.h	Thu Jan  3 19:31:49 2002
 @@ -0,0 +1,59 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
