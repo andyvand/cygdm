@@ -34,7 +34,7 @@ FS=dmfs-error.c dmfs-lv.c dmfs-root.c dmfs-status.c \
 COMMON=dm-linear.c dm-stripe.c \
        dm-snapshot.c kcopyd.c \
        dm-table.c dm-target.c dm.c dm.h dm-snapshot.h \
-       dm-exception-store.c kcopyd.h
+       dm-exception-store.c kcopyd.h dm-hash.c
 
 IOCTL=dm-ioctl.c
 

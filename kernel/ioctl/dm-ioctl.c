@@ -210,14 +210,18 @@ static void __info(struct mapped_device *md, struct dm_ioctl *param)
 /*
  * Always use UUID for lookups if it's present, otherwise use name.
  */
-static inline char *lookup_name(struct dm_ioctl *param)
+static inline struct mapped_device *find_device_r(struct dm_ioctl *param)
 {
-	return (*param->uuid) ? param->uuid : param->name;
+	return (*param->uuid ?
+		dm_get_uuid_r(param->uuid) :
+		dm_get_name_r(param->name));
 }
 
-static inline int lookup_type(struct dm_ioctl *param)
+static inline struct mapped_device *find_device_w(struct dm_ioctl *param)
 {
-	return (*param->uuid) ? DM_LOOKUP_BY_UUID : DM_LOOKUP_BY_NAME;
+	return (*param->uuid ?
+		dm_get_uuid_w(param->uuid) :
+		dm_get_name_w(param->name));
 }
 
 #define ALIGNMENT sizeof(int)
@@ -238,7 +242,7 @@ static int info(struct dm_ioctl *param, struct dm_ioctl *user)
 
 	param->flags = 0;
 
-	md = dm_get_name_r(lookup_name(param), lookup_type(param));
+	md = find_device_r(param);
 	if (!md)
 		/*
 		 * Device not found - returns cleared exists flag.
@@ -365,7 +369,7 @@ static int get_status(struct dm_ioctl *param, struct dm_ioctl *user)
 	int ret;
 	char *outbuf = NULL;
 
-	md = dm_get_name_r(lookup_name(param), lookup_type(param));
+	md = find_device_r(param);
 	if (!md)
 		/*
 		 * Device not found - returns cleared exists flag.
@@ -408,7 +412,7 @@ static int wait_device_event(struct dm_ioctl *param, struct dm_ioctl *user)
 	struct mapped_device *md;
 	DECLARE_WAITQUEUE(wq, current);
 
-	md = dm_get_name_r(lookup_name(param), lookup_type(param));
+	md = find_device_r(param);
 	if (!md)
 		/*
 		 * Device not found - returns cleared exists flag.
@@ -445,7 +449,7 @@ static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
 	size_t len = 0;
 	struct dm_target_deps *deps = NULL;
 
-	md = dm_get_name_r(lookup_name(param), lookup_type(param));
+	md = find_device_r(param);
 	if (!md)
 		goto out;
 
@@ -500,31 +504,36 @@ static int remove(struct dm_ioctl *param, struct dm_ioctl *user)
 	int r;
 	struct mapped_device *md;
 
-	md = dm_get_name_w(lookup_name(param), lookup_type(param));
+	md = find_device_w(param);
 	if (!md)
 		return -ENXIO;
 
+	/*
+	 * This unlocks and deallocates md.
+	 */
 	r = dm_destroy(md);
-	dm_put_w(md);
-	if (!r)
-		kfree(md);
+	if (r) {
+		dm_put_w(md);
+		return r;
+	}
 
-	return r;
+	return 0;
 }
 
 static int suspend(struct dm_ioctl *param, struct dm_ioctl *user)
 {
-	int r;
 	struct mapped_device *md;
+	kdev_t dev;
 
-	md = dm_get_name_w(lookup_name(param), lookup_type(param));
+	md = find_device_r(param);
 	if (!md)
 		return -ENXIO;
 
-	r = (param->flags & DM_SUSPEND_FLAG) ? dm_suspend(md) : dm_resume(md);
-	dm_put_w(md);
+	dev = md->dev;
+	dm_put_r(md);
 
-	return r;
+	return (param->flags & DM_SUSPEND_FLAG) ?
+		dm_suspend(dev) : dm_resume(dev);
 }
 
 static int reload(struct dm_ioctl *param, struct dm_ioctl *user)
@@ -543,7 +552,7 @@ static int reload(struct dm_ioctl *param, struct dm_ioctl *user)
 		return r;
 	}
 
-	md = dm_get_name_w(lookup_name(param), lookup_type(param));
+	md = find_device_w(param);
 	if (!md) {
 		dm_table_destroy(t);
 		return -ENXIO;
@@ -567,14 +576,18 @@ static int rename(struct dm_ioctl *param, struct dm_ioctl *user)
 {
 	char *newname = (char *) param + param->data_start;
 
+	if (!param->name) {
+		DMWARN("Invalid old logical volume name supplied.");
+		return -EINVAL;
+	}
+
 	if (valid_str(newname, (void *) param,
-		      (void *) param + param->data_size) ||
-	    dm_set_name(lookup_name(param), lookup_type(param), newname)) {
+		      (void *) param + param->data_size)) {
 		DMWARN("Invalid new logical volume name supplied.");
 		return -EINVAL;
 	}
 
-	return 0;
+	return dm_set_name(param->name, newname);
 }
 
 
@@ -799,7 +812,9 @@ static int __init dm_devfs_init(void) {
 	return 0;
 }
 
-/* Create misc character device and link to DM_DIR/control */
+/*
+ * Create misc character device and link to DM_DIR/control.
+ */
 int __init dm_interface_init(void)
 {
 	int r;

@@ -30,16 +30,6 @@ struct io_hook {
 
 static kmem_cache_t *_io_hook_cache;
 
-static struct mapped_device *_devs[MAX_DEVICES];
-static struct rw_semaphore _dev_locks[MAX_DEVICES];
-
-/*
- * This lock is only held by dm_create and dm_set_name to avoid
- * race conditions where someone else may create a device with
- * the same name.
- */
-static spinlock_t _create_lock = SPIN_LOCK_UNLOCKED;
-
 /* block device arrays */
 static int _block_size[MAX_DEVICES];
 static int _blksize_size[MAX_DEVICES];
@@ -50,161 +40,9 @@ static devfs_handle_t _dev_dir;
 static int request(request_queue_t * q, int rw, struct buffer_head *bh);
 static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb);
 
-/*
- * Protect the mapped_devices referenced from _dev[]
- */
-struct mapped_device *dm_get_r(kdev_t dev)
-{
-	struct mapped_device *md;
-	int minor = MINOR(dev);
-
-	if (minor >= MAX_DEVICES)
-		return NULL;
-
-	down_read(_dev_locks + minor);
-	md = _devs[minor];
-	if (!md)
-		up_read(_dev_locks + minor);
-	return md;
-}
-
-struct mapped_device *dm_get_w(kdev_t dev)
-{
-	struct mapped_device *md;
-	int minor = MINOR(dev);
-
-	if (minor >= MAX_DEVICES)
-		return NULL;
-
-	down_write(_dev_locks + minor);
-	md = _devs[minor];
-	if (!md)
-		up_write(_dev_locks + minor);
-	return md;
-}
-
-static int namecmp(struct mapped_device *md, const char *name, int nametype)
-{
-	switch (nametype) {
-	case DM_LOOKUP_BY_NAME:
-		return strcmp(md->name, name);
-		break;
-
-	case DM_LOOKUP_BY_UUID:
-		if (!md->uuid)
-			return -1;	/* never equal */
-
-		return strcmp(md->uuid, name);
-		break;
-
-	default:
-		DMWARN("Unknown comparison type in namecmp: %d", nametype);
-		BUG();
-	}
-
-	return -1;
-}
-
-/*
- * The interface (eg, ioctl) will probably access the devices
- * through these slow 'by name' locks, this needs improving at
- * some point if people start playing with *large* numbers of dm
- * devices.
- */
-struct mapped_device *dm_get_name_r(const char *name, int nametype)
-{
-	int i;
-	struct mapped_device *md;
-
-	for (i = 0; i < MAX_DEVICES; i++) {
-		md = dm_get_r(mk_kdev(_major, i));
-		if (md) {
-			if (!namecmp(md, name, nametype))
-				return md;
-
-			dm_put_r(md);
-		}
-	}
-
-	return NULL;
-}
-
-struct mapped_device *dm_get_name_w(const char *name, int nametype)
-{
-	int i;
-	struct mapped_device *md;
-
-	/*
-	 * To avoid getting write locks on all the devices we try
-	 * and promote a read lock to a write lock, this can
-	 * fail, in which case we just start again.
-	 */
-
-      restart:
-	for (i = 0; i < MAX_DEVICES; i++) {
-		md = dm_get_r(mk_kdev(_major, i));
-		if (!md)
-			continue;
-
-		if (namecmp(md, name, nametype)) {
-			dm_put_r(md);
-			continue;
-		}
-
-		/* found it */
-		dm_put_r(md);
-
-		md = dm_get_w(mk_kdev(_major, i));
-		if (!md)
-			goto restart;
-
-		if (namecmp(md, name, nametype)) {
-			dm_put_w(md);
-			goto restart;
-		}
-
-		return md;
-	}
-
-	return NULL;
-}
-
-void dm_put_r(struct mapped_device *md)
-{
-	int minor = MINOR(md->dev);
-
-	if (minor >= MAX_DEVICES)
-		return;
-
-	up_read(_dev_locks + minor);
-}
-
-void dm_put_w(struct mapped_device *md)
-{
-	int minor = MINOR(md->dev);
-
-	if (minor >= MAX_DEVICES)
-		return;
-
-	up_write(_dev_locks + minor);
-}
-
-/*
- * Setup and tear down the driver
- */
-static __init void init_locks(void)
-{
-	int i;
-
-	for (i = 0; i < MAX_DEVICES; i++)
-		init_rwsem(_dev_locks + i);
-}
-
 static __init int local_init(void)
 {
 	int r;
-
-	init_locks();
 
 	/* allocate a slab for the io-hooks */
 	if (!_io_hook_cache &&
@@ -267,6 +105,7 @@ static struct {
 } _inits[] = {
 #define xx(n) {n ## _init, n ## _exit},
 	xx(local)
+	xx(dm_hash)
 	xx(dm_target)
 	xx(dm_linear)
 	xx(dm_stripe)
@@ -693,52 +532,48 @@ static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb)
 }
 
 /*
- * See if the device with a specific minor # is free.  The write
- * lock is held when it returns successfully.
+ * See if the device with a specific minor # is free.  Inserts
+ * the device into the hashes.
  */
 static inline int specific_dev(int minor, struct mapped_device *md)
 {
 	if (minor >= MAX_DEVICES) {
 		DMWARN("request for a mapped_device beyond MAX_DEVICES (%d)",
 		       MAX_DEVICES);
-		return -1;
+		return -EINVAL;
 	}
 
-	down_write(_dev_locks + minor);
-	if (_devs[minor]) {
+	md->dev = mk_kdev(_major, minor);
+	if (dm_hash_insert(md))
 		/* in use */
-		up_write(_dev_locks + minor);
-		return -1;
-	}
+		return -EBUSY;
 
 	return minor;
 }
 
 /*
- * Find the first free device.  Again the write lock is held on
- * success.
+ * Find the first free device.
  */
 static int any_old_dev(struct mapped_device *md)
 {
 	int i;
 
 	for (i = 0; i < MAX_DEVICES; i++)
-		if (specific_dev(i, md) != -1)
+		if (specific_dev(i, md) >= 0)
 			return i;
 
-	return -1;
+	return -EBUSY;
 }
 
 /*
- * Allocate and initialise a blank device.
- * Caller must ensure uuid is null-terminated.
+ * Allocate and initialise a blank device, then insert it into
+ * the hash tables.  Caller must ensure uuid is null-terminated.
  * Device is returned with a write lock held.
  */
 static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 				       int minor)
 {
 	struct mapped_device *md = kmalloc(sizeof(*md), GFP_KERNEL);
-	int len;
 
 	if (!md) {
 		DMWARN("unable to allocate device, out of memory.");
@@ -746,37 +581,64 @@ static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 	}
 
 	memset(md, 0, sizeof(*md));
+	init_rwsem(&md->lock);
+	down_write(&md->lock);
 
 	/*
-	 * This grabs the write lock if it succeeds.
+	 * Copy in the name.
 	 */
-	minor = (minor < 0) ? any_old_dev(md) : specific_dev(minor, md);
-	if (minor < 0) {
-		kfree(md);
-		return NULL;
-	}
-
-	md->dev = mk_kdev(_major, minor);
-	md->suspended = 0;
-
-	strncpy(md->name, name, sizeof(md->name) - 1);
-	md->name[sizeof(md->name) - 1] = '\0';
+	md->name = dm_strdup(name);
+	if (!md->name)
+		goto bad;
 
 	/*
 	 * Copy in the uuid.
 	 */
 	if (uuid && *uuid) {
-		len = strlen(uuid) + 1;
-		if (!(md->uuid = kmalloc(len, GFP_KERNEL))) {
+		md->uuid = dm_strdup(uuid);
+		if (!md->uuid) {
 			DMWARN("unable to allocate uuid - out of memory.");
-			kfree(md);
-			return NULL;
+			goto bad;
 		}
-		strcpy(md->uuid, uuid);
 	}
 
+	/*
+	 * This will have inserted the device into the hashes iff
+	 * it succeeded.
+	 */
+	minor = (minor < 0) ? any_old_dev(md) : specific_dev(minor, md);
+	if (minor < 0)
+		goto bad;
+
+	md->suspended = 0;
+	md->invalid = 0;
+	md->use_count = 0;
+	md->deferred = NULL;
+
+	md->pending = (atomic_t) ATOMIC_INIT(0);
 	init_waitqueue_head(&md->wait);
 	return md;
+
+      bad:
+	if (md->name)
+		kfree(md->name);
+
+	if (md->uuid)
+		kfree(md->uuid);
+
+	kfree(md);
+	return NULL;
+}
+
+static void free_dev(struct mapped_device *md)
+{
+	dm_hash_remove(md);
+	kfree(md->name);
+
+	if (md->uuid)
+		kfree(md->uuid);
+
+	kfree(md);
 }
 
 static int __register_device(struct mapped_device *md)
@@ -855,34 +717,9 @@ static void __unbind(struct mapped_device *md)
 
 static int check_name(const char *name)
 {
-	struct mapped_device *md;
-
-	if (strchr(name, '/') || strlen(name) > DM_NAME_LEN) {
+	if (strchr(name, '/')) {
 		DMWARN("invalid device name");
-		return -1;
-	}
-
-	md = dm_get_name_r(name, DM_LOOKUP_BY_NAME);
-	if (md) {
-		dm_put_r(md);
-		DMWARN("device name already in use");
-		return -1;
-	}
-
-	return 0;
-}
-
-static int check_uuid(const char *uuid)
-{
-	struct mapped_device *md;
-
-	if (uuid) {
-		md = dm_get_name_r(uuid, DM_LOOKUP_BY_UUID);
-		if (md) {
-			dm_put_r(md);
-			DMWARN("device uuid already in use");
-			return -1;
-		}
+		return -EINVAL;
 	}
 
 	return 0;
@@ -897,86 +734,60 @@ int dm_create(const char *name, const char *uuid, int minor, int ro,
 	int r;
 	struct mapped_device *md;
 
-	spin_lock(&_create_lock);
-	if (check_name(name) || check_uuid(uuid)) {
-		spin_unlock(&_create_lock);
-		return -EINVAL;
-	}
+	r = check_name(name);
+	if (r)
+		return r;
 
 	md = alloc_dev(name, uuid, minor);
-	if (!md) {
-		spin_unlock(&_create_lock);
+	if (!md)
 		return -ENXIO;
-	}
-	minor = MINOR(md->dev);
-	_devs[minor] = md;
 
 	r = __register_device(md);
 	if (r)
-		goto err;
+		goto bad;
 
 	r = __bind(md, table);
 	if (r)
-		goto err;
+		goto bad;
 
 	dm_set_ro(md, ro);
-
-	spin_unlock(&_create_lock);
 	dm_put_w(md);
 	return 0;
 
-      err:
-	_devs[minor] = NULL;
-	if (md->uuid)
-		kfree(md->uuid);
-
+      bad:
 	dm_put_w(md);
-	kfree(md);
-	spin_unlock(&_create_lock);
+	free_dev(md);
 	return r;
 }
 
 /*
  * Renames the device.  No lock held.
  */
-int dm_set_name(const char *name, int nametype, const char *newname)
+int dm_set_name(const char *name, const char *new_name)
 {
 	int r;
 	struct mapped_device *md;
 
-	spin_lock(&_create_lock);
-	if (check_name(newname) < 0) {
-		spin_unlock(&_create_lock);
-		return -EINVAL;
-	}
-
-	md = dm_get_name_w(name, nametype);
-	if (!md) {
-		spin_unlock(&_create_lock);
-		return -ENXIO;
-	}
-
-	r = __unregister_device(md);
+	r = dm_hash_rename(name, new_name);
 	if (r)
-		goto out;
+		return r;
 
-	strcpy(md->name, newname);
-	r = __register_device(md);
-
-      out:
+	md = dm_get_name_w(new_name);
+	r = __unregister_device(md);
+	if (!r)
+		r = __register_device(md);
 	dm_put_w(md);
-	spin_unlock(&_create_lock);
 	return r;
 }
 
 /*
- * Destructor for the device.  You cannot destroy an open
- * device.  Write lock must be held before calling.
- * Caller must dm_put_w(md) then kfree(md) if call was successful.
+ * Destructor for the device.  You cannot destroy an open device.
+ * Write lock must be held before calling.  md will have been
+ * freed if call was successful.
  */
 int dm_destroy(struct mapped_device *md)
 {
-	int minor, r;
+	int r;
 
 	if (md->use_count)
 		return -EPERM;
@@ -985,13 +796,14 @@ int dm_destroy(struct mapped_device *md)
 	if (r)
 		return r;
 
-	minor = MINOR(md->dev);
-	_devs[minor] = NULL;
+	/*
+	 * Signal that this md is now invalid so that nothing further
+	 * can acquire its lock.
+	 */
+	md->invalid = 1;
+
 	__unbind(md);
-
-	if (md->uuid)
-		kfree(md->uuid);
-
+	free_dev(md);
 	return 0;
 }
 
@@ -1011,12 +823,10 @@ void dm_destroy_all(void)
 				continue;
 
 			r = dm_destroy(md);
-			dm_put_w(md);
-
-			if (!r) {
-				kfree(md);
+			if (r)
+				dm_put_w(md);
+			else
 				some_destroyed = 1;
-			}
 		}
 	} while (some_destroyed);
 }
@@ -1069,69 +879,81 @@ int dm_swap_table(struct mapped_device *md, struct dm_table *table)
 
 /*
  * We need to be able to change a mapping table under a mounted
- * filesystem.  for example we might want to move some data in
+ * filesystem.  For example we might want to move some data in
  * the background.  Before the table can be swapped with
  * dm_bind_table, dm_suspend must be called to flush any in
  * flight buffer_heads and ensure that any further io gets
  * deferred.  Write lock must be held.
  */
-int dm_suspend(struct mapped_device *md)
+int dm_suspend(kdev_t dev)
 {
-	int minor = MINOR(md->dev);
+	struct mapped_device *md;
 	DECLARE_WAITQUEUE(wait, current);
 
-	if (md->suspended)
+	/*
+	 * First we set the suspend flag so no more ios will be
+	 * mapped.
+	 */
+	md = dm_get_w(dev);
+	if (!md)
+		return -ENXIO;
+
+	if (md->suspended) {
+		dm_put_w(md);
 		return -EINVAL;
+	}
 
 	md->suspended = 1;
 	dm_put_w(md);
 
-	/* wait for all the pending io to flush */
+	/*
+	 * Then we wait for wait for the already mapped ios to
+	 * complete.
+	 */
+	md = dm_get_r(dev);
+	if (!md)
+		return -ENXIO;
+	if (!md->suspended)
+		return -EINVAL;
+
 	add_wait_queue(&md->wait, &wait);
 	current->state = TASK_UNINTERRUPTIBLE;
 	do {
-		md = dm_get_w(md->dev);
-		if (!md) {
-			/* Caller expects to free this lock. Yuck. */
-			down_write(_dev_locks + minor);
-			return -ENXIO;
-		}
-
 		if (!atomic_read(&md->pending))
 			break;
 
-		dm_put_w(md);
 		schedule();
 
 	} while (1);
 
 	current->state = TASK_RUNNING;
 	remove_wait_queue(&md->wait, &wait);
+	dm_put_r(md);
 
 	return 0;
 }
 
-int dm_resume(struct mapped_device *md)
+int dm_resume(kdev_t dev)
 {
-	int minor = MINOR(md->dev);
+	struct mapped_device *md;
 	struct deferred_io *def;
 
-	if (!md->suspended || !md->map->num_targets)
+	md = dm_get_w(dev);
+	if (!md)
+		return -ENXIO;
+
+	if (!md->suspended || !md->map->num_targets) {
+		dm_put_w(md);
 		return -EINVAL;
+	}
 
 	md->suspended = 0;
 	def = md->deferred;
 	md->deferred = NULL;
-
 	dm_put_w(md);
+
 	flush_deferred_io(def);
 	run_task_queue(&tq_disk);
-
-	if (!dm_get_w(md->dev)) {
-		/* FIXME: yuck */
-		down_write(_dev_locks + minor);
-		return -ENXIO;
-	}
 
 	return 0;
 }

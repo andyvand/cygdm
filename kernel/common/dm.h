@@ -99,11 +99,14 @@ struct dm_table {
  * The actual device struct
  */
 struct mapped_device {
+	struct rw_semaphore lock;
+
 	kdev_t dev;
-	char name[DM_NAME_LEN];
+	char *name;
 	char *uuid;
 
 	int use_count;
+	int invalid;
 	int suspended;
 	int read_only;
 
@@ -131,30 +134,46 @@ void dm_target_exit(void);
  */
 int split_args(int max, int *argc, char **argv, char *input);
 
-/* dm.c */
+/*
+ * dm-hash manages the lookup of devices by dev/name/uuid.
+ */
+int dm_hash_init(void);
+void dm_hash_exit(void);
+
+int dm_hash_insert(struct mapped_device *md);
+void dm_hash_remove(struct mapped_device *md);
+int dm_hash_rename(const char *old, const char *new);
+
+/*
+ * There are three ways to lookup a device: by kdev_t, by name
+ * and by uuid.  A code path (eg an ioctl) should only ever get
+ * one device at any time.
+ */
 struct mapped_device *dm_get_r(kdev_t dev);
 struct mapped_device *dm_get_w(kdev_t dev);
 
-/*
- * There are two ways to lookup a device.
- */
-enum {
-	DM_LOOKUP_BY_NAME,
-	DM_LOOKUP_BY_UUID
-};
+struct mapped_device *dm_get_name_r(const char *name);
+struct mapped_device *dm_get_name_w(const char *name);
 
-struct mapped_device *dm_get_name_r(const char *name, int nametype);
-struct mapped_device *dm_get_name_w(const char *name, int nametype);
+struct mapped_device *dm_get_uuid_r(const char *uuid);
+struct mapped_device *dm_get_uuid_w(const char *uuid);
 
-void dm_put_r(struct mapped_device *md);
-void dm_put_w(struct mapped_device *md);
+static inline void dm_put_r(struct mapped_device *md)
+{
+	up_read(&md->lock);
+}
+
+static inline void dm_put_w(struct mapped_device *md)
+{
+	up_write(&md->lock);
+}
 
 /*
  * Call with no lock.
  */
 int dm_create(const char *name, const char *uuid, int minor, int ro,
 	      struct dm_table *table);
-int dm_set_name(const char *name, int nametype, const char *newname);
+int dm_set_name(const char *name, const char *newname);
 void dm_destroy_all(void);
 
 /*
@@ -172,8 +191,8 @@ int dm_swap_table(struct mapped_device *md, struct dm_table *t);
 /*
  * A device can still be used while suspended, but I/O is deferred.
  */
-int dm_suspend(struct mapped_device *md);
-int dm_resume(struct mapped_device *md);
+int dm_suspend(kdev_t dev);
+int dm_resume(kdev_t dev);
 
 /* dm-table.c */
 int dm_table_create(struct dm_table **result, int mode);
@@ -212,6 +231,14 @@ static inline int array_too_big(unsigned long fixed, unsigned long obj,
 				unsigned long num)
 {
 	return (num > (ULONG_MAX - fixed) / obj);
+}
+
+static inline char *dm_strdup(const char *str)
+{
+	char *r = kmalloc(strlen(str) + 1, GFP_KERNEL);
+	if (r)
+		strcpy(r, str);
+	return r;
 }
 
 /*
