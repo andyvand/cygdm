@@ -192,7 +192,7 @@ struct snap_disk_header {
 };
 
 static int write_metadata(struct snapshot_c *lc);
-
+static int write_header(struct snapshot_c *lc);
 /*
  * Size of the hash table for origin volumes. If we make this
  * the size of the minors list then it should be nearly perfect
@@ -206,7 +206,8 @@ static int write_metadata(struct snapshot_c *lc);
  */
 static struct list_head *snapshot_origins = NULL;
 static struct rw_semaphore origin_hash_lock;
-
+static kmem_cache_t *exception_cachep;
+static kmem_cache_t *inflight_cachep;
 /*
  * Hash functions
  */
@@ -353,7 +354,7 @@ static struct exception *add_exception(struct snapshot_c *sc, unsigned long org,
 	struct list_head *l = &sc->hash_table[exception_hash(org, sc)];
 	struct exception *new_ex;
 
-	new_ex = kmalloc(sizeof(struct exception), GFP_KERNEL);
+	new_ex = kmem_cache_alloc(exception_cachep, GFP_NOIO);
 	if (!new_ex) return NULL;
 
 	new_ex->rsector_org = org;
@@ -389,7 +390,7 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 		bh = iex->bh;
 		iex->bh = NULL;
 		up_write(&iex->snap->origin->lock);
-		kfree(iex);
+		kmem_cache_free(inflight_cachep, iex);
 
 		while (bh) {
 			struct buffer_head *nextbh = bh->b_reqnext;
@@ -407,7 +408,7 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 		if (iex->snap->persistent)
 			write_header(iex->snap);
 		list_del(&iex->list);
-		kfree(iex);
+		kmem_cache_free(inflight_cachep, iex);
 	}
 }
 
@@ -495,7 +496,7 @@ static struct inflight_exception *add_inflight_exception(struct snapshot_c *sc, 
 	struct list_head *l = &sc->inflight_hash_table[inflight_exception_hash(org, sc)];
 	struct inflight_exception *new_ex;
 
-	new_ex = kmalloc(sizeof(struct inflight_exception), GFP_KERNEL);
+	new_ex = kmem_cache_alloc(inflight_cachep, GFP_NOIO);
 	if (!new_ex) return NULL;
 
 	new_ex->rsector_org = org;
@@ -647,7 +648,7 @@ static void free_exception_table(struct snapshot_c *lc)
 				struct exception *ex;
 				ex = list_entry(entry, struct exception, list);
 				list_del(&ex->list);
-				kfree(ex);
+				kmem_cache_free(exception_cachep, ex);
 			}
 		}
 	}
@@ -884,7 +885,6 @@ static int write_metadata(struct snapshot_c *lc)
 		DMERR("Error writing COW block");
 		return -1;
 	}
-
 	return 0;
 }
 
@@ -1380,6 +1380,26 @@ int __init dm_snapshot_init(void)
 			init_rwsem(&origin_hash_lock);
 		}
 	}
+	exception_cachep = kmem_cache_create("dm-snapshot-ex",
+					     sizeof(struct exception),
+					     __alignof__(struct exception),
+					     0, NULL, NULL);
+	if (!exception_cachep) {
+		kfree(snapshot_origins);
+		return -1;
+	}
+
+
+	inflight_cachep = kmem_cache_create("dm-snapshot-in",
+					    sizeof(struct inflight_exception),
+					    __alignof__(struct inflight_exception),
+					    0, NULL, NULL);
+	if (!inflight_cachep) {
+		kfree(snapshot_origins);
+		kmem_cache_destroy(exception_cachep);
+		return -1;
+	}
+
 
 	return r;
 }
@@ -1393,6 +1413,9 @@ void dm_snapshot_exit(void)
 
 	if (snapshot_origins)
 		kfree(snapshot_origins);
+
+	kmem_cache_destroy(inflight_cachep);
+	kmem_cache_destroy(exception_cachep);
 }
 
 /*
