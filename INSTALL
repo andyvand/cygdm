@@ -15,9 +15,10 @@ Device Mapper installation
    supply this parameter or you may get compilation failures.
 
    Example:  
-   ./configure --with-kernel-dir=/usr/src/linux-2.4.22
+   ./configure --with-kernel-dir=/usr/src/linux-2.4.26-rc1
 
-   2.6 kernels now already contain device-mapper patches.
+   2.6 kernels now already contain basic device-mapper patches
+   BUT they do not support snapshots and pvmove yet.
 
    The same userspace library and tools work with both 2.4 and 2.6 kernels
    because they share the same device-mapper interface (version 4).

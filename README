@@ -1,10 +1,11 @@
 This directory tree contains the supporting userspace files
 (libdevmapper and dmsetup) you need when working with device-mapper.  
 
-The patches subdirectory also includes device-mapper kernel patches
-for 2.4.20, 2.4.21 and 2.4.22 onwards.  2.6 kernels already contain
-the device-mapper core, but (as at Feb 2004) you need to apply
-development patches if you want snapshot and pvmove functionality.
+The patches subdirectory also includes up-to-date device-mapper kernel 
+patches for 2.4.26-rc1 and old patches for 2.4.20, 2.4.21 and 2.4.22 
+onwards.  2.6 kernels already contain the device-mapper core, but (as at 
+March 2004) you need to apply development patches if you want snapshot 
+and pvmove functionality.
 
 For more information about device-mapper please read the INTRO file.
 Installation instructions are in INSTALL.
