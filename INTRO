@@ -1,104 +1,54 @@
-The main goal of this driver is to support volume management in
-general, not just for LVM.  The kernel should provide general
-services, not support specific applications.  eg, The driver has no
-concept of volume groups.
+An introduction to the device mapper
+====================================
 
-The driver does this by mapping sector ranges for the logical device
-onto 'targets'.
+The goal of this driver is to support volume management.  
+The driver enables the definition of new block devices composed of
+ranges of sectors of existing devices.  This can be used to define
+disk partitions - or logical volumes.  This light-weight kernel
+component can support user-space tools for logical volume management.
 
-When the logical device is accessed, the make_request function looks
-up the correct target for the given sector, and then asks this target
-to do the remapping.
+The driver maps ranges of sectors for the new logical device onto
+'targets' according to a mapping table.  Currently the mapping table
+can be supplied to the driver through either an ioctl interface or a
+custom file system interface (dmfs).
 
+The mapping table consists of an ordered list of rules of the form:
+  <start> <length> <target> [<target args> ...]
+which map <length> sectors beginning at <start> to a target.
+
+Every sector on the new device must be specified - there must be no
+gaps between the rules.  The first rule has <start> = 0. 
+Each subsequent rule starts from the previous <start> + <length> + 1.
+
+When a sector of the new logical device is accessed, the make_request
+function looks up the correct target and then passes the request on to
+the target to perform the remapping according to its arguments.
+
+So far the following targets are available:
+  linear
+  striped
+  error
+
+The 'linear' target takes as arguments a target device name (eg
+/dev/hda6) and a start sector and maps the range of sectors linearly
+to the target.
+
+The 'striped' target is designed to handle striping across physical
+volumes.  It takes as arguments the number of stripes and the striping
+chunk size followed by a list of pairs of device name and sector.
+
+The 'error' target causes any I/O to the mapped sectors to fail.  This
+is useful for defining gaps in the new logical device.
+
+In normal scenarios the mapping tables will remain small.
 A btree structure is used to hold the sector range -> target mapping.
 Since we know all the entries in the btree in advance we can make a
 very compact tree, omitting pointers to child nodes, (child nodes
-locations can be calculated).  Typical users would find they only have
-a handful of targets for each logical volume LV.
+locations can be calculated).
 
 Benchmarking with bonnie++ suggests that this is certainly no slower
 than current LVM.
 
 
-Target types are not hard coded, instead the register_mapping_type
-function should be called.  A target type is specified using three
-functions (see the header):
-
-dm_ctr_fn - takes a string and contructs a target specific piece of
-            context data.
-dm_dtr_fn - destroy contexts.
-dm_map_fn - function that takes a buffer_head and some previously
-            constructed context and performs the remapping.
-
-Currently there are two two trivial mappers, which are automatically
-registered: 'linear', and 'io_error'.  Linear alone is enough to
-implement most of LVM.
-
-
-I do not like ioctl interfaces so this driver is currently controlled
-through a /proc interface.  /proc/device-mapper/control allows you to
-create and remove devices by 'cat'ing a line of the following format:
-
-create <device name> [minor no]
-remove <device name>
-
-If you're not using devfs you'll have to do the mknod'ing yourself,
-otherwise the device will appear in /dev/device-mapper automatically.
-
-/proc/device-mapper/<device name> accepts the mapping table:
-
-begin
-<sector start> <length> <target name> <target args>...
-...
-end
-
-where <target args> are specific to the target type, eg. for a linear
-mapping:
-
-<sector start> <length> linear <major> <minor> <start>
-
-and the io-err mapping:
-
-<sector start> <length> io-err
-
-The begin/end lines around the table are nasty, they should be handled
-by open/close of the file.
-
-The interface is far from complete, currently loading a table either
-succeeds or fails, you have no way of knowing which line of the
-mapping table was erroneous.  Also there is no way to get status
-information out, though this should be easy to add, either as another
-/proc file, or just by reading the same /proc/device-mapper/<device>
-file.  I will be seperating the loading and validation of a table from
-the binding of a valid table to a device.
-
-It has been suggested that I should implement a little custom
-filesystem rather than labouring with /proc.  For example doing a
-mkdir foo in /wherever/device-mapper would create a new device. People
-waiting for a status change (eg, a mirror operation to complete) could
-poll a file.  Does the community find this an acceptable way to go ?
-
-
-At the moment the table assumes 32 bit keys (sectors), the move to 64
-bits will involve no interface changes, since the tables will be read
-in as ascii data.  A different table implementation can therefor be
-provided at another time.  Either just by changing offset_t to 64
-bits, or maybe implementing a structure which looks up the keys in
-stages (ie, 32 bits at a time).
-
-
-More interesting targets:
-
-striped mapping; given a stripe size and a number of device regions
-this would stripe data across the regions.  Especially useful, since
-we could limit each striped region to a 32 bit area and then avoid
-nasty 64 bit %'s.
-
-mirror mapping; would set off a kernel thread slowly copying data from
-one region to another, ensuring that any new writes got copied to both
-destinations correctly.  Enabling us to implement a live pvmove
-correctly.
-
-
-
+08/12/2001 Sistina UK
 
