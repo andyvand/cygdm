@@ -945,14 +945,14 @@ int dm_set_name(const char *oldname, const char *newname)
 }
 
 /*
- * Destructor for the device.  You cannot destroy a suspended
+ * Destructor for the device.  You cannot destroy an open
  * device.  Write lock must be held before calling.
  */
 int dm_destroy(struct mapped_device *md)
 {
 	int minor, r;
 
-	if (md->suspended || md->use_count)
+	if (md->use_count)
 		return -EPERM;
 
 	r = __unregister_device(md);
@@ -1075,6 +1075,7 @@ int dm_suspend(struct mapped_device *md)
 		if (!atomic_read(&md->pending))
 			break;
 
+		dm_put_w(minor);
 		schedule();
 
 	} while (1);
