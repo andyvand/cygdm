@@ -10,3 +10,5 @@ These patches provide the core driver and implement basic mapping functions:
   -config.patch             - add device-mapper option (tagged experimental)
   -devmapper_only.patch     - the driver, including snapshot support
 
+And for 64-bit architectures:
+  -arch64.patch

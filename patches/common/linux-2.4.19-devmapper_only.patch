@@ -1,6 +1,6 @@
-diff -ruN linux-2.4.19/drivers/md/Makefile linux/drivers/md/Makefile
---- linux-2.4.19/drivers/md/Makefile	Tue Jun 25 14:14:54 2002
-+++ linux-2.4.19-dm/drivers/md/Makefile	Tue Jun 25 21:33:16 2002
+diff -ruN linux-2.4.19-dm/drivers/md/Makefile linux-2.4.19-dmbackport/drivers/md/Makefile
+--- linux-2.4.19-dm/drivers/md/Makefile	Wed Aug 14 11:51:06 2002
++++ linux-2.4.19-dmbackport/drivers/md/Makefile	Tue Nov 12 12:47:39 2002
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -28,10 +28,10 @@ diff -ruN linux-2.4.19/drivers/md/Makefile linux/drivers/md/Makefile
 +
 +dm-mod.o: $(dm-mod-objs)
 +	$(LD) -r -o $@ $(dm-mod-objs)
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-exception-store.c linux-2.4.19-dm/drivers/md/dm-exception-store.c
---- linux-2.4.19/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/dm-exception-store.c	Wed Jun 26 20:18:59 2002
-@@ -0,0 +1,698 @@
+diff -ruN linux-2.4.19-dm/drivers/md/dm-exception-store.c linux-2.4.19-dmbackport/drivers/md/dm-exception-store.c
+--- linux-2.4.19-dm/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/dm-exception-store.c	Wed Nov 13 17:29:01 2002
+@@ -0,0 +1,701 @@
 +/*
 + * dm-snapshot.c
 + *
@@ -42,8 +42,11 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +#include "dm-snapshot.h"
 +#include "kcopyd.h"
++
 +#include <linux/mm.h>
 +#include <linux/pagemap.h>
++#include <linux/vmalloc.h>
++#include <linux/slab.h>
 +
 +#define SECTOR_SIZE 512
 +#define SECTOR_SHIFT 9
@@ -112,7 +115,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +};
 +
 +struct commit_callback {
-+	void (*callback)(void *, int success);
++	void (*callback) (void *, int success);
 +	void *context;
 +};
 +
@@ -480,7 +483,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +{
 +	struct pstore *ps = get_info(store);
 +	uint32_t stride;
-+	offset_t size = get_dev_size(store->snap->cow->dev);
++	sector_t size = get_dev_size(store->snap->cow->dev);
 +
 +	/* Is there enough room ? */
 +	if (size <= (ps->next_free * store->snap->chunk_size))
@@ -672,7 +675,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + * Implementation of the store for non-persistent snapshots.
 + *---------------------------------------------------------------*/
 +struct transient_c {
-+	offset_t next_free;
++	sector_t next_free;
 +};
 +
 +void transient_destroy(struct exception_store *store)
@@ -683,7 +686,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +int transient_prepare(struct exception_store *store, struct exception *e)
 +{
 +	struct transient_c *tc = (struct transient_c *) store->context;
-+	offset_t size = get_dev_size(store->snap->cow->dev);
++	sector_t size = get_dev_size(store->snap->cow->dev);
 +
 +	if (size < (tc->next_free + store->snap->chunk_size))
 +		return -1;
@@ -710,7 +713,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +}
 +
 +int dm_create_transient(struct exception_store *store,
-+			struct dm_snapshot *s, int blocksize, void **error)
++			struct dm_snapshot *s, int blocksize)
 +{
 +	struct transient_c *tc;
 +
@@ -730,22 +733,326 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	return 0;
 +}
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-ioctl.c linux-2.4.19-dm/drivers/md/dm-ioctl.c
---- linux-2.4.19/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/dm-ioctl.c	Wed Aug 14 14:12:35 2002
-@@ -0,0 +1,830 @@
+diff -ruN linux-2.4.19-dm/drivers/md/dm-ioctl.c linux-2.4.19-dmbackport/drivers/md/dm-ioctl.c
+--- linux-2.4.19-dm/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/dm-ioctl.c	Wed Nov 13 17:38:50 2002
+@@ -0,0 +1,1139 @@
 +/*
-+ * Copyright (C) 2001 Sistina Software (UK) Limited.
++ * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
 + *
 + * This file is released under the GPL.
 + */
 +
 +#include "dm.h"
 +
++#include <linux/module.h>
++#include <linux/vmalloc.h>
 +#include <linux/miscdevice.h>
 +#include <linux/dm-ioctl.h>
 +#include <linux/init.h>
 +#include <linux/wait.h>
++#include <linux/blk.h>
++#include <linux/slab.h>
++#include <asm/uaccess.h>
++
++#define DM_DRIVER_EMAIL "dm@uk.sistina.com"
++
++/*-----------------------------------------------------------------
++ * The ioctl interface needs to be able to look up devices by
++ * name or uuid.
++ *---------------------------------------------------------------*/
++struct hash_cell {
++	struct list_head name_list;
++	struct list_head uuid_list;
++
++	char *name;
++	char *uuid;
++	struct mapped_device *md;
++
++	/* I hate devfs */
++	devfs_handle_t devfs_entry;
++};
++
++#define NUM_BUCKETS 64
++#define MASK_BUCKETS (NUM_BUCKETS - 1)
++static struct list_head _name_buckets[NUM_BUCKETS];
++static struct list_head _uuid_buckets[NUM_BUCKETS];
++
++static devfs_handle_t _dev_dir;
++void dm_hash_remove_all(void);
++
++/*
++ * Guards access to all three tables.
++ */
++static DECLARE_RWSEM(_hash_lock);
++
++static void init_buckets(struct list_head *buckets)
++{
++	unsigned int i;
++
++	for (i = 0; i < NUM_BUCKETS; i++)
++		INIT_LIST_HEAD(buckets + i);
++}
++
++int dm_hash_init(void)
++{
++	init_buckets(_name_buckets);
++	init_buckets(_uuid_buckets);
++	_dev_dir = devfs_mk_dir(0, DM_DIR, NULL);
++	return 0;
++}
++
++void dm_hash_exit(void)
++{
++	dm_hash_remove_all();
++	devfs_unregister(_dev_dir);
++}
++
++/*-----------------------------------------------------------------
++ * Hash function:
++ * We're not really concerned with the str hash function being
++ * fast since it's only used by the ioctl interface.
++ *---------------------------------------------------------------*/
++static unsigned int hash_str(const char *str)
++{
++	const unsigned int hash_mult = 2654435387U;
++	unsigned int h = 0;
++
++	while (*str)
++		h = (h + (unsigned int) *str++) * hash_mult;
++
++	return h & MASK_BUCKETS;
++}
++
++/*-----------------------------------------------------------------
++ * Code for looking up a device by name
++ *---------------------------------------------------------------*/
++static struct hash_cell *__get_name_cell(const char *str)
++{
++	struct list_head *tmp;
++	struct hash_cell *hc;
++	unsigned int h = hash_str(str);
++
++	list_for_each(tmp, _name_buckets + h) {
++		hc = list_entry(tmp, struct hash_cell, name_list);
++		if (!strcmp(hc->name, str))
++			return hc;
++	}
++
++	return NULL;
++}
++
++static struct hash_cell *__get_uuid_cell(const char *str)
++{
++	struct list_head *tmp;
++	struct hash_cell *hc;
++	unsigned int h = hash_str(str);
++
++	list_for_each(tmp, _uuid_buckets + h) {
++		hc = list_entry(tmp, struct hash_cell, uuid_list);
++		if (!strcmp(hc->uuid, str))
++			return hc;
++	}
++
++	return NULL;
++}
++
++/*-----------------------------------------------------------------
++ * Inserting, removing and renaming a device.
++ *---------------------------------------------------------------*/
++static inline char *kstrdup(const char *str)
++{
++	char *r = kmalloc(strlen(str) + 1, GFP_KERNEL);
++	if (r)
++		strcpy(r, str);
++	return r;
++}
++
++static struct hash_cell *alloc_cell(const char *name, const char *uuid,
++				    struct mapped_device *md)
++{
++	struct hash_cell *hc;
++
++	hc = kmalloc(sizeof(*hc), GFP_KERNEL);
++	if (!hc)
++		return NULL;
++
++	hc->name = kstrdup(name);
++	if (!hc->name) {
++		kfree(hc);
++		return NULL;
++	}
++
++	if (!uuid)
++		hc->uuid = NULL;
++
++	else {
++		hc->uuid = kstrdup(uuid);
++		if (!hc->uuid) {
++			kfree(hc->name);
++			kfree(hc);
++			return NULL;
++		}
++	}
++
++	INIT_LIST_HEAD(&hc->name_list);
++	INIT_LIST_HEAD(&hc->uuid_list);
++	hc->md = md;
++	return hc;
++}
++
++static void free_cell(struct hash_cell *hc)
++{
++	if (hc) {
++		kfree(hc->name);
++		kfree(hc->uuid);
++		kfree(hc);
++	}
++}
++
++/*
++ * devfs stuff.
++ */
++static int register_with_devfs(struct hash_cell *hc)
++{
++	kdev_t dev = dm_kdev(hc->md);
++
++	hc->devfs_entry =
++	    devfs_register(_dev_dir, hc->name, DEVFS_FL_CURRENT_OWNER,
++			   major(dev), minor(dev),
++			   S_IFBLK | S_IRUSR | S_IWUSR | S_IRGRP,
++			   &dm_blk_dops, NULL);
++
++	return 0;
++}
++
++static int unregister_with_devfs(struct hash_cell *hc)
++{
++	devfs_unregister(hc->devfs_entry);
++	return 0;
++}
++
++/*
++ * The kdev_t and uuid of a device can never change once it is
++ * initially inserted.
++ */
++int dm_hash_insert(const char *name, const char *uuid, struct mapped_device *md)
++{
++	struct hash_cell *cell;
++
++	/*
++	 * Allocate the new cells.
++	 */
++	cell = alloc_cell(name, uuid, md);
++	if (!cell)
++		return -ENOMEM;
++
++	/*
++	 * Insert the cell into all three hash tables.
++	 */
++	down_write(&_hash_lock);
++	if (__get_name_cell(name))
++		goto bad;
++
++	list_add(&cell->name_list, _name_buckets + hash_str(name));
++
++	if (uuid) {
++		if (__get_uuid_cell(uuid)) {
++			list_del(&cell->name_list);
++			goto bad;
++		}
++		list_add(&cell->uuid_list, _uuid_buckets + hash_str(uuid));
++	}
++	register_with_devfs(cell);
++	dm_get(md);
++	up_write(&_hash_lock);
++
++	return 0;
++
++      bad:
++	up_write(&_hash_lock);
++	free_cell(cell);
++	return -EBUSY;
++}
++
++void __hash_remove(struct hash_cell *hc)
++{
++	/* remove from the dev hash */
++	list_del(&hc->uuid_list);
++	list_del(&hc->name_list);
++	unregister_with_devfs(hc);
++	dm_put(hc->md);
++}
++
++void dm_hash_remove_all(void)
++{
++	int i;
++	struct hash_cell *hc;
++	struct list_head *tmp, *n;
++
++	down_write(&_hash_lock);
++	for (i = 0; i < NUM_BUCKETS; i++) {
++		list_for_each_safe(tmp, n, _name_buckets + i) {
++			hc = list_entry(tmp, struct hash_cell, name_list);
++			__hash_remove(hc);
++		}
++	}
++	up_write(&_hash_lock);
++}
++
++int dm_hash_rename(const char *old, const char *new)
++{
++	char *new_name, *old_name;
++	struct hash_cell *hc;
++
++	/*
++	 * duplicate new.
++	 */
++	new_name = kstrdup(new);
++	if (!new_name)
++		return -ENOMEM;
++
++	down_write(&_hash_lock);
++
++	/*
++	 * Is new free ?
++	 */
++	hc = __get_name_cell(new);
++	if (hc) {
++		DMWARN("asked to rename to an already existing name %s -> %s",
++		       old, new);
++		up_write(&_hash_lock);
++		return -EBUSY;
++	}
++
++	/*
++	 * Is there such a device as 'old' ?
++	 */
++	hc = __get_name_cell(old);
++	if (!hc) {
++		DMWARN("asked to rename a non existent device %s -> %s",
++		       old, new);
++		up_write(&_hash_lock);
++		return -ENXIO;
++	}
++
++	/*
++	 * rename and move the name cell.
++	 */
++	list_del(&hc->name_list);
++	old_name = hc->name;
++	hc->name = new_name;
++	list_add(&hc->name_list, _name_buckets + hash_str(new_name));
++
++	/* rename the device node in devfs */
++	unregister_with_devfs(hc);
++	register_with_devfs(hc);
++
++	up_write(&_hash_lock);
++	kfree(old_name);
++	return 0;
++}
++
 +
 +/*-----------------------------------------------------------------
 + * Implementation of the ioctl commands
@@ -756,15 +1063,6 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + * prototype.
 + */
 +typedef int (*ioctl_fn)(struct dm_ioctl *param, struct dm_ioctl *user);
-+
-+/*
-+ * This is really a debug only call.
-+ */
-+static int remove_all(struct dm_ioctl *param, struct dm_ioctl *user)
-+{
-+	dm_destroy_all();
-+	return 0;
-+}
 +
 +/*
 + * Check a string doesn't overrun the chunk of
@@ -793,29 +1091,12 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	return valid_str(*params, begin, end);
 +}
 +
-+/*
-+ * Checks to see if there's a gap in the table.
-+ * Returns true iff there is a gap.
-+ */
-+static int gap(struct dm_table *table, struct dm_target_spec *spec)
-+{
-+	if (!table->num_targets)
-+		return (spec->sector_start > 0) ? 1 : 0;
-+
-+	if (spec->sector_start != table->highs[table->num_targets - 1] + 1)
-+		return 1;
-+
-+	return 0;
-+}
-+
 +static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 +{
-+	int i = 0, r, first = 1, argc;
++	int i = 0, r, first = 1;
 +	struct dm_target_spec *spec;
-+	char *params, *argv[MAX_ARGS];
-+	struct target_type *ttype;
-+	void *context, *begin, *end;
-+	offset_t highs = 0;
++	char *params;
++	void *begin, *end;
 +
 +	if (!args->target_count) {
 +		DMWARN("populate_table: no targets specified");
@@ -824,8 +1105,6 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	begin = (void *) args;
 +	end = begin + args->data_size;
-+
-+#define PARSE_ERROR(msg) {DMWARN(msg); return -EINVAL;}
 +
 +	for (i = 0; i < args->target_count; i++) {
 +
@@ -837,41 +1116,23 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +			r = next_target(spec, spec->next, begin, end,
 +					&spec, &params);
 +
-+		if (r)
-+			PARSE_ERROR("unable to find target");
-+
-+		/* Look up the target type */
-+		ttype = dm_get_target_type(spec->target_type);
-+		if (!ttype)
-+			PARSE_ERROR("unable to find target type");
-+
-+		if (gap(table, spec))
-+			PARSE_ERROR("gap in target ranges");
-+
-+		/* Split up the parameter list */
-+		if (split_args(MAX_ARGS, &argc, argv, params) < 0)
-+			PARSE_ERROR("Too many arguments");
-+
-+		/* Build the target */
-+		if (ttype->ctr(table, spec->sector_start, spec->length,
-+			       argc, argv, &context)) {
-+			DMWARN("%s: target constructor failed",
-+			       (char *) context);
++		if (r) {
++			DMWARN("unable to find target");
 +			return -EINVAL;
 +		}
 +
-+		/* Add the target to the table */
-+		highs = spec->sector_start + (spec->length - 1);
-+		if (dm_table_add_target(table, highs, ttype, context))
-+			PARSE_ERROR("internal error adding target to table");
++		r = dm_table_add_target(table, spec->target_type,
++					spec->sector_start, spec->length,
++					params);
++		if (r) {
++			DMWARN("internal error adding target to table");
++			return -EINVAL;
++		}
 +
 +		first = 0;
 +	}
 +
-+#undef PARSE_ERROR
-+
-+	r = dm_table_complete(table);
-+	return r;
++	return dm_table_complete(table);
 +}
 +
 +/*
@@ -923,37 +1184,63 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + * Fills in a dm_ioctl structure, ready for sending back to
 + * userland.
 + */
-+static void __info(struct mapped_device *md, struct dm_ioctl *param)
++static int __info(struct mapped_device *md, struct dm_ioctl *param)
 +{
++	kdev_t dev = dm_kdev(md);
++	struct dm_table *table;
++	struct block_device *bdev;
++
 +	param->flags = DM_EXISTS_FLAG;
-+	if (md->suspended)
++	if (dm_suspended(md))
 +		param->flags |= DM_SUSPEND_FLAG;
-+	if (md->read_only)
++
++	param->dev = kdev_t_to_nr(dev);
++	bdev = bdget(param->dev);
++	if (!bdev)
++		return -ENXIO;
++
++	param->open_count = bdev->bd_openers;
++	bdput(bdev);
++
++	if (is_read_only(dev))
 +		param->flags |= DM_READONLY_FLAG;
 +
-+	strncpy(param->name, md->name, sizeof(param->name));
++	table = dm_get_table(md);
++	param->target_count = dm_table_get_num_targets(table);
++	dm_table_put(table);
 +
-+	if (md->uuid)
-+		strncpy(param->uuid, md->uuid, sizeof(param->uuid) - 1);
-+	else
-+		param->uuid[0] = '\0';
-+
-+	param->open_count = md->use_count;
-+	param->dev = kdev_t_to_nr(md->dev);
-+	param->target_count = md->map->num_targets;
++	return 0;
 +}
 +
 +/*
 + * Always use UUID for lookups if it's present, otherwise use name.
 + */
-+static inline char *lookup_name(struct dm_ioctl *param)
++static inline struct mapped_device *find_device(struct dm_ioctl *param)
 +{
-+	return (*param->uuid) ? param->uuid : param->name;
-+}
++	struct hash_cell *hc;
++	struct mapped_device *md = NULL;
 +
-+static inline int lookup_type(struct dm_ioctl *param)
-+{
-+	return (*param->uuid) ? DM_LOOKUP_BY_UUID : DM_LOOKUP_BY_NAME;
++	down_read(&_hash_lock);
++	hc = *param->uuid ? __get_uuid_cell(param->uuid) :
++	    __get_name_cell(param->name);
++	if (hc) {
++		md = hc->md;
++
++		/*
++		 * Sneakily write in both the name and the uuid
++		 * while we have the cell.
++		 */
++		strncpy(param->name, hc->name, sizeof(param->name));
++		if (hc->uuid)
++			strncpy(param->uuid, hc->uuid, sizeof(param->uuid) - 1);
++		else
++			param->uuid[0] = '\0';
++
++		dm_get(md);
++	}
++	up_read(&_hash_lock);
++
++	return md;
 +}
 +
 +#define ALIGNMENT sizeof(int)
@@ -974,7 +1261,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	param->flags = 0;
 +
-+	md = dm_get_name_r(lookup_name(param), lookup_type(param));
++	md = find_device(param);
 +	if (!md)
 +		/*
 +		 * Device not found - returns cleared exists flag.
@@ -982,7 +1269,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +		goto out;
 +
 +	__info(md, param);
-+	dm_put_r(md);
++	dm_put(md);
 +
 +      out:
 +	return results_to_user(user, param, NULL, 0);
@@ -998,11 +1285,27 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	return mode;
 +}
 +
++static int check_name(const char *name)
++{
++	if (strchr(name, '/')) {
++		DMWARN("invalid device name");
++		return -EINVAL;
++	}
++
++	return 0;
++}
++
 +static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 +{
-+	int r, ro;
++	int r;
++	kdev_t dev;
 +	struct dm_table *t;
++	struct mapped_device *md;
 +	int minor;
++
++	r = check_name(param->name);
++	if (r)
++		return r;
 +
 +	r = dm_table_create(&t, get_mode(param));
 +	if (r)
@@ -1010,26 +1313,27 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	r = populate_table(t, param);
 +	if (r) {
-+		dm_table_destroy(t);
++		dm_table_put(t);
 +		return r;
 +	}
 +
 +	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
-+	    MINOR(to_kdev_t(param->dev)) : -1;
++	    minor(to_kdev_t(param->dev)) : -1;
 +
-+	ro = (param->flags & DM_READONLY_FLAG) ? 1 : 0;
-+
-+	r = dm_create(param->name, param->uuid, minor, ro, t);
++	r = dm_create(minor, t, &md);
 +	if (r) {
-+		dm_table_destroy(t);
++		dm_table_put(t);
 +		return r;
 +	}
++	dm_table_put(t);	/* md will have grabbed its own reference */
 +
-+	r = info(param, user);
-+	return r;
++	dev = dm_kdev(md);
++	set_device_ro(dev, (param->flags & DM_READONLY_FLAG));
++	r = dm_hash_insert(param->name, *param->uuid ? param->uuid : NULL, md);
++	dm_put(md);
++
++	return r ? r : info(param, user);
 +}
-+
-+
 +
 +/*
 + * Build up the status struct for each target
@@ -1037,11 +1341,11 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +static int __status(struct mapped_device *md, struct dm_ioctl *param,
 +		    char *outbuf, int *len)
 +{
-+	int i;
++	int i, num_targets;
 +	struct dm_target_spec *spec;
-+	uint64_t sector = 0LL;
 +	char *outptr;
 +	status_type_t type;
++	struct dm_table *table = dm_get_table(md);
 +
 +	if (param->flags & DM_STATUS_TABLE_FLAG)
 +		type = STATUSTYPE_TABLE;
@@ -1051,41 +1355,41 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	outptr = outbuf;
 +
 +	/* Get all the target info */
-+	for (i = 0; i < md->map->num_targets; i++) {
-+		struct target_type *tt = md->map->targets[i].type;
-+		offset_t high = md->map->highs[i];
++	num_targets = dm_table_get_num_targets(table);
++	for (i = 0; i < num_targets; i++) {
++		struct dm_target *ti = dm_table_get_target(table, i);
 +
 +		if (outptr - outbuf +
-+		    sizeof(struct dm_target_spec) > param->data_size)
-+			    return -ENOMEM;
++		    sizeof(struct dm_target_spec) > param->data_size) {
++			dm_table_put(table);
++			return -ENOMEM;
++		}
 +
 +		spec = (struct dm_target_spec *) outptr;
 +
 +		spec->status = 0;
-+		spec->sector_start = sector;
-+		spec->length = high - sector + 1;
-+		strncpy(spec->target_type, tt->name, sizeof(spec->target_type));
++		spec->sector_start = ti->begin;
++		spec->length = ti->len;
++		strncpy(spec->target_type, ti->type->name,
++			sizeof(spec->target_type));
 +
 +		outptr += sizeof(struct dm_target_spec);
 +
 +		/* Get the status/table string from the target driver */
-+		if (tt->status)
-+			tt->status(type, outptr,
-+				   outbuf + param->data_size - outptr,
-+				   md->map->targets[i].private);
++		if (ti->type->status)
++			ti->type->status(ti, type, outptr,
++					 outbuf + param->data_size - outptr);
 +		else
 +			outptr[0] = '\0';
 +
 +		outptr += strlen(outptr) + 1;
 +		_align(outptr, ALIGNMENT);
-+
-+		sector = high + 1;
-+
 +		spec->next = outptr - outbuf;
 +	}
 +
-+	param->target_count = md->map->num_targets;
++	param->target_count = num_targets;
 +	*len = outptr - outbuf;
++	dm_table_put(table);
 +
 +	return 0;
 +}
@@ -1101,7 +1405,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	int ret;
 +	char *outbuf = NULL;
 +
-+	md = dm_get_name_r(lookup_name(param), lookup_type(param));
++	md = find_device(param);
 +	if (!md)
 +		/*
 +		 * Device not found - returns cleared exists flag.
@@ -1126,7 +1430,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +      out:
 +	if (md)
-+		dm_put_r(md);
++		dm_put(md);
 +
 +	ret = results_to_user(user, param, outbuf, len);
 +
@@ -1142,14 +1446,16 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +static int wait_device_event(struct dm_ioctl *param, struct dm_ioctl *user)
 +{
 +	struct mapped_device *md;
++	struct dm_table *table;
 +	DECLARE_WAITQUEUE(wq, current);
 +
-+	md = dm_get_name_r(lookup_name(param), lookup_type(param));
++	md = find_device(param);
 +	if (!md)
 +		/*
 +		 * Device not found - returns cleared exists flag.
 +		 */
 +		goto out;
++
 +	/*
 +	 * Setup the basic dm_ioctl structure.
 +	 */
@@ -1159,11 +1465,12 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	 * Wait for a notification event
 +	 */
 +	set_current_state(TASK_INTERRUPTIBLE);
-+	add_wait_queue(&md->map->eventq, &wq);
++	table = dm_get_table(md);
++	dm_table_add_wait_queue(table, &wq);
++	dm_table_put(table);
++	dm_put(md);
 +
-+	dm_put_r(md);
-+
-+	schedule();
++	yield();
 +	set_current_state(TASK_RUNNING);
 +
 +      out:
@@ -1180,10 +1487,12 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	struct list_head *tmp;
 +	size_t len = 0;
 +	struct dm_target_deps *deps = NULL;
++	struct dm_table *table;
 +
-+	md = dm_get_name_r(lookup_name(param), lookup_type(param));
++	md = find_device(param);
 +	if (!md)
 +		goto out;
++	table = dm_get_table(md);
 +
 +	/*
 +	 * Setup the basic dm_ioctl structure.
@@ -1194,7 +1503,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	 * Count the devices.
 +	 */
 +	count = 0;
-+	list_for_each(tmp, &md->map->devices)
++	list_for_each(tmp, dm_table_get_devices(table))
 +	    count++;
 +
 +	/*
@@ -1202,14 +1511,16 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	 * struct.
 +	 */
 +	if (array_too_big(sizeof(*deps), sizeof(*deps->dev), count)) {
-+		dm_put_r(md);
++		dm_table_put(table);
++		dm_put(md);
 +		return -ENOMEM;
 +	}
 +
 +	len = sizeof(*deps) + (sizeof(*deps->dev) * count);
 +	deps = kmalloc(len, GFP_KERNEL);
 +	if (!deps) {
-+		dm_put_r(md);
++		dm_table_put(table);
++		dm_put(md);
 +		return -ENOMEM;
 +	}
 +
@@ -1218,11 +1529,12 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	 */
 +	deps->count = count;
 +	count = 0;
-+	list_for_each(tmp, &md->map->devices) {
++	list_for_each(tmp, dm_table_get_devices(table)) {
 +		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
-+		deps->dev[count++] = kdev_t_to_nr(dd->dev);
++		deps->dev[count++] = dd->bdev->bd_dev;
 +	}
-+	dm_put_r(md);
++	dm_table_put(table);
++	dm_put(md);
 +
 +      out:
 +	r = results_to_user(user, param, deps, len);
@@ -1233,19 +1545,26 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +static int remove(struct dm_ioctl *param, struct dm_ioctl *user)
 +{
-+	int r;
-+	struct mapped_device *md;
++	struct hash_cell *hc;
 +
-+	md = dm_get_name_w(lookup_name(param), lookup_type(param));
-+	if (!md)
-+		return -ENXIO;
++	down_write(&_hash_lock);
++	hc = *param->uuid ? __get_uuid_cell(param->uuid) :
++	    __get_name_cell(param->name);
++	if (!hc) {
++		DMWARN("device doesn't appear to be in the dev hash table.");
++		up_write(&_hash_lock);
++		return -EINVAL;
++	}
 +
-+	r = dm_destroy(md);
-+	dm_put_w(md);
-+	if (!r)
-+		kfree(md);
++	__hash_remove(hc);
++	up_write(&_hash_lock);
++	return 0;
++}
 +
-+	return r;
++static int remove_all(struct dm_ioctl *param, struct dm_ioctl *user)
++{
++	dm_hash_remove_all();
++	return 0;
 +}
 +
 +static int suspend(struct dm_ioctl *param, struct dm_ioctl *user)
@@ -1253,19 +1572,23 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	int r;
 +	struct mapped_device *md;
 +
-+	md = dm_get_name_w(lookup_name(param), lookup_type(param));
++	md = find_device(param);
 +	if (!md)
 +		return -ENXIO;
 +
-+	r = (param->flags & DM_SUSPEND_FLAG) ? dm_suspend(md) : dm_resume(md);
-+	dm_put_w(md);
++	if (param->flags & DM_SUSPEND_FLAG)
++		r = dm_suspend(md);
++	else
++		r = dm_resume(md);
 +
++	dm_put(md);
 +	return r;
 +}
 +
 +static int reload(struct dm_ioctl *param, struct dm_ioctl *user)
 +{
 +	int r;
++	kdev_t dev;
 +	struct mapped_device *md;
 +	struct dm_table *t;
 +
@@ -1275,25 +1598,26 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	r = populate_table(t, param);
 +	if (r) {
-+		dm_table_destroy(t);
++		dm_table_put(t);
 +		return r;
 +	}
 +
-+	md = dm_get_name_w(lookup_name(param), lookup_type(param));
++	md = find_device(param);
 +	if (!md) {
-+		dm_table_destroy(t);
++		dm_table_put(t);
 +		return -ENXIO;
 +	}
 +
 +	r = dm_swap_table(md, t);
 +	if (r) {
-+		dm_put_w(md);
-+		dm_table_destroy(t);
++		dm_put(md);
++		dm_table_put(t);
 +		return r;
 +	}
 +
-+	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
-+	dm_put_w(md);
++	dev = dm_kdev(md);
++	set_device_ro(dev, (param->flags & DM_READONLY_FLAG));
++	dm_put(md);
 +
 +	r = info(param, user);
 +	return r;
@@ -1301,16 +1625,20 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +static int rename(struct dm_ioctl *param, struct dm_ioctl *user)
 +{
-+	char *newname = (char *) param + param->data_start;
++	int r;
++	char *new_name = (char *) param + param->data_start;
 +
-+	if (valid_str(newname, (void *) param,
-+		      (void *) param + param->data_size) ||
-+	    dm_set_name(lookup_name(param), lookup_type(param), newname)) {
++	if (valid_str(new_name, (void *) param,
++		      (void *) param + param->data_size)) {
 +		DMWARN("Invalid new logical volume name supplied.");
 +		return -EINVAL;
 +	}
 +
-+	return 0;
++	r = check_name(new_name);
++	if (r)
++		return r;
++
++	return dm_hash_rename(param->name, new_name);
 +}
 +
 +
@@ -1318,23 +1646,6 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + * Implementation of open/close/ioctl on the special char
 + * device.
 + *---------------------------------------------------------------*/
-+static int ctl_open(struct inode *inode, struct file *file)
-+{
-+	/* only root can open this */
-+	if (!capable(CAP_SYS_ADMIN))
-+		return -EACCES;
-+
-+	MOD_INC_USE_COUNT;
-+
-+	return 0;
-+}
-+
-+static int ctl_close(struct inode *inode, struct file *file)
-+{
-+	MOD_DEC_USE_COUNT;
-+	return 0;
-+}
-+
 +static ioctl_fn lookup_ioctl(unsigned int cmd)
 +{
 +	static struct {
@@ -1353,9 +1664,8 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +		{DM_TARGET_STATUS_CMD, get_status},
 +		{DM_TARGET_WAIT_CMD, wait_device_event},
 +	};
-+	static int nelts = sizeof(_ioctls) / sizeof(*_ioctls);
 +
-+	return (cmd >= nelts) ? NULL : _ioctls[cmd].fn;
++	return (cmd >= ARRAY_SIZE(_ioctls)) ? NULL : _ioctls[cmd].fn;
 +}
 +
 +/*
@@ -1445,11 +1755,14 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +static int ctl_ioctl(struct inode *inode, struct file *file,
 +		     uint command, ulong u)
 +{
-+
 +	int r = 0, cmd;
 +	struct dm_ioctl *param;
 +	struct dm_ioctl *user = (struct dm_ioctl *) u;
 +	ioctl_fn fn = NULL;
++
++	/* only root can play with this */
++	if (!capable(CAP_SYS_ADMIN))
++		return -EACCES;
 +
 +	if (_IOC_TYPE(command) != DM_IOCTL)
 +		return -ENOTTY;
@@ -1495,23 +1808,36 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +}
 +
 +static struct file_operations _ctl_fops = {
-+	open:	 ctl_open,
-+	release: ctl_close,
-+	ioctl:	 ctl_ioctl,
-+	owner:	 THIS_MODULE,
++	.ioctl = ctl_ioctl,
++	.owner = THIS_MODULE,
 +};
 +
 +static devfs_handle_t _ctl_handle;
 +
 +static struct miscdevice _dm_misc = {
-+	minor: MISC_DYNAMIC_MINOR,
-+	name:  DM_NAME,
-+	fops:  &_ctl_fops
++	.minor = MISC_DYNAMIC_MINOR,
++	.name  = DM_NAME,
++	.fops  = &_ctl_fops
 +};
 +
-+static int __init dm_devfs_init(void) {
++/*
++ * Create misc character device and link to DM_DIR/control.
++ */
++int __init dm_interface_init(void)
++{
 +	int r;
 +	char rname[64];
++
++	r = dm_hash_init();
++	if (r)
++		return r;
++
++	r = misc_register(&_dm_misc);
++	if (r) {
++		DMERR("misc_register failed for control device");
++		dm_hash_exit();
++		return r;
++	}
 +
 +	r = devfs_generate_path(_dm_misc.devfs_handle, rname + 3,
 +				sizeof rname - 3);
@@ -1520,7 +1846,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	if (r < 0) {
 +		DMERR("devfs_generate_path failed for control device");
-+		return r;
++		goto failed;
 +	}
 +
 +	strncpy(rname + r, "../", 3);
@@ -1528,46 +1854,32 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +			     DEVFS_FL_DEFAULT, rname + r, &_ctl_handle, NULL);
 +	if (r) {
 +		DMERR("devfs_mk_symlink failed for control device");
-+		return r;
++		goto failed;
 +	}
 +	devfs_auto_unregister(_dm_misc.devfs_handle, _ctl_handle);
-+
-+	return 0;
-+}
-+
-+/* Create misc character device and link to DM_DIR/control */
-+int __init dm_interface_init(void)
-+{
-+	int r;
-+
-+	r = misc_register(&_dm_misc);
-+	if (r) {
-+		DMERR("misc_register failed for control device");
-+		return r;
-+	}
-+
-+	r = dm_devfs_init();
-+	if (r) {
-+		misc_deregister(&_dm_misc);
-+		return r;
-+	}
 +
 +	DMINFO("%d.%d.%d%s initialised: %s", DM_VERSION_MAJOR,
 +	       DM_VERSION_MINOR, DM_VERSION_PATCHLEVEL, DM_VERSION_EXTRA,
 +	       DM_DRIVER_EMAIL);
-+
 +	return 0;
++
++      failed:
++	dm_hash_exit();
++	misc_deregister(&_dm_misc);
++	return r;
 +}
 +
 +void dm_interface_exit(void)
 +{
++	dm_hash_exit();
++
 +	if (misc_deregister(&_dm_misc) < 0)
 +		DMERR("misc_deregister failed for control device");
 +}
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-linear.c linux-2.4.19-dm/drivers/md/dm-linear.c
---- linux-2.4.19/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/dm-linear.c	Wed Aug 14 13:58:34 2002
-@@ -0,0 +1,125 @@
+diff -ruN linux-2.4.19-dm/drivers/md/dm-linear.c linux-2.4.19-dmbackport/drivers/md/dm-linear.c
+--- linux-2.4.19-dm/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/dm-linear.c	Wed Nov 13 17:39:17 2002
+@@ -0,0 +1,120 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -1579,51 +1891,46 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +#include <linux/module.h>
 +#include <linux/init.h>
 +#include <linux/blkdev.h>
++#include <linux/slab.h>
 +
 +/*
 + * Linear: maps a linear range of a device.
 + */
 +struct linear_c {
-+	long delta;		/* FIXME: we need a signed offset type */
-+	long start;		/* For display only */
 +	struct dm_dev *dev;
++	sector_t start;
 +};
 +
 +/*
 + * Construct a linear mapping: <dev_path> <offset>
 + */
-+static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
-+		      int argc, char **argv, void **context)
++static int linear_ctr(struct dm_target *ti, int argc, char **argv)
 +{
 +	struct linear_c *lc;
-+	unsigned long start;	/* FIXME: unsigned long long */
-+	char *end;
 +
 +	if (argc != 2) {
-+		*context = "dm-linear: Not enough arguments";
++		ti->error = "dm-linear: Not enough arguments";
 +		return -EINVAL;
 +	}
 +
 +	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
 +	if (lc == NULL) {
-+		*context = "dm-linear: Cannot allocate linear context";
++		ti->error = "dm-linear: Cannot allocate linear context";
 +		return -ENOMEM;
 +	}
 +
-+	start = simple_strtoul(argv[1], &end, 10);
-+	if (*end) {
-+		*context = "dm-linear: Invalid device sector";
++	if (sscanf(argv[1], SECTOR_FORMAT, &lc->start) != 1) {
++		ti->error = "dm-linear: Invalid device sector";
 +		goto bad;
 +	}
 +
-+	if (dm_table_get_device(t, argv[0], start, l, t->mode, &lc->dev)) {
-+		*context = "dm-linear: Device lookup failed";
++	if (dm_get_device(ti, argv[0], lc->start, ti->len,
++			  dm_table_get_mode(ti->table), &lc->dev)) {
++		ti->error = "dm-linear: Device lookup failed";
 +		goto bad;
 +	}
 +
-+	lc->delta = (int) start - (int) b;
-+	lc->start = start;
-+	*context = lc;
++	ti->private = lc;
 +	return 0;
 +
 +      bad:
@@ -1631,28 +1938,28 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	return -EINVAL;
 +}
 +
-+static void linear_dtr(struct dm_table *t, void *c)
++static void linear_dtr(struct dm_target *ti)
 +{
-+	struct linear_c *lc = (struct linear_c *) c;
++	struct linear_c *lc = (struct linear_c *) ti->private;
 +
-+	dm_table_put_device(t, lc->dev);
-+	kfree(c);
++	dm_put_device(ti, lc->dev);
++	kfree(lc);
 +}
 +
-+static int linear_map(struct buffer_head *bh, int rw, void *context)
++static int linear_map(struct dm_target *ti, struct buffer_head *bh, int rw)
 +{
-+	struct linear_c *lc = (struct linear_c *) context;
++	struct linear_c *lc = (struct linear_c *) ti->private;
 +
 +	bh->b_rdev = lc->dev->dev;
-+	bh->b_rsector = bh->b_rsector + lc->delta;
++	bh->b_rsector = lc->start + (bh->b_rsector - ti->begin);
 +
 +	return 1;
 +}
 +
-+static int linear_status(status_type_t type, char *result, int maxlen,
-+			 void *context)
++static int linear_status(struct dm_target *ti, status_type_t type,
++			 char *result, int maxlen)
 +{
-+	struct linear_c *lc = (struct linear_c *) context;
++	struct linear_c *lc = (struct linear_c *) ti->private;
 +
 +	switch (type) {
 +	case STATUSTYPE_INFO:
@@ -1660,20 +1967,20 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +		break;
 +
 +	case STATUSTYPE_TABLE:
-+		snprintf(result, maxlen, "%s %ld", kdevname(lc->dev->dev),
-+			 lc->start);
++		snprintf(result, maxlen, "%s " SECTOR_FORMAT,
++			 kdevname(to_kdev_t(lc->dev->bdev->bd_dev)), lc->start);
 +		break;
 +	}
 +	return 0;
 +}
 +
 +static struct target_type linear_target = {
-+	name:	"linear",
-+	module:	THIS_MODULE,
-+	ctr:	linear_ctr,
-+	dtr:	linear_dtr,
-+	map:	linear_map,
-+	status:	linear_status,
++	.name   = "linear",
++	.module = THIS_MODULE,
++	.ctr    = linear_ctr,
++	.dtr    = linear_dtr,
++	.map    = linear_map,
++	.status = linear_status,
 +};
 +
 +int __init dm_linear_init(void)
@@ -1693,9 +2000,9 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	if (r < 0)
 +		DMERR("linear: unregister failed %d", r);
 +}
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-snapshot.c linux-2.4.19-dm/drivers/md/dm-snapshot.c
---- linux-2.4.19/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/dm-snapshot.c	Wed Aug 14 14:00:43 2002
+diff -ruN linux-2.4.19-dm/drivers/md/dm-snapshot.c linux-2.4.19-dmbackport/drivers/md/dm-snapshot.c
+--- linux-2.4.19-dm/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/dm-snapshot.c	Wed Nov 13 17:44:55 2002
 @@ -0,0 +1,1169 @@
 +/*
 + * dm-snapshot.c
@@ -1714,6 +2021,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +#include <linux/blkdev.h>
 +#include <linux/mempool.h>
 +#include <linux/device-mapper.h>
++#include <linux/vmalloc.h>
 +
 +#include "dm-snapshot.h"
 +#include "kcopyd.h"
@@ -2044,7 +2352,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + */
 +static int init_hash_tables(struct dm_snapshot *s)
 +{
-+	offset_t hash_size, cow_dev_size, origin_dev_size, max_buckets;
++	sector_t hash_size, cow_dev_size, origin_dev_size, max_buckets;
 +
 +	/*
 +	 * Calculate based on the size of the original volume or
@@ -2091,8 +2399,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +/*
 + * Construct a snapshot mapping: <origin_dev> <COW-dev> <p/n> <chunk-size>
 + */
-+static int snapshot_ctr(struct dm_table *t, offset_t b, offset_t l,
-+			int argc, char **argv, void **context)
++static int snapshot_ctr(struct dm_target *ti, int argc, char **argv)
 +{
 +	struct dm_snapshot *s;
 +	unsigned long chunk_size;
@@ -2104,7 +2411,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	int blocksize;
 +
 +	if (argc < 4) {
-+		*context = "dm-snapshot: requires exactly 4 arguments";
++		ti->error = "dm-snapshot: requires exactly 4 arguments";
 +		r = -EINVAL;
 +		goto bad;
 +	}
@@ -2114,36 +2421,38 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	persistent = argv[2];
 +
 +	if ((*persistent & 0x5f) != 'P' && (*persistent & 0x5f) != 'N') {
-+		*context = "Persistent flag is not P or N";
++		ti->error = "Persistent flag is not P or N";
 +		r = -EINVAL;
 +		goto bad;
 +	}
 +
 +	chunk_size = simple_strtoul(argv[3], &value, 10);
 +	if (chunk_size == 0 || value == NULL) {
-+		*context = "Invalid chunk size";
++		ti->error = "Invalid chunk size";
 +		r = -EINVAL;
 +		goto bad;
 +	}
 +
 +	s = kmalloc(sizeof(*s), GFP_KERNEL);
 +	if (s == NULL) {
-+		*context = "Cannot allocate snapshot context private structure";
++		ti->error = "Cannot allocate snapshot context private "
++			    "structure";
 +		r = -ENOMEM;
 +		goto bad;
 +	}
 +
-+	r = dm_table_get_device(t, origin_path, 0, 0, FMODE_READ, &s->origin);
++	r = dm_get_device(ti, origin_path, 0, ti->len, FMODE_READ, &s->origin);
 +	if (r) {
-+		*context = "Cannot get origin device";
++		ti->error = "Cannot get origin device";
 +		goto bad_free;
 +	}
 +
-+	r = dm_table_get_device(t, cow_path, 0, 0,
-+				FMODE_READ | FMODE_WRITE, &s->cow);
++	/* FIXME: get cow length */
++	r = dm_get_device(ti, cow_path, 0, 0,
++			  FMODE_READ | FMODE_WRITE, &s->cow);
 +	if (r) {
-+		dm_table_put_device(t, s->origin);
-+		*context = "Cannot get COW device";
++		dm_put_device(ti, s->origin);
++		ti->error = "Cannot get COW device";
 +		goto bad_free;
 +	}
 +
@@ -2156,21 +2465,21 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	/* Validate the chunk size against the device block size */
 +	blocksize = get_hardsect_size(s->cow->dev);
 +	if (chunk_size % (blocksize / SECTOR_SIZE)) {
-+		*context = "Chunk size is not a multiple of device blocksize";
++		ti->error = "Chunk size is not a multiple of device blocksize";
 +		r = -EINVAL;
 +		goto bad_putdev;
 +	}
 +
 +	/* Check the sizes are small enough to fit in one kiovec */
 +	if (chunk_size > KIO_MAX_SECTORS) {
-+		*context = "Chunk size is too big";
++		ti->error = "Chunk size is too big";
 +		r = -EINVAL;
 +		goto bad_putdev;
 +	}
 +
 +	/* Check chunk_size is a power of 2 */
 +	if (chunk_size & (chunk_size - 1)) {
-+		*context = "Chunk size is not a power of 2";
++		ti->error = "Chunk size is not a power of 2";
 +		r = -EINVAL;
 +		goto bad_putdev;
 +	}
@@ -2185,12 +2494,12 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	s->valid = 1;
 +	s->last_percent = 0;
-+	s->table = t;
 +	init_rwsem(&s->lock);
++	s->table = ti->table;
 +
 +	/* Allocate hash table for COW data */
 +	if (init_hash_tables(s)) {
-+		*context = "Unable to allocate hash table space";
++		ti->error = "Unable to allocate hash table space";
 +		r = -ENOMEM;
 +		goto bad_putdev;
 +	}
@@ -2204,10 +2513,10 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	if ((*persistent & 0x5f) == 'P')
 +		r = dm_create_persistent(&s->store, s->chunk_size);
 +	else
-+		r = dm_create_transient(&s->store, s, blocksize, context);
++		r = dm_create_transient(&s->store, s, blocksize);
 +
 +	if (r) {
-+		*context = "Couldn't create exception store";
++		ti->error = "Couldn't create exception store";
 +		r = -EINVAL;
 +		goto bad_free1;
 +	}
@@ -2222,7 +2531,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	/* Add snapshot to the list of snapshots for this origin */
 +	if (register_snapshot(s)) {
 +		r = -EINVAL;
-+		*context = "Cannot register snapshot origin";
++		ti->error = "Cannot register snapshot origin";
 +		goto bad_free2;
 +	}
 +#if LVM_VFS_ENHANCEMENT
@@ -2230,7 +2539,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +#endif
 +	kcopyd_inc_client_count();
 +
-+	*context = s;
++	ti->private = s;
 +	return 0;
 +
 +      bad_free2:
@@ -2241,8 +2550,8 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	exit_exception_table(&s->complete, exception_cache);
 +
 +      bad_putdev:
-+	dm_table_put_device(t, s->cow);
-+	dm_table_put_device(t, s->origin);
++	dm_put_device(ti, s->cow);
++	dm_put_device(ti, s->origin);
 +
 +      bad_free:
 +	kfree(s);
@@ -2251,11 +2560,11 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	return r;
 +}
 +
-+static void snapshot_dtr(struct dm_table *t, void *context)
++static void snapshot_dtr(struct dm_target *ti)
 +{
-+	struct dm_snapshot *s = (struct dm_snapshot *) context;
++	struct dm_snapshot *s = (struct dm_snapshot *) ti->private;
 +
-+	dm_table_event(s->table);
++	dm_table_event(ti->table);
 +
 +	unregister_snapshot(s);
 +
@@ -2265,8 +2574,8 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	/* Deallocate memory used */
 +	s->store.destroy(&s->store);
 +
-+	dm_table_put_device(t, s->origin);
-+	dm_table_put_device(t, s->cow);
++	dm_put_device(ti, s->origin);
++	dm_put_device(ti, s->cow);
 +	kfree(s);
 +
 +	kcopyd_dec_client_count();
@@ -2482,10 +2791,10 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	    (bh->b_rsector & s->chunk_mask);
 +}
 +
-+static int snapshot_map(struct buffer_head *bh, int rw, void *context)
++static int snapshot_map(struct dm_target *ti, struct buffer_head *bh, int rw)
 +{
 +	struct exception *e;
-+	struct dm_snapshot *s = (struct dm_snapshot *) context;
++	struct dm_snapshot *s = (struct dm_snapshot *) ti->private;
 +	int r = 1;
 +	chunk_t chunk;
 +	struct pending_exception *pe;
@@ -2632,10 +2941,10 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	return r;
 +}
 +
-+static int snapshot_status(status_type_t type, char *result,
-+			   int maxlen, void *context)
++static int snapshot_status(struct dm_target *ti, status_type_t type,
++			   char *result, int maxlen)
 +{
-+	struct dm_snapshot *snap = (struct dm_snapshot *) context;
++	struct dm_snapshot *snap = (struct dm_snapshot *) ti->private;
 +	char cow[16];
 +	char org[16];
 +
@@ -2697,47 +3006,47 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + * The context for an origin is merely a 'struct dm_dev *'
 + * pointing to the real device.
 + */
-+static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
-+		      int argc, char **argv, void **context)
++static int origin_ctr(struct dm_target *ti, int argc, char **argv)
 +{
 +	int r;
 +	struct dm_dev *dev;
 +
 +	if (argc != 1) {
-+		*context = "dm-origin: incorrect number of arguments";
++		ti->error = "dm-origin: incorrect number of arguments";
 +		return -EINVAL;
 +	}
 +
-+	r = dm_table_get_device(t, argv[0], 0, l, t->mode, &dev);
++	r = dm_get_device(ti, argv[0], 0, ti->len,
++			  dm_table_get_mode(ti->table), &dev);
 +	if (r) {
-+		*context = "Cannot get target device";
++		ti->error = "Cannot get target device";
 +		return r;
 +	}
 +
-+	*context = dev;
++	ti->private = dev;
 +
 +	return 0;
 +}
 +
-+static void origin_dtr(struct dm_table *t, void *c)
++static void origin_dtr(struct dm_target *ti)
 +{
-+	struct dm_dev *dev = (struct dm_dev *) c;
-+	dm_table_put_device(t, dev);
++	struct dm_dev *dev = (struct dm_dev *) ti->private;
++	dm_put_device(ti, dev);
 +}
 +
-+static int origin_map(struct buffer_head *bh, int rw, void *context)
++static int origin_map(struct dm_target *ti, struct buffer_head *bh, int rw)
 +{
-+	struct dm_dev *dev = (struct dm_dev *) context;
++	struct dm_dev *dev = (struct dm_dev *) ti->private;
 +	bh->b_rdev = dev->dev;
 +
 +	/* Only tell snapshots if this is a write */
 +	return (rw == WRITE) ? do_origin(dev, bh) : 1;
 +}
 +
-+static int origin_status(status_type_t type, char *result,
-+			 int maxlen, void *context)
++static int origin_status(struct dm_target *ti, status_type_t type, char *result,
++			 int maxlen)
 +{
-+	struct dm_dev *dev = (struct dm_dev *) context;
++	struct dm_dev *dev = (struct dm_dev *) ti->private;
 +
 +	switch (type) {
 +	case STATUSTYPE_INFO:
@@ -2759,7 +3068,6 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	dtr:	origin_dtr,
 +	map:	origin_map,
 +	status:	origin_status,
-+	err:	NULL
 +};
 +
 +static struct target_type snapshot_target = {
@@ -2769,7 +3077,6 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	dtr:	snapshot_dtr,
 +	map:	snapshot_map,
 +	status:	snapshot_status,
-+	err:	NULL
 +};
 +
 +int __init dm_snapshot_init(void)
@@ -2866,9 +3173,9 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + * c-file-style: "linux"
 + * End:
 + */
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-snapshot.h linux-2.4.19-dm/drivers/md/dm-snapshot.h
---- linux-2.4.19/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/dm-snapshot.h	Wed Jul 17 15:04:57 2002
+diff -ruN linux-2.4.19-dm/drivers/md/dm-snapshot.h linux-2.4.19-dmbackport/drivers/md/dm-snapshot.h
+--- linux-2.4.19-dm/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/dm-snapshot.h	Wed Nov 13 18:08:24 2002
 @@ -0,0 +1,147 @@
 +/*
 + * dm-snapshot.c
@@ -2894,7 +3201,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + * time. Typically 64k - 256k.
 + */
 +/* FIXME: can we get away with limiting these to a uint32_t ? */
-+typedef offset_t chunk_t;
++typedef sector_t chunk_t;
 +
 +/*
 + * An exception is used where an old chunk of data has been
@@ -2916,31 +3223,31 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	/*
 +	 * Destroys this object when you've finished with it.
 +	 */
-+	void (*destroy) (struct exception_store *store);
++	void (*destroy) (struct exception_store * store);
 +
 +	/*
 +	 * Find somewhere to store the next exception.
 +	 */
-+	int (*prepare_exception) (struct exception_store *store,
-+				  struct exception *e);
++	int (*prepare_exception) (struct exception_store * store,
++				  struct exception * e);
 +
 +	/*
 +	 * Update the metadata with this exception.
 +	 */
-+	void (*commit_exception) (struct exception_store *store,
-+				  struct exception *e,
++	void (*commit_exception) (struct exception_store * store,
++				  struct exception * e,
 +				  void (*callback) (void *, int success),
 +				  void *callback_context);
 +
 +	/*
 +	 * The snapshot is invalid, note this in the metadata.
 +	 */
-+	void (*drop_snapshot) (struct exception_store *store);
++	void (*drop_snapshot) (struct exception_store * store);
 +
 +	/*
 +	 * Return the %age full of the snapshot
 +	 */
-+	int (*percent_full) (struct exception_store *store);
++	int (*percent_full) (struct exception_store * store);
 +
 +	struct dm_snapshot *snap;
 +	void *context;
@@ -2990,12 +3297,12 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +int dm_create_persistent(struct exception_store *store, uint32_t chunk_size);
 +
 +int dm_create_transient(struct exception_store *store,
-+			struct dm_snapshot *s, int blocksize, void **error);
++			struct dm_snapshot *s, int blocksize);
 +
 +/*
 + * Return the number of sectors in the device.
 + */
-+static inline offset_t get_dev_size(kdev_t dev)
++static inline sector_t get_dev_size(kdev_t dev)
 +{
 +	int *sizes;
 +
@@ -3006,21 +3313,21 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	return 0;
 +}
 +
-+static inline chunk_t sector_to_chunk(struct dm_snapshot *s, offset_t sector)
++static inline chunk_t sector_to_chunk(struct dm_snapshot *s, sector_t sector)
 +{
 +	return (sector & ~s->chunk_mask) >> s->chunk_shift;
 +}
 +
-+static inline offset_t chunk_to_sector(struct dm_snapshot *s, chunk_t chunk)
++static inline sector_t chunk_to_sector(struct dm_snapshot *s, chunk_t chunk)
 +{
 +	return chunk << s->chunk_shift;
 +}
 +
 +#endif
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-stripe.c linux-2.4.19-dm/drivers/md/dm-stripe.c
---- linux-2.4.19/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/dm-stripe.c	Wed Aug 14 14:00:56 2002
-@@ -0,0 +1,234 @@
+diff -ruN linux-2.4.19-dm/drivers/md/dm-stripe.c linux-2.4.19-dmbackport/drivers/md/dm-stripe.c
+--- linux-2.4.19-dm/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/dm-stripe.c	Wed Nov 13 17:45:21 2002
+@@ -0,0 +1,256 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -3032,14 +3339,14 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +#include <linux/module.h>
 +#include <linux/init.h>
 +#include <linux/blkdev.h>
++#include <linux/slab.h>
 +
 +struct stripe {
 +	struct dm_dev *dev;
-+	offset_t physical_start;
++	sector_t physical_start;
 +};
 +
 +struct stripe_c {
-+	offset_t logical_start;
 +	uint32_t stripes;
 +
 +	/* The size of this target / num. stripes */
@@ -3047,7 +3354,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	/* stripe chunk size */
 +	uint32_t chunk_shift;
-+	offset_t chunk_mask;
++	sector_t chunk_mask;
 +
 +	struct stripe stripe[0];
 +};
@@ -3068,18 +3375,17 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +/*
 + * Parse a single <dev> <sector> pair
 + */
-+static int get_stripe(struct dm_table *t, struct stripe_c *sc,
++static int get_stripe(struct dm_target *ti, struct stripe_c *sc,
 +		      int stripe, char **argv)
 +{
-+	char *end;
-+	unsigned long start;
++	sector_t start;
 +
-+	start = simple_strtoul(argv[1], &end, 10);
-+	if (*end)
++	if (sscanf(argv[1], SECTOR_FORMAT, &start) != 1)
 +		return -EINVAL;
 +
-+	if (dm_table_get_device(t, argv[0], start, sc->stripe_width,
-+				t->mode, &sc->stripe[stripe].dev))
++	if (dm_get_device(ti, argv[0], start, sc->stripe_width,
++			  dm_table_get_mode(ti->table),
++			  &sc->stripe[stripe].dev))
 +		return -ENXIO;
 +
 +	sc->stripe[stripe].physical_start = start;
@@ -3087,62 +3393,85 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +}
 +
 +/*
++ * FIXME: Nasty function, only present because we can't link
++ * against __moddi3 and __divdi3.
++ *
++ * returns a == b * n
++ */
++static int multiple(sector_t a, sector_t b, sector_t *n)
++{
++	sector_t acc, prev, i;
++
++	*n = 0;
++	while (a >= b) {
++		for (acc = b, prev = 0, i = 1;
++		     acc <= a;
++		     prev = acc, acc <<= 1, i <<= 1)
++			;
++
++		a -= prev;
++		*n += i >> 1;
++	}
++
++	return a == 0;
++}
++
++/*
 + * Construct a striped mapping.
 + * <number of stripes> <chunk size (2^^n)> [<dev_path> <offset>]+
 + */
-+static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
-+		      int argc, char **argv, void **context)
++static int stripe_ctr(struct dm_target *ti, int argc, char **argv)
 +{
 +	struct stripe_c *sc;
++	sector_t width;
 +	uint32_t stripes;
 +	uint32_t chunk_size;
 +	char *end;
 +	int r, i;
 +
 +	if (argc < 2) {
-+		*context = "dm-stripe: Not enough arguments";
++		ti->error = "dm-stripe: Not enough arguments";
 +		return -EINVAL;
 +	}
 +
 +	stripes = simple_strtoul(argv[0], &end, 10);
 +	if (*end) {
-+		*context = "dm-stripe: Invalid stripe count";
++		ti->error = "dm-stripe: Invalid stripe count";
 +		return -EINVAL;
 +	}
 +
 +	chunk_size = simple_strtoul(argv[1], &end, 10);
 +	if (*end) {
-+		*context = "dm-stripe: Invalid chunk_size";
++		ti->error = "dm-stripe: Invalid chunk_size";
 +		return -EINVAL;
 +	}
 +
-+	if (l % stripes) {
-+		*context = "dm-stripe: Target length not divisable by "
++	if (!multiple(ti->len, stripes, &width)) {
++		ti->error = "dm-stripe: Target length not divisable by "
 +		    "number of stripes";
 +		return -EINVAL;
 +	}
 +
 +	sc = alloc_context(stripes);
 +	if (!sc) {
-+		*context = "dm-stripe: Memory allocation for striped context "
-+		    "failed";
++		ti->error = "dm-stripe: Memory allocation for striped context "
++			    "failed";
 +		return -ENOMEM;
 +	}
 +
-+	sc->logical_start = b;
 +	sc->stripes = stripes;
-+	sc->stripe_width = l / stripes;
++	sc->stripe_width = width;
 +
 +	/*
 +	 * chunk_size is a power of two
 +	 */
 +	if (!chunk_size || (chunk_size & (chunk_size - 1))) {
-+		*context = "dm-stripe: Invalid chunk size";
++		ti->error = "dm-stripe: Invalid chunk size";
 +		kfree(sc);
 +		return -EINVAL;
 +	}
 +
-+	sc->chunk_mask = chunk_size - 1;
++	sc->chunk_mask = ((sector_t) chunk_size) - 1;
 +	for (sc->chunk_shift = 0; chunk_size; sc->chunk_shift++)
 +		chunk_size >>= 1;
 +	sc->chunk_shift--;
@@ -3152,45 +3481,45 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	 */
 +	for (i = 0; i < stripes; i++) {
 +		if (argc < 2) {
-+			*context = "dm-stripe: Not enough destinations "
-+			    "specified";
++			ti->error = "dm-stripe: Not enough destinations "
++				    "specified";
 +			kfree(sc);
 +			return -EINVAL;
 +		}
 +
 +		argv += 2;
 +
-+		r = get_stripe(t, sc, i, argv);
++		r = get_stripe(ti, sc, i, argv);
 +		if (r < 0) {
-+			*context = "dm-stripe: Couldn't parse stripe "
-+			    "destination";
++			ti->error = "dm-stripe: Couldn't parse stripe "
++				    "destination";
 +			while (i--)
-+				dm_table_put_device(t, sc->stripe[i].dev);
++				dm_put_device(ti, sc->stripe[i].dev);
 +			kfree(sc);
 +			return r;
 +		}
 +	}
 +
-+	*context = sc;
++	ti->private = sc;
 +	return 0;
 +}
 +
-+static void stripe_dtr(struct dm_table *t, void *c)
++static void stripe_dtr(struct dm_target *ti)
 +{
 +	unsigned int i;
-+	struct stripe_c *sc = (struct stripe_c *) c;
++	struct stripe_c *sc = (struct stripe_c *) ti->private;
 +
 +	for (i = 0; i < sc->stripes; i++)
-+		dm_table_put_device(t, sc->stripe[i].dev);
++		dm_put_device(ti, sc->stripe[i].dev);
 +
 +	kfree(sc);
 +}
 +
-+static int stripe_map(struct buffer_head *bh, int rw, void *context)
++static int stripe_map(struct dm_target *ti, struct buffer_head *bh, int rw)
 +{
-+	struct stripe_c *sc = (struct stripe_c *) context;
++	struct stripe_c *sc = (struct stripe_c *) ti->private;
 +
-+	offset_t offset = bh->b_rsector - sc->logical_start;
++	sector_t offset = bh->b_rsector - ti->begin;
 +	uint32_t chunk = (uint32_t) (offset >> sc->chunk_shift);
 +	uint32_t stripe = chunk % sc->stripes;	/* 32bit modulus */
 +	chunk = chunk / sc->stripes;
@@ -3201,10 +3530,10 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	return 1;
 +}
 +
-+static int stripe_status(status_type_t type, char *result, int maxlen,
-+			 void *context)
++static int stripe_status(struct dm_target *ti,
++			 status_type_t type, char *result, int maxlen)
 +{
-+	struct stripe_c *sc = (struct stripe_c *) context;
++	struct stripe_c *sc = (struct stripe_c *) ti->private;
 +	int offset;
 +	int i;
 +
@@ -3214,14 +3543,14 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +		break;
 +
 +	case STATUSTYPE_TABLE:
-+		offset = snprintf(result, maxlen, "%d %ld",
++		offset = snprintf(result, maxlen, "%d " SECTOR_FORMAT,
 +				  sc->stripes, sc->chunk_mask + 1);
 +		for (i = 0; i < sc->stripes; i++) {
-+			offset +=
-+			    snprintf(result + offset, maxlen - offset,
-+				     " %s %ld",
-+				     kdevname(sc->stripe[i].dev->dev),
-+				     sc->stripe[i].physical_start);
++			offset += snprintf(result + offset, maxlen - offset,
++					   " %s " SECTOR_FORMAT,
++		       			   kdevname(to_kdev_t
++					     (sc->stripe[i].dev->bdev->bd_dev)),
++					   sc->stripe[i].physical_start);
 +		}
 +		break;
 +	}
@@ -3229,12 +3558,12 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +}
 +
 +static struct target_type stripe_target = {
-+	name:	"striped",
-+	module:	THIS_MODULE,
-+	ctr:	stripe_ctr,
-+	dtr:	stripe_dtr,
-+	map:	stripe_map,
-+	status:	stripe_status,
++	.name   = "striped",
++	.module = THIS_MODULE,
++	.ctr    = stripe_ctr,
++	.dtr    = stripe_dtr,
++	.map    = stripe_map,
++	.status = stripe_status,
 +};
 +
 +int __init dm_stripe_init(void)
@@ -3255,10 +3584,10 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	return;
 +}
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-table.c linux-2.4.19-dm/drivers/md/dm-table.c
---- linux-2.4.19/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/dm-table.c	Wed Aug 14 14:17:32 2002
-@@ -0,0 +1,452 @@
+diff -ruN linux-2.4.19-dm/drivers/md/dm-table.c linux-2.4.19-dmbackport/drivers/md/dm-table.c
+--- linux-2.4.19-dm/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/dm-table.c	Wed Nov 13 17:47:11 2002
+@@ -0,0 +1,665 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -3267,23 +3596,60 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +#include "dm.h"
 +
++#include <linux/module.h>
++#include <linux/vmalloc.h>
 +#include <linux/blkdev.h>
++#include <linux/ctype.h>
++#include <linux/slab.h>
++#include <asm/atomic.h>
 +
-+/* ceiling(n / size) * size */
-+static inline unsigned long round_up(unsigned long n, unsigned long size)
-+{
-+	unsigned long r = n % size;
-+	return n + (r ? (size - r) : 0);
-+}
++#define MAX_DEPTH 16
++#define NODE_SIZE L1_CACHE_BYTES
++#define KEYS_PER_NODE (NODE_SIZE / sizeof(sector_t))
++#define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
 +
-+/* ceiling(n / size) */
++struct dm_table {
++	atomic_t holders;
++
++	/* btree table */
++	int depth;
++	int counts[MAX_DEPTH];	/* in nodes */
++	sector_t *index[MAX_DEPTH];
++
++	int num_targets;
++	int num_allocated;
++	sector_t *highs;
++	struct dm_target *targets;
++
++	/*
++	 * Indicates the rw permissions for the new logical
++	 * device.  This should be a combination of FMODE_READ
++	 * and FMODE_WRITE.
++	 */
++	int mode;
++
++	/* a list of devices used by this table */
++	struct list_head devices;
++
++	/*
++	 * A waitqueue for processes waiting for something
++	 * interesting to happen to this table.
++	 */
++	wait_queue_head_t eventq;
++};
++
++/*
++ * Ceiling(n / size)
++ */
 +static inline unsigned long div_up(unsigned long n, unsigned long size)
 +{
-+	return round_up(n, size) / size;
++	return dm_round_up(n, size) / size;
 +}
 +
-+/* similar to ceiling(log_size(n)) */
-+static uint int_log(unsigned long n, unsigned long base)
++/*
++ * Similar to ceiling(log_size(n))
++ */
++static unsigned int int_log(unsigned long n, unsigned long base)
 +{
 +	int result = 0;
 +
@@ -3296,28 +3662,44 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +}
 +
 +/*
-+ * return the highest key that you could lookup
-+ * from the n'th node on level l of the btree.
++ * Calculate the index of the child node of the n'th node k'th key.
 + */
-+static offset_t high(struct dm_table *t, int l, int n)
++static inline int get_child(int n, int k)
++{
++	return (n * CHILDREN_PER_NODE) + k;
++}
++
++/*
++ * Return the n'th node of level l from table t.
++ */
++static inline sector_t *get_node(struct dm_table *t, int l, int n)
++{
++	return t->index[l] + (n * KEYS_PER_NODE);
++}
++
++/*
++ * Return the highest key that you could lookup from the n'th
++ * node on level l of the btree.
++ */
++static sector_t high(struct dm_table *t, int l, int n)
 +{
 +	for (; l < t->depth - 1; l++)
 +		n = get_child(n, CHILDREN_PER_NODE - 1);
 +
 +	if (n >= t->counts[l])
-+		return (offset_t) - 1;
++		return (sector_t) - 1;
 +
 +	return get_node(t, l, n)[KEYS_PER_NODE - 1];
 +}
 +
 +/*
-+ * fills in a level of the btree based on the
-+ * highs of the level below it.
++ * Fills in a level of the btree based on the highs of the level
++ * below it.
 + */
 +static int setup_btree_index(int l, struct dm_table *t)
 +{
 +	int n, k;
-+	offset_t *node;
++	sector_t *node;
 +
 +	for (n = 0; n < t->counts[l]; n++) {
 +		node = get_node(t, l, n);
@@ -3330,24 +3712,24 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +}
 +
 +/*
-+ * highs, and targets are managed as dynamic
-+ * arrays during a table load.
++ * highs, and targets are managed as dynamic arrays during a
++ * table load.
 + */
 +static int alloc_targets(struct dm_table *t, int num)
 +{
-+	offset_t *n_highs;
-+	struct target *n_targets;
++	sector_t *n_highs;
++	struct dm_target *n_targets;
 +	int n = t->num_targets;
 +
 +	/*
 +	 * Allocate both the target array and offset array at once.
 +	 */
-+	n_highs = (offset_t *) vcalloc(sizeof(struct target) + sizeof(offset_t),
-+				       num);
++	n_highs = (sector_t *) vcalloc(sizeof(struct dm_target) +
++				       sizeof(sector_t), num);
 +	if (!n_highs)
 +		return -ENOMEM;
 +
-+	n_targets = (struct target *) (n_highs + num);
++	n_targets = (struct dm_target *) (n_highs + num);
 +
 +	if (n) {
 +		memcpy(n_highs, t->highs, sizeof(*n_highs) * n);
@@ -3355,8 +3737,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	}
 +
 +	memset(n_highs + n, -1, sizeof(*n_highs) * (num - n));
-+	if (t->highs)
-+		vfree(t->highs);
++	vfree(t->highs);
 +
 +	t->num_allocated = num;
 +	t->highs = n_highs;
@@ -3374,8 +3755,9 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	memset(t, 0, sizeof(*t));
 +	INIT_LIST_HEAD(&t->devices);
++	atomic_set(&t->holders, 1);
 +
-+	/* allocate a single node's worth of targets to begin with */
++	/* allocate a single nodes worth of targets to begin with */
 +	if (alloc_targets(t, KEYS_PER_NODE)) {
 +		kfree(t);
 +		t = NULL;
@@ -3399,7 +3781,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	}
 +}
 +
-+void dm_table_destroy(struct dm_table *t)
++void table_destroy(struct dm_table *t)
 +{
 +	int i;
 +
@@ -3412,12 +3794,12 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	/* free the targets */
 +	for (i = 0; i < t->num_targets; i++) {
-+		struct target *tgt = &t->targets[i];
++		struct dm_target *tgt = &t->targets[i];
 +
 +		dm_put_target_type(t->targets[i].type);
 +
 +		if (tgt->type->dtr)
-+			tgt->type->dtr(t, tgt->private);
++			tgt->type->dtr(tgt);
 +	}
 +
 +	vfree(t->highs);
@@ -3433,6 +3815,17 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	kfree(t);
 +}
 +
++void dm_table_get(struct dm_table *t)
++{
++	atomic_inc(&t->holders);
++}
++
++void dm_table_put(struct dm_table *t)
++{
++	if (atomic_dec_and_test(&t->holders))
++		table_destroy(t);
++}
++
 +/*
 + * Checks to see if we need to extend highs or targets.
 + */
@@ -3445,9 +3838,9 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +}
 +
 +/*
-+ * Convert a device path to a kdev_t.
++ * Convert a device path to a dev_t.
 + */
-+int lookup_device(const char *path, kdev_t *dev)
++static int lookup_device(const char *path, kdev_t *dev)
 +{
 +	int r;
 +	struct nameidata nd;
@@ -3457,22 +3850,22 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +		return 0;
 +
 +	if ((r = path_walk(path, &nd)))
-+		goto bad;
++		goto out;
 +
 +	inode = nd.dentry->d_inode;
 +	if (!inode) {
 +		r = -ENOENT;
-+		goto bad;
++		goto out;
 +	}
 +
 +	if (!S_ISBLK(inode->i_mode)) {
 +		r = -EINVAL;
-+		goto bad;
++		goto out;
 +	}
 +
 +	*dev = inode->i_rdev;
 +
-+      bad:
++      out:
 +	path_release(&nd);
 +	return r;
 +}
@@ -3486,7 +3879,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	list_for_each(tmp, l) {
 +		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
-+		if (dd->dev == dev)
++		if (kdev_same(dd->dev, dev))
 +			return dd;
 +	}
 +
@@ -3496,45 +3889,40 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +/*
 + * Open a device so we can use it as a map destination.
 + */
-+static int open_dev(struct dm_dev *d)
++static int open_dev(struct dm_dev *dd)
 +{
-+	int err;
-+
-+	if (d->bd)
++	if (dd->bdev)
 +		BUG();
 +
-+	if (!(d->bd = bdget(kdev_t_to_nr(d->dev))))
++	dd->bdev = bdget(kdev_t_to_nr(dd->dev));
++	if (!dd->bdev)
 +		return -ENOMEM;
 +
-+	if ((err = blkdev_get(d->bd, d->mode, 0, BDEV_FILE)))
-+		return err;
-+
-+	return 0;
++	return blkdev_get(dd->bdev, dd->mode, 0, BDEV_RAW);
 +}
 +
 +/*
 + * Close a device that we've been using.
 + */
-+static void close_dev(struct dm_dev *d)
++static void close_dev(struct dm_dev *dd)
 +{
-+	if (!d->bd)
++	if (!dd->bdev)
 +		return;
 +
-+	blkdev_put(d->bd, BDEV_FILE);
-+	d->bd = NULL;
++	blkdev_put(dd->bdev, BDEV_RAW);
++	dd->bdev = NULL;
 +}
 +
 +/*
-+ * If possible (ie. blk_size[major] is set), this
-+ * checks an area of a destination device is
-+ * valid.
++ * If possible (ie. blk_size[major] is set), this checks an area
++ * of a destination device is valid.
 + */
-+static int check_device_area(kdev_t dev, offset_t start, offset_t len)
++static int check_device_area(kdev_t dev, sector_t start, sector_t len)
 +{
 +	int *sizes;
-+	offset_t dev_size;
++	sector_t dev_size;
 +
-+	if (!(sizes = blk_size[MAJOR(dev)]) || !(dev_size = sizes[MINOR(dev)]))
++	if (!(sizes = blk_size[major(dev)]) || !(dev_size = sizes[minor(dev)]))
 +		/* we don't know the device details,
 +		 * so give the benefit of the doubt */
 +		return 1;
@@ -3558,7 +3946,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	memcpy(&dd_copy, dd, sizeof(dd_copy));
 +
 +	dd->mode |= new_mode;
-+	dd->bd = NULL;
++	dd->bdev = NULL;
 +	r = open_dev(dd);
 +	if (!r)
 +		close_dev(&dd_copy);
@@ -3569,21 +3957,24 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +}
 +
 +/*
-+ * Add a device to the list, or just increment the usage count
-+ * if it's already present.
++ * Add a device to the list, or just increment the usage count if
++ * it's already present.
 + */
-+int dm_table_get_device(struct dm_table *t, const char *path,
-+			offset_t start, offset_t len, int mode,
-+			struct dm_dev **result)
++int dm_get_device(struct dm_target *ti, const char *path, sector_t start,
++		  sector_t len, int mode, struct dm_dev **result)
 +{
 +	int r;
 +	kdev_t dev;
 +	struct dm_dev *dd;
 +	int major, minor;
++	struct dm_table *t = ti->table;
++
++	if (!t)
++		BUG();
 +
 +	if (sscanf(path, "%x:%x", &major, &minor) == 2) {
 +		/* Extract the major/minor numbers */
-+		dev = MKDEV(major, minor);
++		dev = mk_kdev(major, minor);
 +	} else {
 +		/* convert the path to a device */
 +		if ((r = lookup_device(path, &dev)))
@@ -3596,9 +3987,9 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +		if (!dd)
 +			return -ENOMEM;
 +
-+		dd->mode = mode;
 +		dd->dev = dev;
-+		dd->bd = NULL;
++		dd->mode = mode;
++		dd->bdev = NULL;
 +
 +		if ((r = open_dev(dd))) {
 +			kfree(dd);
@@ -3617,7 +4008,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	if (!check_device_area(dd->dev, start, len)) {
 +		DMWARN("device %s too small for target", path);
-+		dm_table_put_device(t, dd);
++		dm_put_device(ti, dd);
 +		return -EINVAL;
 +	}
 +
@@ -3629,7 +4020,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +/*
 + * Decrement a devices use count and remove it if neccessary.
 + */
-+void dm_table_put_device(struct dm_table *t, struct dm_dev *dd)
++void dm_put_device(struct dm_target *ti, struct dm_dev *dd)
 +{
 +	if (atomic_dec_and_test(&dd->count)) {
 +		close_dev(dd);
@@ -3639,108 +4030,23 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +}
 +
 +/*
-+ * Adds a target to the map
++ * Checks to see if the target joins onto the end of the table.
 + */
-+int dm_table_add_target(struct dm_table *t, offset_t highs,
-+			struct target_type *type, void *private)
++static int adjoin(struct dm_table *table, struct dm_target *ti)
 +{
-+	int r, n;
++	struct dm_target *prev;
 +
-+	if ((r = check_space(t)))
-+		return r;
++	if (!table->num_targets)
++		return !ti->begin;
 +
-+	n = t->num_targets++;
-+	t->highs[n] = highs;
-+	t->targets[n].type = type;
-+	t->targets[n].private = private;
-+
-+	return 0;
++	prev = &table->targets[table->num_targets - 1];
++	return (ti->begin == (prev->begin + prev->len));
 +}
-+
-+static int setup_indexes(struct dm_table *t)
-+{
-+	int i, total = 0;
-+	offset_t *indexes;
-+
-+	/* allocate the space for *all* the indexes */
-+	for (i = t->depth - 2; i >= 0; i--) {
-+		t->counts[i] = div_up(t->counts[i + 1], CHILDREN_PER_NODE);
-+		total += t->counts[i];
-+	}
-+
-+	indexes = (offset_t *) vcalloc(total, (unsigned long) NODE_SIZE);
-+	if (!indexes)
-+		return -ENOMEM;
-+
-+	/* set up internal nodes, bottom-up */
-+	for (i = t->depth - 2, total = 0; i >= 0; i--) {
-+		t->index[i] = indexes;
-+		indexes += (KEYS_PER_NODE * t->counts[i]);
-+		setup_btree_index(i, t);
-+	}
-+
-+	return 0;
-+}
-+
-+/*
-+ * Builds the btree to index the map
-+ */
-+int dm_table_complete(struct dm_table *t)
-+{
-+	int leaf_nodes, r = 0;
-+
-+	/* how many indexes will the btree have ? */
-+	leaf_nodes = div_up(t->num_targets, KEYS_PER_NODE);
-+	t->depth = 1 + int_log(leaf_nodes, CHILDREN_PER_NODE);
-+
-+	/* leaf layer has already been set up */
-+	t->counts[t->depth - 1] = leaf_nodes;
-+	t->index[t->depth - 1] = t->highs;
-+
-+	if (t->depth >= 2)
-+		r = setup_indexes(t);
-+
-+	return r;
-+}
-+
-+void dm_table_event(struct dm_table *t)
-+{
-+	wake_up_interruptible(&t->eventq);
-+}
-+
-+EXPORT_SYMBOL(dm_table_get_device);
-+EXPORT_SYMBOL(dm_table_put_device);
-+EXPORT_SYMBOL(dm_table_event);
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm-target.c linux-2.4.19-dm/drivers/md/dm-target.c
---- linux-2.4.19/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/dm-target.c	Thu Jun 13 15:07:55 2002
-@@ -0,0 +1,242 @@
-+/*
-+ * Copyright (C) 2001 Sistina Software (UK) Limited
-+ *
-+ * This file is released under the GPL.
-+ */
-+
-+#include "dm.h"
-+
-+#include <linux/kmod.h>
-+
-+struct tt_internal {
-+	struct target_type tt;
-+
-+	struct list_head list;
-+	long use;
-+};
-+
-+static LIST_HEAD(_targets);
-+static rwlock_t _lock = RW_LOCK_UNLOCKED;
-+
-+#define DM_MOD_NAME_SIZE 32
 +
 +/*
 + * Destructively splits up the argument list to pass to ctr.
 + */
-+int split_args(int max, int *argc, char **argv, char *input)
++static int split_args(int max, int *argc, char **argv, char *input)
 +{
 +	char *start, *end = input, *out;
 +	*argc = 0;
@@ -3787,6 +4093,193 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	return 0;
 +}
++
++int dm_table_add_target(struct dm_table *t, const char *type,
++			sector_t start, sector_t len, char *params)
++{
++	int r, argc;
++	char *argv[32];
++	struct target_type *tt;
++	struct dm_target *tgt;
++
++	if ((r = check_space(t)))
++		return r;
++
++	tgt = t->targets + t->num_targets;
++	memset(tgt, 0, sizeof(*tgt));
++
++	tt = dm_get_target_type(type);
++	if (!tt) {
++		tgt->error = "unknown target type";
++		return -EINVAL;
++	}
++
++	tgt->table = t;
++	tgt->type = tt;
++	tgt->begin = start;
++	tgt->len = len;
++	tgt->error = "Unknown error";
++
++	/*
++	 * Does this target adjoin the previous one ?
++	 */
++	if (!adjoin(t, tgt)) {
++		DMERR("Gap in table");
++		dm_put_target_type(tt);
++		return -EINVAL;
++	}
++
++	r = split_args(ARRAY_SIZE(argv), &argc, argv, params);
++	if (r) {
++		tgt->error = "couldn't split parameters";
++		dm_put_target_type(tt);
++		return r;
++	}
++
++	r = tt->ctr(tgt, argc, argv);
++	if (r) {
++		dm_put_target_type(tt);
++		return r;
++	}
++
++	t->highs[t->num_targets++] = tgt->begin + tgt->len - 1;
++	return 0;
++}
++
++static int setup_indexes(struct dm_table *t)
++{
++	int i, total = 0;
++	sector_t *indexes;
++
++	/* allocate the space for *all* the indexes */
++	for (i = t->depth - 2; i >= 0; i--) {
++		t->counts[i] = div_up(t->counts[i + 1], CHILDREN_PER_NODE);
++		total += t->counts[i];
++	}
++
++	indexes = (sector_t *) vcalloc(total, (unsigned long) NODE_SIZE);
++	if (!indexes)
++		return -ENOMEM;
++
++	/* set up internal nodes, bottom-up */
++	for (i = t->depth - 2, total = 0; i >= 0; i--) {
++		t->index[i] = indexes;
++		indexes += (KEYS_PER_NODE * t->counts[i]);
++		setup_btree_index(i, t);
++	}
++
++	return 0;
++}
++
++/*
++ * Builds the btree to index the map.
++ */
++int dm_table_complete(struct dm_table *t)
++{
++	int leaf_nodes, r = 0;
++
++	/* how many indexes will the btree have ? */
++	leaf_nodes = div_up(t->num_targets, KEYS_PER_NODE);
++	t->depth = 1 + int_log(leaf_nodes, CHILDREN_PER_NODE);
++
++	/* leaf layer has already been set up */
++	t->counts[t->depth - 1] = leaf_nodes;
++	t->index[t->depth - 1] = t->highs;
++
++	if (t->depth >= 2)
++		r = setup_indexes(t);
++
++	return r;
++}
++
++void dm_table_event(struct dm_table *t)
++{
++	wake_up_interruptible(&t->eventq);
++}
++
++sector_t dm_table_get_size(struct dm_table *t)
++{
++	return t->num_targets ? (t->highs[t->num_targets - 1] + 1) : 0;
++}
++
++struct dm_target *dm_table_get_target(struct dm_table *t, int index)
++{
++	if (index > t->num_targets)
++		return NULL;
++
++	return t->targets + index;
++}
++
++/*
++ * Search the btree for the correct target.
++ */
++struct dm_target *dm_table_find_target(struct dm_table *t, sector_t sector)
++{
++	int l, n = 0, k = 0;
++	sector_t *node;
++
++	for (l = 0; l < t->depth; l++) {
++		n = get_child(n, k);
++		node = get_node(t, l, n);
++
++		for (k = 0; k < KEYS_PER_NODE; k++)
++			if (node[k] >= sector)
++				break;
++	}
++
++	return &t->targets[(KEYS_PER_NODE * n) + k];
++}
++
++unsigned int dm_table_get_num_targets(struct dm_table *t)
++{
++	return t->num_targets;
++}
++
++struct list_head *dm_table_get_devices(struct dm_table *t)
++{
++	return &t->devices;
++}
++
++int dm_table_get_mode(struct dm_table *t)
++{
++	return t->mode;
++}
++
++void dm_table_add_wait_queue(struct dm_table *t, wait_queue_t *wq)
++{
++	add_wait_queue(&t->eventq, wq);
++}
++
++EXPORT_SYMBOL(dm_get_device);
++EXPORT_SYMBOL(dm_put_device);
++EXPORT_SYMBOL(dm_table_event);
+diff -ruN linux-2.4.19-dm/drivers/md/dm-target.c linux-2.4.19-dmbackport/drivers/md/dm-target.c
+--- linux-2.4.19-dm/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/dm-target.c	Wed Nov 13 17:47:29 2002
+@@ -0,0 +1,190 @@
++/*
++ * Copyright (C) 2001 Sistina Software (UK) Limited
++ *
++ * This file is released under the GPL.
++ */
++
++#include "dm.h"
++
++#include <linux/module.h>
++#include <linux/kmod.h>
++#include <linux/slab.h>
++
++struct tt_internal {
++	struct target_type tt;
++
++	struct list_head list;
++	long use;
++};
++
++static LIST_HEAD(_targets);
++static rwlock_t _lock = RW_LOCK_UNLOCKED;
++
++#define DM_MOD_NAME_SIZE 32
 +
 +static inline struct tt_internal *__find_target_type(const char *name)
 +{
@@ -3915,33 +4408,30 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +/*
 + * io-err: always fails an io, useful for bringing
-+ * up LV's that have holes in them.
++ * up LVs that have holes in them.
 + */
-+static int io_err_ctr(struct dm_table *t, offset_t b, offset_t l,
-+		      int argc, char **args, void **context)
++static int io_err_ctr(struct dm_target *ti, int argc, char **args)
 +{
-+	*context = NULL;
 +	return 0;
 +}
 +
-+static void io_err_dtr(struct dm_table *t, void *c)
++static void io_err_dtr(struct dm_target *ti)
 +{
 +	/* empty */
 +	return;
 +}
 +
-+static int io_err_map(struct buffer_head *bh, int rw, void *context)
++static int io_err_map(struct dm_target *ti, struct buffer_head *bh, int rw)
 +{
 +	buffer_IO_error(bh);
 +	return 0;
 +}
 +
 +static struct target_type error_target = {
-+	name:	"error",
-+	ctr:	io_err_ctr,
-+	dtr:	io_err_dtr,
-+	map:	io_err_map,
-+	status:	NULL,
++	.name = "error",
++	.ctr  = io_err_ctr,
++	.dtr  = io_err_dtr,
++	.map  = io_err_map,
 +};
 +
 +int dm_target_init(void)
@@ -3957,228 +4447,114 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm.c linux-2.4.19-dm/drivers/md/dm.c
---- linux-2.4.19/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/dm.c	Wed Aug 14 14:50:17 2002
-@@ -0,0 +1,1173 @@
+diff -ruN linux-2.4.19-dm/drivers/md/dm.c linux-2.4.19-dmbackport/drivers/md/dm.c
+--- linux-2.4.19-dm/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/dm.c	Wed Nov 13 19:15:43 2002
+@@ -0,0 +1,868 @@
 +/*
-+ * Copyright (C) 2001 Sistina Software (UK) Limited.
++ * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
 + *
 + * This file is released under the GPL.
 + */
 +
 +#include "dm.h"
 +
++#include <linux/init.h>
++#include <linux/module.h>
 +#include <linux/blk.h>
 +#include <linux/blkpg.h>
-+
-+/* we only need this for the lv_bmap struct definition, not happy */
++#include <linux/mempool.h>
++#include <linux/slab.h>
++#include <linux/kdev_t.h>
 +#include <linux/lvm.h>
 +
-+#define DEFAULT_READ_AHEAD 64
++#include <asm/uaccess.h>
 +
 +static const char *_name = DM_NAME;
++#define MAX_DEVICES (1 << MINORBITS)
++#define SECTOR_SHIFT 9
++#define DEFAULT_READ_AHEAD 64
 +
 +static int major = 0;
 +static int _major = 0;
 +
-+struct io_hook {
++struct dm_io {
 +	struct mapped_device *md;
-+	struct target *target;
-+	int rw;
 +
 +	void (*end_io) (struct buffer_head * bh, int uptodate);
 +	void *context;
 +};
 +
-+static kmem_cache_t *_io_hook_cache;
-+
-+static struct mapped_device *_devs[MAX_DEVICES];
-+static struct rw_semaphore _dev_locks[MAX_DEVICES];
++struct deferred_io {
++	int rw;
++	struct buffer_head *bh;
++	struct deferred_io *next;
++};
 +
 +/*
-+ * This lock is only held by dm_create and dm_set_name to avoid
-+ * race conditions where someone else may create a device with
-+ * the same name.
++ * Bits for the md->flags field.
 + */
-+static spinlock_t _create_lock = SPIN_LOCK_UNLOCKED;
++#define DMF_BLOCK_IO 0
++#define DMF_SUSPENDED 1
++
++struct mapped_device {
++	struct rw_semaphore lock;
++	atomic_t holders;
++
++	kdev_t dev;
++	unsigned long flags;
++
++	/*
++	 * A list of ios that arrived while we were suspended.
++	 */
++	atomic_t pending;
++	wait_queue_head_t wait;
++	struct deferred_io *deferred;
++
++	/*
++	 * The current mapping.
++	 */
++	struct dm_table *map;
++};
++
++#define MIN_IOS 256
++static kmem_cache_t *_io_cache;
++static mempool_t *_io_pool;
 +
 +/* block device arrays */
 +static int _block_size[MAX_DEVICES];
 +static int _blksize_size[MAX_DEVICES];
 +static int _hardsect_size[MAX_DEVICES];
 +
-+static devfs_handle_t _dev_dir;
-+
-+static int request(request_queue_t * q, int rw, struct buffer_head *bh);
++static struct mapped_device *get_kdev(kdev_t dev);
++static int dm_request(request_queue_t *q, int rw, struct buffer_head *bh);
 +static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb);
 +
-+/*
-+ * Protect the mapped_devices referenced from _dev[]
-+ */
-+struct mapped_device *dm_get_r(int minor)
-+{
-+	struct mapped_device *md;
-+
-+	if (minor >= MAX_DEVICES)
-+		return NULL;
-+
-+	down_read(_dev_locks + minor);
-+	md = _devs[minor];
-+	if (!md)
-+		up_read(_dev_locks + minor);
-+	return md;
-+}
-+
-+struct mapped_device *dm_get_w(int minor)
-+{
-+	struct mapped_device *md;
-+
-+	if (minor >= MAX_DEVICES)
-+		return NULL;
-+
-+	down_write(_dev_locks + minor);
-+	md = _devs[minor];
-+	if (!md)
-+		up_write(_dev_locks + minor);
-+	return md;
-+}
-+
-+static int namecmp(struct mapped_device *md, const char *name, int nametype)
-+{
-+	switch (nametype) {
-+	case DM_LOOKUP_BY_NAME:
-+		return strcmp(md->name, name);
-+		break;
-+
-+	case DM_LOOKUP_BY_UUID:
-+		if (!md->uuid)
-+			return -1;	/* never equal */
-+
-+		return strcmp(md->uuid, name);
-+		break;
-+
-+	default:
-+		DMWARN("Unknown comparison type in namecmp: %d", nametype);
-+		BUG();
-+	}
-+
-+	return -1;
-+}
-+
-+/*
-+ * The interface (eg, ioctl) will probably access the devices
-+ * through these slow 'by name' locks, this needs improving at
-+ * some point if people start playing with *large* numbers of dm
-+ * devices.
-+ */
-+struct mapped_device *dm_get_name_r(const char *name, int nametype)
-+{
-+	int i;
-+	struct mapped_device *md;
-+
-+	for (i = 0; i < MAX_DEVICES; i++) {
-+		md = dm_get_r(i);
-+		if (md) {
-+			if (!namecmp(md, name, nametype))
-+				return md;
-+
-+			dm_put_r(md);
-+		}
-+	}
-+
-+	return NULL;
-+}
-+
-+struct mapped_device *dm_get_name_w(const char *name, int nametype)
-+{
-+	int i;
-+	struct mapped_device *md;
-+
-+	/*
-+	 * To avoid getting write locks on all the devices we try
-+	 * and promote a read lock to a write lock, this can
-+	 * fail, in which case we just start again.
-+	 */
-+
-+      restart:
-+	for (i = 0; i < MAX_DEVICES; i++) {
-+		md = dm_get_r(i);
-+		if (!md)
-+			continue;
-+
-+		if (namecmp(md, name, nametype)) {
-+			dm_put_r(md);
-+			continue;
-+		}
-+
-+		/* found it */
-+		dm_put_r(md);
-+
-+		md = dm_get_w(i);
-+		if (!md)
-+			goto restart;
-+
-+		if (namecmp(md, name, nametype)) {
-+			dm_put_w(md);
-+			goto restart;
-+		}
-+
-+		return md;
-+	}
-+
-+	return NULL;
-+}
-+
-+void dm_put_r(struct mapped_device *md)
-+{
-+	int minor = MINOR(md->dev);
-+
-+	if (minor >= MAX_DEVICES)
-+		return;
-+
-+	up_read(_dev_locks + minor);
-+}
-+
-+void dm_put_w(struct mapped_device *md)
-+{
-+	int minor = MINOR(md->dev);
-+
-+	if (minor >= MAX_DEVICES)
-+		return;
-+
-+	up_write(_dev_locks + minor);
-+}
-+
-+/*
-+ * Setup and tear down the driver
-+ */
-+static __init void init_locks(void)
-+{
-+	int i;
-+
-+	for (i = 0; i < MAX_DEVICES; i++)
-+		init_rwsem(_dev_locks + i);
-+}
 +
 +static __init int local_init(void)
 +{
 +	int r;
 +
-+	init_locks();
++	/* allocate a slab for the dm_ios */
++	_io_cache = kmem_cache_create("dm io",
++				      sizeof(struct dm_io), 0, 0, NULL, NULL);
 +
-+	/* allocate a slab for the io-hooks */
-+	if (!_io_hook_cache &&
-+	    !(_io_hook_cache = kmem_cache_create("dm io hooks",
-+						 sizeof(struct io_hook),
-+						 0, 0, NULL, NULL)))
++	if (!_io_cache)
 +		return -ENOMEM;
 +
++	_io_pool = mempool_create(MIN_IOS, mempool_alloc_slab,
++				  mempool_free_slab, _io_cache);
++	if (!_io_pool) {
++		kmem_cache_destroy(_io_cache);
++		return -ENOMEM;
++	}
++
 +	_major = major;
-+	r = devfs_register_blkdev(_major, _name, &dm_blk_dops);
++	r = register_blkdev(_major, _name, &dm_blk_dops);
 +	if (r < 0) {
 +		DMERR("register_blkdev failed");
-+		kmem_cache_destroy(_io_hook_cache);
++		mempool_destroy(_io_pool);
++		kmem_cache_destroy(_io_cache);
 +		return r;
 +	}
 +
@@ -4191,20 +4567,17 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	blksize_size[_major] = _blksize_size;
 +	hardsect_size[_major] = _hardsect_size;
 +
-+	blk_queue_make_request(BLK_DEFAULT_QUEUE(_major), request);
-+
-+	_dev_dir = devfs_mk_dir(0, DM_DIR, NULL);
++	blk_queue_make_request(BLK_DEFAULT_QUEUE(_major), dm_request);
 +
 +	return 0;
 +}
 +
 +static void local_exit(void)
 +{
-+	if (kmem_cache_destroy(_io_hook_cache))
-+		DMWARN("io_hooks still allocated during unregistration");
-+	_io_hook_cache = NULL;
++	mempool_destroy(_io_pool);
++	kmem_cache_destroy(_io_cache);
 +
-+	if (devfs_unregister_blkdev(_major, _name) < 0)
++	if (unregister_blkdev(_major, _name) < 0)
 +		DMERR("devfs_unregister_blkdev failed");
 +
 +	read_ahead[_major] = 0;
@@ -4222,8 +4595,8 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + * expands a prefix into a pair of function names.
 + */
 +static struct {
-+	int (*init)(void);
-+	void (*exit)(void);
++	int (*init) (void);
++	void (*exit) (void);
 +
 +} _inits[] = {
 +#define xx(n) {n ## _init, n ## _exit},
@@ -4232,14 +4605,13 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	xx(dm_linear)
 +	xx(dm_stripe)
 +	xx(dm_snapshot)
-+/*	xx(dm_mirror) */
 +	xx(dm_interface)
 +#undef xx
 +};
 +
 +static int __init dm_init(void)
 +{
-+	const int count = sizeof(_inits) / sizeof(*_inits);
++	const int count = ARRAY_SIZE(_inits);
 +
 +	int r, i;
 +
@@ -4260,9 +4632,8 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +static void __exit dm_exit(void)
 +{
-+	int i = sizeof(_inits) / sizeof(*_inits);
++	int i = ARRAY_SIZE(_inits);
 +
-+	dm_destroy_all();
 +	while (i--)
 +		_inits[i].exit();
 +}
@@ -4274,12 +4645,9 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +{
 +	struct mapped_device *md;
 +
-+	md = dm_get_w(MINOR(inode->i_rdev));
++	md = get_kdev(inode->i_rdev);
 +	if (!md)
 +		return -ENXIO;
-+
-+	md->use_count++;
-+	dm_put_w(md);
 +
 +	return 0;
 +}
@@ -4288,22 +4656,36 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +{
 +	struct mapped_device *md;
 +
-+	md = dm_get_w(MINOR(inode->i_rdev));
-+	if (!md)
-+		return -ENXIO;
-+
-+	if (md->use_count < 1)
-+		DMWARN("incorrect reference count found in mapped_device");
-+
-+	md->use_count--;
-+	dm_put_w(md);
-+
++	md = get_kdev(inode->i_rdev);
++	dm_put(md);		/* put the reference gained by dm_blk_open */
++	dm_put(md);
 +	return 0;
++}
++
++static inline struct dm_io *alloc_io(void)
++{
++	return mempool_alloc(_io_pool, GFP_NOIO);
++}
++
++static inline void free_io(struct dm_io *io)
++{
++	mempool_free(io, _io_pool);
++}
++
++static inline struct deferred_io *alloc_deferred(void)
++{
++	return kmalloc(sizeof(struct deferred_io), GFP_NOIO);
++}
++
++static inline void free_deferred(struct deferred_io *di)
++{
++	kfree(di);
 +}
 +
 +/* In 512-byte units */
 +#define VOLUME_SIZE(minor) (_block_size[(minor)] << 1)
 +
++/* FIXME: check this */
 +static int dm_blk_ioctl(struct inode *inode, struct file *file,
 +			uint command, unsigned long a)
 +{
@@ -4355,85 +4737,21 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	return 0;
 +}
 +
-+static inline struct io_hook *alloc_io_hook(void)
-+{
-+	return kmem_cache_alloc(_io_hook_cache, GFP_NOIO);
-+}
-+
-+static inline void free_io_hook(struct io_hook *ih)
-+{
-+	kmem_cache_free(_io_hook_cache, ih);
-+}
-+
 +/*
-+ * FIXME: We need to decide if deferred_io's need
-+ * their own slab, I say no for now since they are
-+ * only used when the device is suspended.
++ * Add the buffer to the list of deferred io.
 + */
-+static inline struct deferred_io *alloc_deferred(void)
++static int queue_io(struct mapped_device *md, struct buffer_head *bh, int rw)
 +{
-+	return kmalloc(sizeof(struct deferred_io), GFP_NOIO);
-+}
++	struct deferred_io *di;
 +
-+static inline void free_deferred(struct deferred_io *di)
-+{
-+	kfree(di);
-+}
-+
-+/*
-+ * Call a target's optional error function if an I/O failed.
-+ */
-+static inline int call_err_fn(struct io_hook *ih, struct buffer_head *bh)
-+{
-+	dm_err_fn err = ih->target->type->err;
-+
-+	if (err)
-+		return err(bh, ih->rw, ih->target->private);
-+
-+	return 0;
-+}
-+
-+/*
-+ * bh->b_end_io routine that decrements the pending count
-+ * and then calls the original bh->b_end_io fn.
-+ */
-+static void dec_pending(struct buffer_head *bh, int uptodate)
-+{
-+	struct io_hook *ih = bh->b_private;
-+
-+	if (!uptodate && call_err_fn(ih, bh))
-+		return;
-+
-+	if (atomic_dec_and_test(&ih->md->pending))
-+		/* nudge anyone waiting on suspend queue */
-+		wake_up(&ih->md->wait);
-+
-+	bh->b_end_io = ih->end_io;
-+	bh->b_private = ih->context;
-+	free_io_hook(ih);
-+
-+	bh->b_end_io(bh, uptodate);
-+}
-+
-+/*
-+ * Add the bh to the list of deferred io.
-+ */
-+static int queue_io(struct buffer_head *bh, int rw)
-+{
-+	struct deferred_io *di = alloc_deferred();
-+	struct mapped_device *md;
-+
++	di = alloc_deferred();
 +	if (!di)
 +		return -ENOMEM;
 +
-+	md = dm_get_w(MINOR(bh->b_rdev));
-+	if (!md) {
-+		free_deferred(di);
-+		return -ENXIO;
-+	}
++	down_write(&md->lock);
 +
-+	if (!md->suspended) {
-+		dm_put_w(md);
++	if (!test_bit(DMF_SUSPENDED, &md->flags)) {
++		up_write(&md->lock);
 +		free_deferred(di);
 +		return 1;
 +	}
@@ -4443,148 +4761,144 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	di->next = md->deferred;
 +	md->deferred = di;
 +
-+	dm_put_w(md);
-+
++	up_write(&md->lock);
 +	return 0;		/* deferred successfully */
++}
++
++/*
++ * bh->b_end_io routine that decrements the pending count
++ * and then calls the original bh->b_end_io fn.
++ */
++static void dec_pending(struct buffer_head *bh, int uptodate)
++{
++	struct dm_io *io = bh->b_private;
++
++	if (atomic_dec_and_test(&io->md->pending))
++		/* nudge anyone waiting on suspend queue */
++		wake_up(&io->md->wait);
++
++	bh->b_end_io = io->end_io;
++	bh->b_private = io->context;
++	free_io(io);
++
++	bh->b_end_io(bh, uptodate);
 +}
 +
 +/*
 + * Do the bh mapping for a given leaf
 + */
 +static inline int __map_buffer(struct mapped_device *md,
-+			       struct buffer_head *bh, int rw, int leaf)
++			       int rw, struct buffer_head *bh)
 +{
 +	int r;
-+	dm_map_fn fn;
-+	void *context;
-+	struct io_hook *ih = NULL;
-+	struct target *ti = md->map->targets + leaf;
++	struct dm_io *io;
++	struct dm_target *ti;
 +
-+	fn = ti->type->map;
-+	context = ti->private;
++	ti = dm_table_find_target(md->map, bh->b_rsector);
++	if (!ti)
++		return -EINVAL;
 +
-+	ih = alloc_io_hook();
++	io = alloc_io();
++	if (!io)
++		return -ENOMEM;
 +
-+	if (!ih)
-+		return -1;
++	io->md = md;
++	io->end_io = bh->b_end_io;
++	io->context = bh->b_private;
 +
-+	ih->md = md;
-+	ih->rw = rw;
-+	ih->target = ti;
-+	ih->end_io = bh->b_end_io;
-+	ih->context = bh->b_private;
-+
-+	r = fn(bh, rw, context);
++	r = ti->type->map(ti, bh, rw);
 +
 +	if (r > 0) {
 +		/* hook the end io request fn */
 +		atomic_inc(&md->pending);
 +		bh->b_end_io = dec_pending;
-+		bh->b_private = ih;
++		bh->b_private = io;
 +
-+	} else if (r == 0)
++	} else
 +		/* we don't need to hook */
-+		free_io_hook(ih);
-+
-+	else if (r < 0) {
-+		free_io_hook(ih);
-+		return -1;
-+	}
++		free_io(io);
 +
 +	return r;
 +}
 +
 +/*
-+ * Search the btree for the correct target.
++ * Checks to see if we should be deferring io, if so it queues it
++ * and returns 1.
 + */
-+static inline int __find_node(struct dm_table *t, struct buffer_head *bh)
++static inline int __deferring(struct mapped_device *md, int rw,
++			      struct buffer_head *bh)
 +{
-+	int l, n = 0, k = 0;
-+	offset_t *node;
++	int r;
 +
-+	for (l = 0; l < t->depth; l++) {
-+		n = get_child(n, k);
-+		node = get_node(t, l, n);
++	/*
++	 * If we're suspended we have to queue this io for later.
++	 */
++	while (test_bit(DMF_BLOCK_IO, &md->flags)) {
++		up_read(&md->lock);
 +
-+		for (k = 0; k < KEYS_PER_NODE; k++)
-+			if (node[k] >= bh->b_rsector)
-+				break;
++		/*
++		 * There's no point deferring a read ahead
++		 * request, just drop it.
++		 */
++		if (rw == READA) {
++			down_read(&md->lock);
++			return -EIO;
++		}
++
++		r = queue_io(md, bh, rw);
++		down_read(&md->lock);
++
++		if (r < 0)
++			return r;
++
++		if (r == 0)
++			return 1;	/* deferred successfully */
++
 +	}
 +
-+	return (KEYS_PER_NODE * n) + k;
++	return 0;
 +}
 +
-+static int request(request_queue_t * q, int rw, struct buffer_head *bh)
++static int dm_request(request_queue_t *q, int rw, struct buffer_head *bh)
 +{
++	int r;
 +	struct mapped_device *md;
-+	int r, minor = MINOR(bh->b_rdev);
-+	unsigned int block_size = _blksize_size[minor];
 +
-+	md = dm_get_r(minor);
++	md = get_kdev(bh->b_rdev);
 +	if (!md) {
 +		buffer_IO_error(bh);
 +		return 0;
 +	}
 +
-+	/*
-+	 * Sanity checks.
-+	 */
-+	if (bh->b_size > block_size)
-+		DMERR("request is larger than block size "
-+		      "b_size (%d), block size (%d)",
-+		      bh->b_size, block_size);
++	down_read(&md->lock);
 +
-+	if (bh->b_rsector & ((bh->b_size >> 9) - 1))
-+		DMERR("misaligned block requested logical "
-+		      "sector (%lu), b_size (%d)",
-+		      bh->b_rsector, bh->b_size);
-+
-+	/*
-+	 * If we're suspended we have to queue
-+	 * this io for later.
-+	 */
-+	while (md->suspended) {
-+		dm_put_r(md);
-+
-+		if (rw == READA)
-+			goto bad_no_lock;
-+
-+		r = queue_io(bh, rw);
-+
-+		if (r < 0)
-+			goto bad_no_lock;
-+
-+		else if (r == 0)
-+			return 0;	/* deferred successfully */
-+
-+		/*
-+		 * We're in a while loop, because someone could suspend
-+		 * before we get to the following read lock.
-+		 */
-+		md = dm_get_r(minor);
-+		if (!md) {
-+			buffer_IO_error(bh);
-+			return 0;
-+		}
-+	}
-+
-+	if ((r = __map_buffer(md, bh, rw, __find_node(md->map, bh))) < 0)
++	r = __deferring(md, rw, bh);
++	if (r < 0)
 +		goto bad;
 +
-+	dm_put_r(md);
++	else if (!r) {
++		/* not deferring */
++		r = __map_buffer(md, rw, bh);
++		if (r < 0)
++			goto bad;
++	} else
++		r = 0;
++
++	up_read(&md->lock);
++	dm_put(md);
 +	return r;
 +
 +      bad:
-+	dm_put_r(md);
-+
-+      bad_no_lock:
 +	buffer_IO_error(bh);
++	up_read(&md->lock);
++	dm_put(md);
 +	return 0;
 +}
 +
-+static int check_dev_size(int minor, unsigned long block)
++static int check_dev_size(kdev_t dev, unsigned long block)
 +{
 +	/* FIXME: check this */
++	int minor = MINOR(dev);
 +	unsigned long max_sector = (_block_size[minor] << 1) + 1;
 +	unsigned long sector = (block + 1) * (_blksize_size[minor] >> 9);
 +
@@ -4594,25 +4908,18 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +/*
 + * Creates a dummy buffer head and maps it (for lilo).
 + */
-+static int do_bmap(kdev_t dev, unsigned long block,
-+		   kdev_t * r_dev, unsigned long *r_block)
++static int __bmap(struct mapped_device *md, kdev_t dev, unsigned long block,
++		  kdev_t *r_dev, unsigned long *r_block)
 +{
-+	struct mapped_device *md;
 +	struct buffer_head bh;
-+	int minor = MINOR(dev), r;
-+	struct target *t;
++	struct dm_target *ti;
++	int r;
 +
-+	md = dm_get_r(minor);
-+	if (!md)
-+		return -ENXIO;
-+
-+	if (md->suspended) {
-+		dm_put_r(md);
++	if (test_bit(DMF_BLOCK_IO, &md->flags)) {
 +		return -EPERM;
 +	}
 +
-+	if (!check_dev_size(minor, block)) {
-+		dm_put_r(md);
++	if (!check_dev_size(dev, block)) {
 +		return -EINVAL;
 +	}
 +
@@ -4620,19 +4927,20 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	memset(&bh, 0, sizeof(bh));
 +	bh.b_blocknr = block;
 +	bh.b_dev = bh.b_rdev = dev;
-+	bh.b_size = _blksize_size[minor];
++	bh.b_size = _blksize_size[MINOR(dev)];
 +	bh.b_rsector = block * (bh.b_size >> 9);
 +
 +	/* find target */
-+	t = md->map->targets + __find_node(md->map, &bh);
++	ti = dm_table_find_target(md->map, bh.b_rsector);
 +
 +	/* do the mapping */
-+	r = t->type->map(&bh, READ, t->private);
++	r = ti->type->map(ti, &bh, READ);
 +
-+	*r_dev = bh.b_rdev;
-+	*r_block = bh.b_rsector / (bh.b_size >> 9);
++	if (!r) {
++		*r_dev = bh.b_rdev;
++		*r_block = bh.b_rsector / (bh.b_size >> 9);
++	}
 +
-+	dm_put_r(md);
 +	return r;
 +}
 +
@@ -4641,6 +4949,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + */
 +static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb)
 +{
++	struct mapped_device *md;
 +	unsigned long block, r_block;
 +	kdev_t r_dev;
 +	int r;
@@ -4648,142 +4957,140 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	if (get_user(block, &lvb->lv_block))
 +		return -EFAULT;
 +
-+	if ((r = do_bmap(inode->i_rdev, block, &r_dev, &r_block)))
-+		return r;
++	md = get_kdev(inode->i_rdev);
++	if (!md)
++		return -ENXIO;
 +
-+	if (put_user(kdev_t_to_nr(r_dev), &lvb->lv_dev) ||
-+	    put_user(r_block, &lvb->lv_block))
-+		return -EFAULT;
++	down_read(&md->lock);
++	r = __bmap(md, inode->i_rdev, block, &r_dev, &r_block);
++	up_read(&md->lock);
++	dm_put(md);
 +
-+	return 0;
++	if (!r && (put_user(kdev_t_to_nr(r_dev), &lvb->lv_dev) ||
++		   put_user(r_block, &lvb->lv_block)))
++		r = -EFAULT;
++
++	return r;
++}
++
++/*-----------------------------------------------------------------
++ * A bitset is used to keep track of allocated minor numbers.
++ *---------------------------------------------------------------*/
++static spinlock_t _minor_lock = SPIN_LOCK_UNLOCKED;
++static struct mapped_device *_mds[MAX_DEVICES];
++
++static void free_minor(int minor)
++{
++	spin_lock(&_minor_lock);
++	_mds[minor] = NULL;
++	spin_unlock(&_minor_lock);
 +}
 +
 +/*
-+ * See if the device with a specific minor # is free.  The write
-+ * lock is held when it returns successfully.
++ * See if the device with a specific minor # is free.
 + */
-+static inline int specific_dev(int minor, struct mapped_device *md)
++static int specific_minor(int minor, struct mapped_device *md)
 +{
++	int r = -EBUSY;
++
 +	if (minor >= MAX_DEVICES) {
 +		DMWARN("request for a mapped_device beyond MAX_DEVICES (%d)",
 +		       MAX_DEVICES);
-+		return -1;
++		return -EINVAL;
 +	}
 +
-+	down_write(_dev_locks + minor);
-+	if (_devs[minor]) {
-+		/* in use */
-+		up_write(_dev_locks + minor);
-+		return -1;
++	spin_lock(&_minor_lock);
++	if (!_mds[minor]) {
++		_mds[minor] = md;
++		r = minor;
 +	}
++	spin_unlock(&_minor_lock);
 +
-+	return minor;
++	return r;
 +}
 +
-+/*
-+ * Find the first free device.  Again the write lock is held on
-+ * success.
-+ */
-+static int any_old_dev(struct mapped_device *md)
++static int next_free_minor(struct mapped_device *md)
 +{
 +	int i;
 +
-+	for (i = 0; i < MAX_DEVICES; i++)
-+		if (specific_dev(i, md) != -1)
-+			return i;
++	spin_lock(&_minor_lock);
++	for (i = 0; i < MAX_DEVICES; i++) {
++		if (!_mds[i]) {
++			_mds[i] = md;
++			break;
++		}
++	}
++	spin_unlock(&_minor_lock);
 +
-+	return -1;
++	return (i < MAX_DEVICES) ? i : -EBUSY;
++}
++
++static struct mapped_device *get_kdev(kdev_t dev)
++{
++	struct mapped_device *md;
++
++	if (major(dev) != _major)
++		return NULL;
++
++	spin_lock(_minor_lock);
++	md = _mds[minor(dev)];
++	if (md)
++		dm_get(md);
++	spin_unlock(_minor_lock);
++
++	return md;
 +}
 +
 +/*
-+ * Allocate and initialise a blank device.
-+ * Caller must ensure uuid is null-terminated.
-+ * Device is returned with a write lock held.
++ * Allocate and initialise a blank device with a given minor.
 + */
-+static struct mapped_device *alloc_dev(const char *name, const char *uuid,
-+				       int minor)
++static struct mapped_device *alloc_dev(int minor)
 +{
 +	struct mapped_device *md = kmalloc(sizeof(*md), GFP_KERNEL);
-+	int len;
 +
 +	if (!md) {
 +		DMWARN("unable to allocate device, out of memory.");
 +		return NULL;
 +	}
 +
-+	memset(md, 0, sizeof(*md));
-+
-+	/*
-+	 * This grabs the write lock if it succeeds.
-+	 */
-+	minor = (minor < 0) ? any_old_dev(md) : specific_dev(minor, md);
++	/* get a minor number for the dev */
++	minor = (minor < 0) ? next_free_minor(md) : specific_minor(minor, md);
 +	if (minor < 0) {
 +		kfree(md);
 +		return NULL;
 +	}
 +
-+	md->dev = MKDEV(_major, minor);
-+	md->suspended = 0;
-+
-+	strncpy(md->name, name, sizeof(md->name) - 1);
-+	md->name[sizeof(md->name) - 1] = '\0';
-+
-+	/*
-+	 * Copy in the uuid.
-+	 */
-+	if (uuid && *uuid) {
-+		len = strlen(uuid) + 1;
-+		if (!(md->uuid = kmalloc(len, GFP_KERNEL))) {
-+			DMWARN("unable to allocate uuid - out of memory.");
-+			kfree(md);
-+			return NULL;
-+		}
-+		strcpy(md->uuid, uuid);
-+	}
-+
++	memset(md, 0, sizeof(*md));
++	md->dev = mk_kdev(_major, minor);
++	init_rwsem(&md->lock);
++	atomic_set(&md->holders, 1);
++	atomic_set(&md->pending, 0);
 +	init_waitqueue_head(&md->wait);
++
 +	return md;
 +}
 +
-+static int __register_device(struct mapped_device *md)
++static void free_dev(struct mapped_device *md)
 +{
-+	md->devfs_entry =
-+	    devfs_register(_dev_dir, md->name, DEVFS_FL_CURRENT_OWNER,
-+			   MAJOR(md->dev), MINOR(md->dev),
-+			   S_IFBLK | S_IRUSR | S_IWUSR | S_IRGRP,
-+			   &dm_blk_dops, NULL);
-+
-+	return 0;
-+}
-+
-+static int __unregister_device(struct mapped_device *md)
-+{
-+	devfs_unregister(md->devfs_entry);
-+	return 0;
++	free_minor(minor(md->dev));
++	kfree(md);
 +}
 +
 +/*
-+ * The hardsect size for a mapped device is the smallest hardsect size
++ * The hardsect size for a mapped device is the largest hardsect size
 + * from the devices it maps onto.
 + */
 +static int __find_hardsect_size(struct list_head *devices)
 +{
-+	int result = INT_MAX, size;
++	int result = 512, size;
 +	struct list_head *tmp;
 +
 +	list_for_each(tmp, devices) {
 +		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
 +		size = get_hardsect_size(dd->dev);
-+		if (size < result)
++		if (size > result)
 +			result = size;
 +	}
-+
-+	/*
-+	 * I think it's safe to assume that no block devices have
-+	 * a hard sector size this large.
-+	 */
-+	if (result == INT_MAX)
-+		result = 512;
 +
 +	return result;
 +}
@@ -4793,32 +5100,24 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + */
 +static int __bind(struct mapped_device *md, struct dm_table *t)
 +{
-+	int minor = MINOR(md->dev);
-+
++	int minor = minor(md->dev);
 +	md->map = t;
 +
-+	if (!t->num_targets) {
-+		_block_size[minor] = 0;
-+		_blksize_size[minor] = BLOCK_SIZE;
-+		_hardsect_size[minor] = 0;
-+		return 0;
-+	}
-+
 +	/* in k */
-+	_block_size[minor] = (t->highs[t->num_targets - 1] + 1) >> 1;
-+
++	_block_size[minor] = dm_table_get_size(t) >> 1;
 +	_blksize_size[minor] = BLOCK_SIZE;
-+	_hardsect_size[minor] = __find_hardsect_size(&t->devices);
++	_hardsect_size[minor] = __find_hardsect_size(dm_table_get_devices(t));
 +	register_disk(NULL, md->dev, 1, &dm_blk_dops, _block_size[minor]);
 +
++	dm_table_get(t);
 +	return 0;
 +}
 +
 +static void __unbind(struct mapped_device *md)
 +{
-+	int minor = MINOR(md->dev);
++	int minor = minor(md->dev);
 +
-+	dm_table_destroy(md->map);
++	dm_table_put(md->map);
 +	md->map = NULL;
 +
 +	_block_size[minor] = 0;
@@ -4826,193 +5125,43 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	_hardsect_size[minor] = 0;
 +}
 +
-+static int check_name(const char *name)
-+{
-+	struct mapped_device *md;
-+
-+	if (strchr(name, '/') || strlen(name) > DM_NAME_LEN) {
-+		DMWARN("invalid device name");
-+		return -1;
-+	}
-+
-+	md = dm_get_name_r(name, DM_LOOKUP_BY_NAME);
-+	if (md) {
-+		dm_put_r(md);
-+		DMWARN("device name already in use");
-+		return -1;
-+	}
-+
-+	return 0;
-+}
-+
-+static int check_uuid(const char *uuid)
-+{
-+	struct mapped_device *md;
-+
-+	if (uuid) {
-+		md = dm_get_name_r(uuid, DM_LOOKUP_BY_UUID);
-+		if (md) {
-+			dm_put_r(md);
-+			DMWARN("device uuid already in use");
-+			return -1;
-+		}
-+	}
-+
-+	return 0;
-+}
-+
 +/*
 + * Constructor for a new device.
 + */
-+int dm_create(const char *name, const char *uuid, int minor, int ro,
-+	      struct dm_table *table)
++int dm_create(int minor, struct dm_table *table, struct mapped_device **result)
 +{
 +	int r;
 +	struct mapped_device *md;
 +
-+	spin_lock(&_create_lock);
-+	if (check_name(name) || check_uuid(uuid)) {
-+		spin_unlock(&_create_lock);
-+		return -EINVAL;
-+	}
-+
-+	md = alloc_dev(name, uuid, minor);
-+	if (!md) {
-+		spin_unlock(&_create_lock);
++	md = alloc_dev(minor);
++	if (!md)
 +		return -ENXIO;
-+	}
-+	minor = MINOR(md->dev);
-+	_devs[minor] = md;
-+
-+	r = __register_device(md);
-+	if (r)
-+		goto err;
 +
 +	r = __bind(md, table);
-+	if (r)
-+		goto err;
-+
-+	dm_set_ro(md, ro);
-+
-+	spin_unlock(&_create_lock);
-+	dm_put_w(md);
-+	return 0;
-+
-+      err:
-+	_devs[minor] = NULL;
-+	if (md->uuid)
-+		kfree(md->uuid);
-+
-+	dm_put_w(md);
-+	kfree(md);
-+	spin_unlock(&_create_lock);
-+	return r;
-+}
-+
-+/*
-+ * Renames the device.  No lock held.
-+ */
-+int dm_set_name(const char *name, int nametype, const char *newname)
-+{
-+	int r;
-+	struct mapped_device *md;
-+
-+	spin_lock(&_create_lock);
-+	if (check_name(newname) < 0) {
-+		spin_unlock(&_create_lock);
-+		return -EINVAL;
-+	}
-+
-+	md = dm_get_name_w(name, nametype);
-+	if (!md) {
-+		spin_unlock(&_create_lock);
-+		return -ENXIO;
-+	}
-+
-+	r = __unregister_device(md);
-+	if (r)
-+		goto out;
-+
-+	strcpy(md->name, newname);
-+	r = __register_device(md);
-+
-+      out:
-+	dm_put_w(md);
-+	spin_unlock(&_create_lock);
-+	return r;
-+}
-+
-+/*
-+ * Destructor for the device.  You cannot destroy an open
-+ * device.  Write lock must be held before calling.
-+ * Caller must dm_put_w(md) then kfree(md) if call was successful.
-+ */
-+int dm_destroy(struct mapped_device *md)
-+{
-+	int minor, r;
-+
-+	if (md->use_count)
-+		return -EPERM;
-+
-+	r = __unregister_device(md);
-+	if (r)
++	if (r) {
++		free_dev(md);
 +		return r;
++	}
 +
-+	minor = MINOR(md->dev);
-+	_devs[minor] = NULL;
-+	__unbind(md);
-+
-+	if (md->uuid)
-+		kfree(md->uuid);
-+
++	*result = md;
 +	return 0;
 +}
 +
-+/*
-+ * Destroy all devices - except open ones
-+ */
-+void dm_destroy_all(void)
++void dm_get(struct mapped_device *md)
 +{
-+	int i, some_destroyed, r;
-+	struct mapped_device *md;
++	atomic_inc(&md->holders);
++}
 +
-+	do {
-+		some_destroyed = 0;
-+		for (i = 0; i < MAX_DEVICES; i++) {
-+			md = dm_get_w(i);
-+			if (!md)
-+				continue;
-+
-+			r = dm_destroy(md);
-+			dm_put_w(md);
-+
-+			if (!r) {
-+				kfree(md);
-+				some_destroyed = 1;
-+			}
-+		}
-+	} while (some_destroyed);
++void dm_put(struct mapped_device *md)
++{
++	if (atomic_dec_and_test(&md->holders)) {
++		__unbind(md);
++		free_dev(md);
++	}
 +}
 +
 +/*
-+ * Sets or clears the read-only flag for the device.  Write lock
-+ * must be held.
-+ */
-+void dm_set_ro(struct mapped_device *md, int ro)
-+{
-+	md->read_only = ro;
-+	set_device_ro(md->dev, ro);
-+}
-+
-+/*
-+ * A target is notifying us of some event
-+ */
-+void dm_notify(void *target)
-+{
-+}
-+
-+/*
-+ * Requeue the deferred buffer_heads by calling generic_make_request.
++ * Requeue the deferred io by calling generic_make_request.
 + */
 +static void flush_deferred_io(struct deferred_io *c)
 +{
@@ -5027,100 +5176,136 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +}
 +
 +/*
-+ * Swap in a new table (destroying old one).  Write lock must be
-+ * held.
++ * Swap in a new table (destroying old one).
 + */
 +int dm_swap_table(struct mapped_device *md, struct dm_table *table)
 +{
 +	int r;
 +
++	down_write(&md->lock);
++
 +	/* device must be suspended */
-+	if (!md->suspended)
++	if (!test_bit(DMF_SUSPENDED, &md->flags)) {
++		up_write(&md->lock);
 +		return -EPERM;
++	}
 +
 +	__unbind(md);
-+
 +	r = __bind(md, table);
 +	if (r)
 +		return r;
 +
++	up_write(&md->lock);
 +	return 0;
 +}
 +
 +/*
 + * We need to be able to change a mapping table under a mounted
-+ * filesystem.  for example we might want to move some data in
++ * filesystem.  For example we might want to move some data in
 + * the background.  Before the table can be swapped with
 + * dm_bind_table, dm_suspend must be called to flush any in
-+ * flight buffer_heads and ensure that any further io gets
-+ * deferred.  Write lock must be held.
++ * flight io and ensure that any further io gets deferred.
 + */
 +int dm_suspend(struct mapped_device *md)
 +{
-+	int minor = MINOR(md->dev);
 +	DECLARE_WAITQUEUE(wait, current);
 +
-+	if (md->suspended)
++	down_write(&md->lock);
++
++	/*
++	 * First we set the BLOCK_IO flag so no more ios will be
++	 * mapped.
++	 */
++	if (test_bit(DMF_BLOCK_IO, &md->flags)) {
++		up_write(&md->lock);
 +		return -EINVAL;
++	}
 +
-+	md->suspended = 1;
-+	dm_put_w(md);
++	set_bit(DMF_BLOCK_IO, &md->flags);
++	up_write(&md->lock);
 +
-+	/* wait for all the pending io to flush */
++	/*
++	 * Then we wait for the already mapped ios to
++	 * complete.
++	 */
++	down_read(&md->lock);
++
 +	add_wait_queue(&md->wait, &wait);
-+	current->state = TASK_UNINTERRUPTIBLE;
-+	do {
-+		md = dm_get_w(minor);
-+		if (!md) {
-+			/* Caller expects to free this lock. Yuck. */
-+			down_write(_dev_locks + minor);
-+			return -ENXIO;
-+		}
++	while (1) {
++		set_current_state(TASK_INTERRUPTIBLE);
 +
 +		if (!atomic_read(&md->pending))
 +			break;
 +
-+		dm_put_w(md);
 +		schedule();
-+
-+	} while (1);
++	}
 +
 +	current->state = TASK_RUNNING;
 +	remove_wait_queue(&md->wait, &wait);
++	up_read(&md->lock);
++
++	/* set_bit is atomic */
++	set_bit(DMF_SUSPENDED, &md->flags);
 +
 +	return 0;
 +}
 +
 +int dm_resume(struct mapped_device *md)
 +{
-+	int minor = MINOR(md->dev);
 +	struct deferred_io *def;
 +
-+	if (!md->suspended || !md->map->num_targets)
++	down_write(&md->lock);
++	if (!test_bit(DMF_SUSPENDED, &md->flags) ||
++	    !dm_table_get_size(md->map)) {
++		up_write(&md->lock);
 +		return -EINVAL;
++	}
 +
-+	md->suspended = 0;
++	clear_bit(DMF_SUSPENDED, &md->flags);
++	clear_bit(DMF_BLOCK_IO, &md->flags);
 +	def = md->deferred;
 +	md->deferred = NULL;
++	up_write(&md->lock);
 +
-+	dm_put_w(md);
 +	flush_deferred_io(def);
 +	run_task_queue(&tq_disk);
-+
-+	if (!dm_get_w(minor)) {
-+		/* FIXME: yuck */
-+		down_write(_dev_locks + minor);
-+		return -ENXIO;
-+	}
 +
 +	return 0;
 +}
 +
++struct dm_table *dm_get_table(struct mapped_device *md)
++{
++	struct dm_table *t;
++
++	down_read(&md->lock);
++	t = md->map;
++	dm_table_get(t);
++	up_read(&md->lock);
++
++	return t;
++}
++
++kdev_t dm_kdev(struct mapped_device *md)
++{
++	kdev_t dev;
++
++	down_read(&md->lock);
++	dev = md->dev;
++	up_read(&md->lock);
++
++	return dev;
++}
++
++int dm_suspended(struct mapped_device *md)
++{
++	return test_bit(DMF_SUSPENDED, &md->flags);
++}
++
 +struct block_device_operations dm_blk_dops = {
-+	open:		dm_blk_open,
-+	release:	dm_blk_close,
-+	ioctl:		dm_blk_ioctl,
-+	owner:		THIS_MODULE
++	.open = dm_blk_open,
++	.release = dm_blk_close,
++	.ioctl = dm_blk_ioctl,
++	.owner = THIS_MODULE
 +};
 +
 +/*
@@ -5134,14 +5319,14 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +MODULE_DESCRIPTION(DM_NAME " driver");
 +MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 +MODULE_LICENSE("GPL");
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/dm.h linux-2.4.19-dm/drivers/md/dm.h
---- linux-2.4.19/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/dm.h	Wed Aug 14 14:51:11 2002
-@@ -0,0 +1,242 @@
+diff -ruN linux-2.4.19-dm/drivers/md/dm.h linux-2.4.19-dmbackport/drivers/md/dm.h
+--- linux-2.4.19-dm/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/dm.h	Wed Nov 13 18:08:20 2002
+@@ -0,0 +1,150 @@
 +/*
 + * Internal header file for device mapper
 + *
-+ * Copyright (C) 2001 Sistina Software
++ * Copyright (C) 2001, 2002 Sistina Software
 + *
 + * This file is released under the LGPL.
 + */
@@ -5149,165 +5334,54 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +#ifndef DM_INTERNAL_H
 +#define DM_INTERNAL_H
 +
-+#include <linux/config.h>
-+#include <linux/version.h>
-+#include <linux/major.h>
-+#include <linux/iobuf.h>
-+#include <linux/module.h>
 +#include <linux/fs.h>
-+#include <linux/slab.h>
-+#include <linux/vmalloc.h>
-+#include <linux/compatmac.h>
-+#include <linux/cache.h>
-+#include <linux/devfs_fs_kernel.h>
-+#include <linux/ctype.h>
 +#include <linux/device-mapper.h>
 +#include <linux/list.h>
-+#include <linux/init.h>
++#include <linux/blkdev.h>
 +
-+#define DM_NAME "device-mapper"	/* Name for messaging */
-+#define DM_DRIVER_EMAIL "lvm-devel@lists.sistina.com"
-+#define MAX_DEPTH 16
-+#define NODE_SIZE L1_CACHE_BYTES
-+#define KEYS_PER_NODE (NODE_SIZE / sizeof(offset_t))
-+#define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
-+#define MAX_ARGS 32
-+#define MAX_DEVICES 256
++#define DM_NAME "device-mapper"
++#define DMWARN(f, x...) printk(KERN_WARNING DM_NAME ": " f "\n" , ## x)
++#define DMERR(f, x...) printk(KERN_ERR DM_NAME ": " f "\n" , ## x)
++#define DMINFO(f, x...) printk(KERN_INFO DM_NAME ": " f "\n" , ## x)
++
++/*
++ * FIXME: I think this should be with the definition of sector_t
++ * in types.h.
++ */
++#ifdef CONFIG_LBD
++#define SECTOR_FORMAT "%Lu"
++#else
++#define SECTOR_FORMAT "%lu"
++#endif
++
++extern struct block_device_operations dm_blk_dops;
 +
 +/*
 + * List of devices that a metadevice uses and should open/close.
 + */
 +struct dm_dev {
-+	atomic_t count;
 +	struct list_head list;
 +
++	atomic_t count;
 +	int mode;
-+
 +	kdev_t dev;
-+	struct block_device *bd;
++	struct block_device *bdev;
 +};
 +
-+/*
-+ * I/O that had to be deferred while we were suspended
-+ */
-+struct deferred_io {
-+	int rw;
-+	struct buffer_head *bh;
-+	struct deferred_io *next;
-+};
++struct dm_table;
++struct mapped_device;
++
++/*-----------------------------------------------------------------
++ * Functions for manipulating a struct mapped_device.
++ * Drop the reference with dm_put when you finish with the object.
++ *---------------------------------------------------------------*/
++int dm_create(int minor, struct dm_table *table, struct mapped_device **md);
 +
 +/*
-+ * Btree leaf - this does the actual mapping
++ * Reference counting for md.
 + */
-+struct target {
-+	struct target_type *type;
-+	void *private;
-+};
-+
-+/*
-+ * The btree
-+ */
-+struct dm_table {
-+	/* btree table */
-+	int depth;
-+	int counts[MAX_DEPTH];	/* in nodes */
-+	offset_t *index[MAX_DEPTH];
-+
-+	int num_targets;
-+	int num_allocated;
-+	offset_t *highs;
-+	struct target *targets;
-+
-+	/*
-+	 * Indicates the rw permissions for the new logical
-+	 * device.  This should be a combination of FMODE_READ
-+	 * and FMODE_WRITE.
-+	 */
-+	int mode;
-+
-+	/* a list of devices used by this table */
-+	struct list_head devices;
-+
-+	/*
-+	 * A waitqueue for processes waiting for something
-+	 * interesting to happen to this table.
-+	 */
-+	wait_queue_head_t eventq;
-+};
-+
-+/*
-+ * The actual device struct
-+ */
-+struct mapped_device {
-+	kdev_t dev;
-+	char name[DM_NAME_LEN];
-+	char *uuid;
-+
-+	int use_count;
-+	int suspended;
-+	int read_only;
-+
-+	/* a list of io's that arrived while we were suspended */
-+	atomic_t pending;
-+	wait_queue_head_t wait;
-+	struct deferred_io *deferred;
-+
-+	struct dm_table *map;
-+
-+	/* used by dm-fs.c */
-+	devfs_handle_t devfs_entry;
-+};
-+
-+extern struct block_device_operations dm_blk_dops;
-+
-+/* dm-target.c */
-+int dm_target_init(void);
-+struct target_type *dm_get_target_type(const char *name);
-+void dm_put_target_type(struct target_type *t);
-+void dm_target_exit(void);
-+
-+/*
-+ * Destructively splits argument list to pass to ctr.
-+ */
-+int split_args(int max, int *argc, char **argv, char *input);
-+
-+/* dm.c */
-+struct mapped_device *dm_get_r(int minor);
-+struct mapped_device *dm_get_w(int minor);
-+
-+/*
-+ * There are two ways to lookup a device.
-+ */
-+enum {
-+	DM_LOOKUP_BY_NAME,
-+	DM_LOOKUP_BY_UUID
-+};
-+
-+struct mapped_device *dm_get_name_r(const char *name, int nametype);
-+struct mapped_device *dm_get_name_w(const char *name, int nametype);
-+
-+void dm_put_r(struct mapped_device *md);
-+void dm_put_w(struct mapped_device *md);
-+
-+/*
-+ * Call with no lock.
-+ */
-+int dm_create(const char *name, const char *uuid, int minor, int ro,
-+	      struct dm_table *table);
-+int dm_set_name(const char *name, int nametype, const char *newname);
-+void dm_destroy_all(void);
-+
-+/*
-+ * You must have the write lock before calling the remaining md
-+ * methods.
-+ */
-+int dm_destroy(struct mapped_device *md);
-+void dm_set_ro(struct mapped_device *md, int ro);
-+
-+/*
-+ * The device must be suspended before calling this method.
-+ */
-+int dm_swap_table(struct mapped_device *md, struct dm_table *t);
++void dm_get(struct mapped_device *md);
++void dm_put(struct mapped_device *md);
 +
 +/*
 + * A device can still be used while suspended, but I/O is deferred.
@@ -5315,39 +5389,55 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +int dm_suspend(struct mapped_device *md);
 +int dm_resume(struct mapped_device *md);
 +
-+/* dm-table.c */
++/*
++ * The device must be suspended before calling this method.
++ */
++int dm_swap_table(struct mapped_device *md, struct dm_table *t);
++
++/*
++ * Drop a reference on the table when you've finished with the
++ * result.
++ */
++struct dm_table *dm_get_table(struct mapped_device *md);
++
++/*
++ * Info functions.
++ */
++kdev_t dm_kdev(struct mapped_device *md);
++int dm_suspended(struct mapped_device *md);
++
++/*-----------------------------------------------------------------
++ * Functions for manipulating a table.  Tables are also reference
++ * counted.
++ *---------------------------------------------------------------*/
 +int dm_table_create(struct dm_table **result, int mode);
-+void dm_table_destroy(struct dm_table *t);
 +
-+int dm_table_add_target(struct dm_table *t, offset_t highs,
-+			struct target_type *type, void *private);
++void dm_table_get(struct dm_table *t);
++void dm_table_put(struct dm_table *t);
++
++int dm_table_add_target(struct dm_table *t, const char *type,
++			sector_t start, sector_t len, char *params);
 +int dm_table_complete(struct dm_table *t);
-+
-+/*
-+ * Event handling
-+ */
 +void dm_table_event(struct dm_table *t);
++sector_t dm_table_get_size(struct dm_table *t);
++struct dm_target *dm_table_get_target(struct dm_table *t, int index);
++struct dm_target *dm_table_find_target(struct dm_table *t, sector_t sector);
++unsigned int dm_table_get_num_targets(struct dm_table *t);
++struct list_head *dm_table_get_devices(struct dm_table *t);
++int dm_table_get_mode(struct dm_table *t);
++void dm_table_add_wait_queue(struct dm_table *t, wait_queue_t *wq);
 +
-+#define DMWARN(f, x...) printk(KERN_WARNING DM_NAME ": " f "\n" , ## x)
-+#define DMERR(f, x...) printk(KERN_ERR DM_NAME ": " f "\n" , ## x)
-+#define DMINFO(f, x...) printk(KERN_INFO DM_NAME ": " f "\n" , ## x)
++/*-----------------------------------------------------------------
++ * A registry of target types.
++ *---------------------------------------------------------------*/
++int dm_target_init(void);
++void dm_target_exit(void);
++struct target_type *dm_get_target_type(const char *name);
++void dm_put_target_type(struct target_type *t);
 +
-+/*
-+ * Calculate the index of the child node of the n'th node k'th key.
-+ */
-+static inline int get_child(int n, int k)
-+{
-+	return (n * CHILDREN_PER_NODE) + k;
-+}
-+
-+/*
-+ * Return the n'th node of level l from table t.
-+ */
-+static inline offset_t *get_node(struct dm_table *t, int l, int n)
-+{
-+	return t->index[l] + (n * KEYS_PER_NODE);
-+}
-+
++/*-----------------------------------------------------------------
++ * Useful inlines.
++ *---------------------------------------------------------------*/
 +static inline int array_too_big(unsigned long fixed, unsigned long obj,
 +				unsigned long num)
 +{
@@ -5355,7 +5445,23 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +}
 +
 +/*
-+ * Targets
++ * ceiling(n / size) * size
++ */
++static inline unsigned long dm_round_up(unsigned long n, unsigned long size)
++{
++	unsigned long r = n % size;
++	return n + (r ? (size - r) : 0);
++}
++
++/*
++ * The device-mapper can be driven through one of two interfaces;
++ * ioctl or filesystem, depending which patch you have applied.
++ */
++int dm_interface_init(void);
++void dm_interface_exit(void);
++
++/*
++ * Targets for linear and striped mappings
 + */
 +int dm_linear_init(void);
 +void dm_linear_exit(void);
@@ -5366,42 +5472,31 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +int dm_snapshot_init(void);
 +void dm_snapshot_exit(void);
 +
-+/* Future */
-+/* int dm_mirror_init(void); */
-+/* void dm_mirror_exit(void); */
-+
-+/*
-+ * Init functions for the user interface to device-mapper.  At
-+ * the moment an ioctl interface on a special char device is
-+ * used.  A filesystem based interface would be a nicer way to
-+ * go.
-+ */
-+int __init dm_interface_init(void);
-+void dm_interface_exit(void);
-+
 +#endif
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/kcopyd.c linux-2.4.19-dm/drivers/md/kcopyd.c
---- linux-2.4.19/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/kcopyd.c	Wed Aug 14 14:13:40 2002
-@@ -0,0 +1,841 @@
+diff -ruN linux-2.4.19-dm/drivers/md/kcopyd.c linux-2.4.19-dmbackport/drivers/md/kcopyd.c
+--- linux-2.4.19-dm/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/kcopyd.c	Wed Nov 13 17:52:16 2002
+@@ -0,0 +1,843 @@
 +/*
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
 + *
 + * This file is released under the GPL.
 + */
 +
-+#include <linux/config.h>
-+#include <linux/module.h>
-+#include <linux/init.h>
-+#include <linux/slab.h>
-+#include <linux/list.h>
-+#include <linux/fs.h>
-+#include <linux/blkdev.h>
-+#include <linux/device-mapper.h>
-+#include <linux/mempool.h>
 +#include <asm/atomic.h>
-+#include <linux/pagemap.h>
++
++#include <linux/blkdev.h>
++#include <linux/config.h>
++#include <linux/device-mapper.h>
++#include <linux/fs.h>
++#include <linux/init.h>
++#include <linux/list.h>
 +#include <linux/locks.h>
++#include <linux/mempool.h>
++#include <linux/module.h>
++#include <linux/pagemap.h>
++#include <linux/slab.h>
++#include <linux/vmalloc.h>
 +
 +#include "kcopyd.h"
 +
@@ -5641,7 +5736,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +{
 +	struct kcopyd_job *job;
 +
-+	job = mempool_alloc(_job_pool, GFP_KERNEL);
++	job = mempool_alloc(_job_pool, GFP_NOIO);
 +	if (!job)
 +		return NULL;
 +
@@ -5997,7 +6092,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +static inline struct copy_info *alloc_copy_info(void)
 +{
-+	return mempool_alloc(_copy_pool, GFP_KERNEL);
++	return mempool_alloc(_copy_pool, GFP_NOIO);
 +}
 +
 +static inline void free_copy_info(struct copy_info *info)
@@ -6225,9 +6320,9 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +	up(&_client_count_sem);
 +}
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/drivers/md/kcopyd.h linux-2.4.19-dm/drivers/md/kcopyd.h
---- linux-2.4.19/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/drivers/md/kcopyd.h	Wed Jul 17 14:59:03 2002
+diff -ruN linux-2.4.19-dm/drivers/md/kcopyd.h linux-2.4.19-dmbackport/drivers/md/kcopyd.h
+--- linux-2.4.19-dm/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/drivers/md/kcopyd.h	Wed Nov 13 18:08:24 2002
 @@ -0,0 +1,101 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
@@ -6246,8 +6341,8 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +struct kcopyd_region {
 +	kdev_t dev;
-+	offset_t sector;
-+	offset_t count;
++	sector_t sector;
++	sector_t count;
 +};
 +
 +#define MAX_KCOPYD_PAGES 128
@@ -6277,11 +6372,11 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	 * Shifts and masks that will be useful when dispatching
 +	 * each buffer_head.
 +	 */
-+	offset_t offset;
-+	offset_t block_size;
-+	offset_t block_shift;
-+	offset_t bpp_shift;	/* blocks per page */
-+	offset_t bpp_mask;
++	sector_t offset;
++	sector_t block_size;
++	sector_t block_shift;
++	sector_t bpp_shift;	/* blocks per page */
++	sector_t bpp_mask;
 +
 +	/*
 +	 * nr_blocks is how many buffer heads will have to be
@@ -6297,7 +6392,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	 * Set this to ensure you are notified when the job has
 +	 * completed.  'context' is for callback to use.
 +	 */
-+	void (*callback)(struct kcopyd_job *job);
++	void (*callback) (struct kcopyd_job *job);
 +	void *context;
 +};
 +
@@ -6313,7 +6408,7 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 + * Submit a copy job to kcopyd.  This is built on top of the
 + * previous three fns.
 + */
-+typedef void (*kcopyd_notify_fn)(int err, void *context);
++typedef void (*kcopyd_notify_fn) (int err, void *context);
 +
 +int kcopyd_copy(struct kcopyd_region *from, struct kcopyd_region *to,
 +		kcopyd_notify_fn fn, void *context);
@@ -6330,10 +6425,10 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +void kcopyd_dec_client_count(void);
 +
 +#endif
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/include/linux/device-mapper.h linux-2.4.19-dm/include/linux/device-mapper.h
---- linux-2.4.19/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/include/linux/device-mapper.h	Wed Aug 14 13:56:56 2002
-@@ -0,0 +1,63 @@
+diff -ruN linux-2.4.19-dm/include/linux/device-mapper.h linux-2.4.19-dmbackport/include/linux/device-mapper.h
+--- linux-2.4.19-dm/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/include/linux/device-mapper.h	Wed Nov 13 17:54:29 2002
+@@ -0,0 +1,85 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -6343,40 +6438,48 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +#ifndef _LINUX_DEVICE_MAPPER_H
 +#define _LINUX_DEVICE_MAPPER_H
 +
-+#define DM_DIR "mapper"	/* Slashes not supported */
-+#define DM_MAX_TYPE_NAME 16
-+#define DM_NAME_LEN 128
-+#define DM_UUID_LEN 129
-+
 +#ifdef __KERNEL__
 +
++typedef unsigned long sector_t;
++
++struct dm_target;
 +struct dm_table;
 +struct dm_dev;
-+typedef unsigned long offset_t;
 +
 +typedef enum { STATUSTYPE_INFO, STATUSTYPE_TABLE } status_type_t;
 +
 +/*
-+ * Prototypes for functions for a target
++ * In the constructor the target parameter will already have the
++ * table, type, begin and len fields filled in.
 + */
-+typedef int (*dm_ctr_fn) (struct dm_table *t, offset_t b, offset_t l,
-+			  int argc, char **argv, void **context);
-+typedef void (*dm_dtr_fn) (struct dm_table *t, void *c);
-+typedef int (*dm_map_fn) (struct buffer_head *bh, int rw, void *context);
-+typedef int (*dm_err_fn) (struct buffer_head *bh, int rw, void *context);
-+typedef int (*dm_status_fn) (status_type_t status_type, char *result,
-+			     int maxlen, void *context);
++typedef int (*dm_ctr_fn) (struct dm_target *target, int argc, char **argv);
++
++/*
++ * The destructor doesn't need to free the dm_target, just
++ * anything hidden ti->private.
++ */
++typedef void (*dm_dtr_fn) (struct dm_target *ti);
++
++/*
++ * The map function must return:
++ * < 0: error
++ * = 0: The target will handle the io by resubmitting it later
++ * > 0: simple remap complete
++ */
++typedef int (*dm_map_fn) (struct dm_target *ti, struct buffer_head *bh, int rw);
++typedef int (*dm_status_fn) (struct dm_target *ti, status_type_t status_type,
++			     char *result, int maxlen);
 +
 +void dm_error(const char *message);
 +
 +/*
 + * Constructors should call these functions to ensure destination devices
-+ * are opened/closed correctly
++ * are opened/closed correctly.
++ * FIXME: too many arguments.
 + */
-+int dm_table_get_device(struct dm_table *t, const char *path,
-+			offset_t start, offset_t len,
-+			int mode, struct dm_dev **result);
-+void dm_table_put_device(struct dm_table *table, struct dm_dev *d);
++int dm_get_device(struct dm_target *ti, const char *path, sector_t start,
++		  sector_t len, int mode, struct dm_dev **result);
++void dm_put_device(struct dm_target *ti, struct dm_dev *d);
 +
 +/*
 + * Information about a target type
@@ -6387,8 +6490,22 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +	dm_ctr_fn ctr;
 +	dm_dtr_fn dtr;
 +	dm_map_fn map;
-+	dm_err_fn err;
 +	dm_status_fn status;
++};
++
++struct dm_target {
++	struct dm_table *table;
++	struct target_type *type;
++
++	/* target limits */
++	sector_t begin;
++	sector_t len;
++
++	/* target specific data */
++	void *private;
++
++	/* Used to provide an error string from the ctr */
++	char *error;
 +};
 +
 +int dm_register_target(struct target_type *t);
@@ -6397,10 +6514,10 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +#endif				/* __KERNEL__ */
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
-diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -ruN linux-2.4.19/include/linux/dm-ioctl.h linux-2.4.19-dm/include/linux/dm-ioctl.h
---- linux-2.4.19/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux-2.4.19-dm/include/linux/dm-ioctl.h	Wed Aug 14 16:30:49 2002
-@@ -0,0 +1,145 @@
+diff -ruN linux-2.4.19-dm/include/linux/dm-ioctl.h linux-2.4.19-dmbackport/include/linux/dm-ioctl.h
+--- linux-2.4.19-dm/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
++++ linux-2.4.19-dmbackport/include/linux/dm-ioctl.h	Wed Nov 13 17:53:50 2002
+@@ -0,0 +1,149 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -6410,8 +6527,12 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +#ifndef _LINUX_DM_IOCTL_H
 +#define _LINUX_DM_IOCTL_H
 +
-+#include "device-mapper.h"
 +#include <linux/types.h>
++
++#define DM_DIR "mapper"		/* Slashes not supported */
++#define DM_MAX_TYPE_NAME 16
++#define DM_NAME_LEN 128
++#define DM_UUID_LEN 129
 +
 +/*
 + * Implements a traditional ioctl interface to the device mapper.
@@ -6530,8 +6651,8 @@ diff --exclude .depend --exclude BitKeeper --exclude SCCS --exclude ChangeSet -r
 +
 +#define DM_VERSION_MAJOR	1
 +#define DM_VERSION_MINOR	0
-+#define DM_VERSION_PATCHLEVEL	3
-+#define DM_VERSION_EXTRA	"-ioctl (2002-08-14)"
++#define DM_VERSION_PATCHLEVEL	7
++#define DM_VERSION_EXTRA	"-ioctl (2002-11-13)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	0x00000001
