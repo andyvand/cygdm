@@ -57,9 +57,9 @@ static struct kiobuf *iobuf;
 static int thread_exit = 0;
 static long last_jiffies = 0;
 
-/* Find a free entry from the free-list or allocate a new one
+/* Find a free entry from the free-list or allocate a new one.
    This routine always returns a valid pointer even if it has to wait
-   for one */
+   for it */
 static struct copy_work *get_work_struct(void)
 {
 	struct copy_work *entry = NULL;
@@ -287,11 +287,11 @@ static int copy_kthread(void *unused)
 				down_write(&free_list_lock);
 				list_add(&work_item->list, &free_list);
 				up_write(&free_list_lock);
-			        wake_up_interruptible(&freelist_waitq);
 			}
 			else {
 				kmem_cache_free(entry_cachep, work_item);
 			}
+			wake_up_interruptible(&freelist_waitq);
 
 			/* Get the work lock again for the top of the while loop */
 			down_write(&work_list_lock);
