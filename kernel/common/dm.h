@@ -132,8 +132,8 @@ void dm_target_exit(void);
 int split_args(int max, int *argc, char **argv, char *input);
 
 /* dm.c */
-struct mapped_device *dm_get_r(int minor);
-struct mapped_device *dm_get_w(int minor);
+struct mapped_device *dm_get_r(kdev_t dev);
+struct mapped_device *dm_get_w(kdev_t dev);
 
 /*
  * There are two ways to lookup a device.

@@ -7,7 +7,7 @@
 #ifndef _LINUX_DM_IOCTL_H
 #define _LINUX_DM_IOCTL_H
 
-#include "device-mapper.h"
+#include <linux/device-mapper.h>
 #include <linux/types.h>
 
 /*
@@ -127,8 +127,8 @@ enum {
 
 #define DM_VERSION_MAJOR	1
 #define DM_VERSION_MINOR	0
-#define DM_VERSION_PATCHLEVEL	3
-#define DM_VERSION_EXTRA	"-ioctl-cvs (2002-08-14)"
+#define DM_VERSION_PATCHLEVEL	4
+#define DM_VERSION_EXTRA	"-ioctl-cvs (2002-09-24)"
 
 /* Status bits */
 #define DM_READONLY_FLAG	0x00000001

@@ -302,11 +302,11 @@ static int read_header(struct pstore *ps, int *new_snapshot)
 	if (dh->magic == 0) {
 		*new_snapshot = 1;
 
-	} else if (dh->magic == SNAP_MAGIC) {
+	} else if (le32_to_cpu(dh->magic) == SNAP_MAGIC) {
 		*new_snapshot = 0;
-		ps->valid = dh->valid;
-		ps->version = dh->version;
-		ps->chunk_size = dh->chunk_size;
+		ps->valid = le32_to_cpu(dh->valid);
+		ps->version = le32_to_cpu(dh->version);
+		ps->chunk_size = le32_to_cpu(dh->chunk_size);
 
 	} else {
 		DMWARN("Invalid/corrupt snapshot");

@@ -53,9 +53,10 @@ static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb);
 /*
  * Protect the mapped_devices referenced from _dev[]
  */
-struct mapped_device *dm_get_r(int minor)
+struct mapped_device *dm_get_r(kdev_t dev)
 {
 	struct mapped_device *md;
+	int minor = MINOR(dev);
 
 	if (minor >= MAX_DEVICES)
 		return NULL;
@@ -67,9 +68,10 @@ struct mapped_device *dm_get_r(int minor)
 	return md;
 }
 
-struct mapped_device *dm_get_w(int minor)
+struct mapped_device *dm_get_w(kdev_t dev)
 {
 	struct mapped_device *md;
+	int minor = MINOR(dev);
 
 	if (minor >= MAX_DEVICES)
 		return NULL;
@@ -115,7 +117,7 @@ struct mapped_device *dm_get_name_r(const char *name, int nametype)
 	struct mapped_device *md;
 
 	for (i = 0; i < MAX_DEVICES; i++) {
-		md = dm_get_r(i);
+		md = dm_get_r(mk_kdev(_major, i));
 		if (md) {
 			if (!namecmp(md, name, nametype))
 				return md;
@@ -140,7 +142,7 @@ struct mapped_device *dm_get_name_w(const char *name, int nametype)
 
       restart:
 	for (i = 0; i < MAX_DEVICES; i++) {
-		md = dm_get_r(i);
+		md = dm_get_r(mk_kdev(_major, i));
 		if (!md)
 			continue;
 
@@ -152,7 +154,7 @@ struct mapped_device *dm_get_name_w(const char *name, int nametype)
 		/* found it */
 		dm_put_r(md);
 
-		md = dm_get_w(i);
+		md = dm_get_w(mk_kdev(_major, i));
 		if (!md)
 			goto restart;
 
@@ -311,7 +313,7 @@ static int dm_blk_open(struct inode *inode, struct file *file)
 {
 	struct mapped_device *md;
 
-	md = dm_get_w(MINOR(inode->i_rdev));
+	md = dm_get_w(inode->i_rdev);
 	if (!md)
 		return -ENXIO;
 
@@ -325,7 +327,7 @@ static int dm_blk_close(struct inode *inode, struct file *file)
 {
 	struct mapped_device *md;
 
-	md = dm_get_w(MINOR(inode->i_rdev));
+	md = dm_get_w(inode->i_rdev);
 	if (!md)
 		return -ENXIO;
 
@@ -463,7 +465,7 @@ static int queue_io(struct buffer_head *bh, int rw)
 	if (!di)
 		return -ENOMEM;
 
-	md = dm_get_w(MINOR(bh->b_rdev));
+	md = dm_get_w(bh->b_rdev);
 	if (!md) {
 		free_deferred(di);
 		return -ENXIO;
@@ -551,26 +553,20 @@ static inline int __find_node(struct dm_table *t, struct buffer_head *bh)
 	return (KEYS_PER_NODE * n) + k;
 }
 
-static int request(request_queue_t * q, int rw, struct buffer_head *bh)
+static int request(request_queue_t *q, int rw, struct buffer_head *bh)
 {
 	struct mapped_device *md;
-	int r, minor = MINOR(bh->b_rdev);
-	unsigned int block_size = _blksize_size[minor];
+	int r;
 
-	md = dm_get_r(minor);
+	md = dm_get_r(bh->b_rdev);
 	if (!md) {
 		buffer_IO_error(bh);
 		return 0;
 	}
 
 	/*
-	 * Sanity checks.
+	 * Sanity check.
 	 */
-	if (bh->b_size > block_size)
-		DMERR("request is larger than block size "
-		      "b_size (%d), block size (%d)",
-		      bh->b_size, block_size);
-
 	if (bh->b_rsector & ((bh->b_size >> 9) - 1))
 		DMERR("misaligned block requested logical "
 		      "sector (%lu), b_size (%d)",
@@ -598,7 +594,7 @@ static int request(request_queue_t * q, int rw, struct buffer_head *bh)
 		 * We're in a while loop, because someone could suspend
 		 * before we get to the following read lock.
 		 */
-		md = dm_get_r(minor);
+		md = dm_get_r(bh->b_rdev);
 		if (!md) {
 			buffer_IO_error(bh);
 			return 0;
@@ -619,9 +615,10 @@ static int request(request_queue_t * q, int rw, struct buffer_head *bh)
 	return 0;
 }
 
-static int check_dev_size(int minor, unsigned long block)
+static int check_dev_size(kdev_t dev, unsigned long block)
 {
 	/* FIXME: check this */
+	int minor = MINOR(dev);
 	unsigned long max_sector = (_block_size[minor] << 1) + 1;
 	unsigned long sector = (block + 1) * (_blksize_size[minor] >> 9);
 
@@ -636,10 +633,10 @@ static int do_bmap(kdev_t dev, unsigned long block,
 {
 	struct mapped_device *md;
 	struct buffer_head bh;
-	int minor = MINOR(dev), r;
+	int r;
 	struct target *t;
 
-	md = dm_get_r(minor);
+	md = dm_get_r(dev);
 	if (!md)
 		return -ENXIO;
 
@@ -648,7 +645,7 @@ static int do_bmap(kdev_t dev, unsigned long block,
 		return -EPERM;
 	}
 
-	if (!check_dev_size(minor, block)) {
+	if (!check_dev_size(dev, block)) {
 		dm_put_r(md);
 		return -EINVAL;
 	}
@@ -657,7 +654,7 @@ static int do_bmap(kdev_t dev, unsigned long block,
 	memset(&bh, 0, sizeof(bh));
 	bh.b_blocknr = block;
 	bh.b_dev = bh.b_rdev = dev;
-	bh.b_size = _blksize_size[minor];
+	bh.b_size = _blksize_size[MINOR(dev)];
 	bh.b_rsector = block * (bh.b_size >> 9);
 
 	/* find target */
@@ -759,7 +756,7 @@ static struct mapped_device *alloc_dev(const char *name, const char *uuid,
 		return NULL;
 	}
 
-	md->dev = MKDEV(_major, minor);
+	md->dev = mk_kdev(_major, minor);
 	md->suspended = 0;
 
 	strncpy(md->name, name, sizeof(md->name) - 1);
@@ -800,27 +797,20 @@ static int __unregister_device(struct mapped_device *md)
 }
 
 /*
- * The hardsect size for a mapped device is the smallest hardsect size
+ * The hardsect size for a mapped device is the largest hardsect size
  * from the devices it maps onto.
  */
 static int __find_hardsect_size(struct list_head *devices)
 {
-	int result = INT_MAX, size;
+	int result = 512, size;
 	struct list_head *tmp;
 
 	list_for_each(tmp, devices) {
 		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
 		size = get_hardsect_size(dd->dev);
-		if (size < result)
+		if (size > result)
 			result = size;
 	}
-
-	/*
-	 * I think it's safe to assume that no block devices have
-	 * a hard sector size this large.
-	 */
-	if (result == INT_MAX)
-		result = 512;
 
 	return result;
 }
@@ -1016,7 +1006,7 @@ void dm_destroy_all(void)
 	do {
 		some_destroyed = 0;
 		for (i = 0; i < MAX_DEVICES; i++) {
-			md = dm_get_w(i);
+			md = dm_get_w(mk_kdev(_major, i));
 			if (!md)
 				continue;
 
@@ -1039,13 +1029,6 @@ void dm_set_ro(struct mapped_device *md, int ro)
 {
 	md->read_only = ro;
 	set_device_ro(md->dev, ro);
-}
-
-/*
- * A target is notifying us of some event
- */
-void dm_notify(void *target)
-{
 }
 
 /*
@@ -1107,7 +1090,7 @@ int dm_suspend(struct mapped_device *md)
 	add_wait_queue(&md->wait, &wait);
 	current->state = TASK_UNINTERRUPTIBLE;
 	do {
-		md = dm_get_w(minor);
+		md = dm_get_w(md->dev);
 		if (!md) {
 			/* Caller expects to free this lock. Yuck. */
 			down_write(_dev_locks + minor);
@@ -1144,7 +1127,7 @@ int dm_resume(struct mapped_device *md)
 	flush_deferred_io(def);
 	run_task_queue(&tq_disk);
 
-	if (!dm_get_w(minor)) {
+	if (!dm_get_w(md->dev)) {
 		/* FIXME: yuck */
 		down_write(_dev_locks + minor);
 		return -ENXIO;
