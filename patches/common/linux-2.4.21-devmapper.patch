@@ -1,5 +1,5 @@
 --- linux-2.4.21/drivers/md/dm-daemon.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.c	Wed Aug 13 14:59:40 2003
++++ linux/drivers/md/dm-daemon.c	Mon Aug 18 20:56:11 2003
 @@ -0,0 +1,113 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -115,7 +115,7 @@
 +EXPORT_SYMBOL(dm_daemon_stop);
 +EXPORT_SYMBOL(dm_daemon_wake);
 --- linux-2.4.21/drivers/md/dm-daemon.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-daemon.h	Wed Aug 13 14:56:11 2003
++++ linux/drivers/md/dm-daemon.h	Sat Jul 12 17:06:56 2003
 @@ -0,0 +1,29 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -147,7 +147,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-exception-store.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-exception-store.c	Wed Aug 13 14:57:15 2003
++++ linux/drivers/md/dm-exception-store.c	Mon Aug 18 20:56:05 2003
 @@ -0,0 +1,673 @@
 +/*
 + * dm-snapshot.c
@@ -823,7 +823,7 @@
 +	return 0;
 +}
 --- linux-2.4.21/drivers/md/dm-io.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.c	Wed Aug 13 14:56:11 2003
++++ linux/drivers/md/dm-io.c	Fri Jul  4 15:19:02 2003
 @@ -0,0 +1,344 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -1170,7 +1170,7 @@
 +EXPORT_SYMBOL(dm_io_sync);
 +EXPORT_SYMBOL(dm_io_async);
 --- linux-2.4.21/drivers/md/dm-io.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-io.h	Wed Aug 13 14:56:11 2003
++++ linux/drivers/md/dm-io.h	Sat Jul 12 17:06:55 2003
 @@ -0,0 +1,86 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -1259,8 +1259,8 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-ioctl.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-ioctl.c	Wed Aug 13 15:00:01 2003
-@@ -0,0 +1,1274 @@
++++ linux/drivers/md/dm-ioctl.c	Mon Aug 18 21:24:26 2003
+@@ -0,0 +1,1284 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
 + *
@@ -1961,40 +1961,6 @@
 +	return r;
 +}
 +
-+/*
-+ * Wait for a device to report an event
-+ */
-+static int dev_wait(struct dm_ioctl *param, size_t param_size)
-+{
-+	int r;
-+	struct mapped_device *md;
-+	DECLARE_WAITQUEUE(wq, current);
-+
-+	md = find_device(param);
-+	if (!md)
-+		return -ENXIO;
-+
-+	/*
-+	 * Wait for a notification event
-+	 */
-+	set_current_state(TASK_INTERRUPTIBLE);
-+	if (!dm_add_wait_queue(md, &wq, param->event_nr)) {
-+		schedule();
-+		dm_remove_wait_queue(md, &wq);
-+	}
-+	set_current_state(TASK_RUNNING);
-+
-+	/*
-+	 * The userland program is going to want to know what
-+	 * changed to trigger the event, so we may as well tell
-+	 * him and save an ioctl.
-+	 */
-+	r = __dev_status(md, param);
-+
-+	dm_put(md);
-+	return r;
-+}
-+
 +static inline int get_mode(struct dm_ioctl *param)
 +{
 +	int mode = FMODE_READ | FMODE_WRITE;
@@ -2273,6 +2239,50 @@
 +	return r;
 +}
 +
++/*
++ * Wait for a device to report an event
++ */
++static int dev_wait(struct dm_ioctl *param, size_t param_size)
++{
++	int r;
++	struct mapped_device *md;
++	struct dm_table *table;
++	DECLARE_WAITQUEUE(wq, current);
++
++	md = find_device(param);
++	if (!md)
++		return -ENXIO;
++
++	/*
++	 * Wait for a notification event
++	 */
++	set_current_state(TASK_INTERRUPTIBLE);
++	if (!dm_add_wait_queue(md, &wq, param->event_nr)) {
++		schedule();
++		dm_remove_wait_queue(md, &wq);
++	}
++	set_current_state(TASK_RUNNING);
++
++	/*
++	 * The userland program is going to want to know what
++	 * changed to trigger the event, so we may as well tell
++	 * him and save an ioctl.
++	 */
++	r = __dev_status(md, param);
++	if (r)
++		goto out;
++
++	table = dm_get_table(md);
++	if (table) {
++		retrieve_status(table, param, param_size);
++		dm_table_put(table);
++	}
++
++ out:
++	dm_put(md);
++	return r;
++}
++
 +/*-----------------------------------------------------------------
 + * Implementation of open/close/ioctl on the special char
 + * device.
@@ -2536,7 +2546,7 @@
 +	dm_hash_exit();
 +}
 --- linux-2.4.21/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-linear.c	Wed Aug 13 14:56:12 2003
++++ linux/drivers/md/dm-linear.c	Tue Aug 19 16:09:38 2003
 @@ -0,0 +1,123 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -2567,7 +2577,7 @@
 +	struct linear_c *lc;
 +
 +	if (argc != 2) {
-+		ti->error = "dm-linear: Not enough arguments";
++		ti->error = "dm-linear: Invalid argument count";
 +		return -EINVAL;
 +	}
 +
@@ -2662,7 +2672,7 @@
 +		DMERR("linear: unregister failed %d", r);
 +}
 --- linux-2.4.21/drivers/md/dm-log.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.c	Wed Aug 13 14:56:12 2003
++++ linux/drivers/md/dm-log.c	Tue Jun 17 17:24:26 2003
 @@ -0,0 +1,302 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -2967,7 +2977,7 @@
 +EXPORT_SYMBOL(dm_create_dirty_log);
 +EXPORT_SYMBOL(dm_destroy_dirty_log);
 --- linux-2.4.21/drivers/md/dm-log.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-log.h	Wed Aug 13 14:56:12 2003
++++ linux/drivers/md/dm-log.h	Sat Jul 12 17:06:58 2003
 @@ -0,0 +1,112 @@
 +/*
 + * Copyright (C) 2003 Sistina Software
@@ -3082,7 +3092,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-raid1.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-raid1.c	Wed Aug 13 14:56:12 2003
++++ linux/drivers/md/dm-raid1.c	Fri Jul  4 15:40:14 2003
 @@ -0,0 +1,1297 @@
 +/*
 + * Copyright (C) 2003 Sistina Software Limited.
@@ -4382,7 +4392,7 @@
 +MODULE_AUTHOR("Heinz Mauelshagen <mge@sistina.com>");
 +MODULE_LICENSE("GPL");
 --- linux-2.4.21/drivers/md/dm-snapshot.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.c	Wed Aug 13 14:56:12 2003
++++ linux/drivers/md/dm-snapshot.c	Tue Aug 19 22:14:37 2003
 @@ -0,0 +1,1235 @@
 +/*
 + * dm-snapshot.c
@@ -5620,7 +5630,7 @@
 +	kmem_cache_destroy(exception_cache);
 +}
 --- linux-2.4.21/drivers/md/dm-snapshot.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-snapshot.h	Wed Aug 13 14:56:12 2003
++++ linux/drivers/md/dm-snapshot.h	Sat Jul 12 17:06:55 2003
 @@ -0,0 +1,158 @@
 +/*
 + * dm-snapshot.c
@@ -5781,7 +5791,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-stripe.c	Wed Aug 13 14:56:12 2003
++++ linux/drivers/md/dm-stripe.c	Fri Jul  4 15:43:21 2003
 @@ -0,0 +1,258 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -6042,8 +6052,8 @@
 +	return;
 +}
 --- linux-2.4.21/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-table.c	Wed Aug 13 14:56:12 2003
-@@ -0,0 +1,687 @@
++++ linux/drivers/md/dm-table.c	Tue Aug 19 15:43:50 2003
+@@ -0,0 +1,708 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
 + *
@@ -6063,6 +6073,7 @@
 +#define NODE_SIZE L1_CACHE_BYTES
 +#define KEYS_PER_NODE (NODE_SIZE / sizeof(sector_t))
 +#define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
++#define MAX_TARGET_ARGS 64
 +
 +struct dm_table {
 +	atomic_t holders;
@@ -6489,10 +6500,16 @@
 +/*
 + * Destructively splits up the argument list to pass to ctr.
 + */
-+static int split_args(int max, int *argc, char **argv, char *input)
++static int split_args(int *argc, char ***argvp, char *input)
 +{
 +	char *start, *end = input, *out;
++	char **argv;
++	int max_args = MAX_TARGET_ARGS;
++
 +	*argc = 0;
++	argv = kmalloc(sizeof(*argv) * max_args, GFP_NOIO);
++	if (!argv)
++		return -ENOMEM;
 +
 +	while (1) {
 +		start = end;
@@ -6521,8 +6538,20 @@
 +		}
 +
 +		/* have we already filled the array ? */
-+		if ((*argc + 1) > max)
-+			return -EINVAL;
++		if ((*argc + 1) > max_args) {
++			char **argv2;
++			
++			max_args *= 2;
++			argv2 = kmalloc(sizeof(*argv2) * max_args, GFP_NOIO);
++			if (!argv2) {
++				kfree(argv);
++				return -ENOMEM;
++			}
++
++			memcpy(argv2, argv, sizeof(*argv) * *argc);
++			kfree(argv);
++			argv = argv2;
++		}
 +
 +		/* we know this is whitespace */
 +		if (*end)
@@ -6534,6 +6563,7 @@
 +		(*argc)++;
 +	}
 +
++	*argvp = argv;
 +	return 0;
 +}
 +
@@ -6541,7 +6571,7 @@
 +			sector_t start, sector_t len, char *params)
 +{
 +	int r = -EINVAL, argc;
-+	char *argv[32];
++	char **argv;
 +	struct dm_target *tgt;
 +
 +	if ((r = check_space(t)))
@@ -6570,13 +6600,14 @@
 +		goto bad;
 +	}
 +
-+	r = split_args(ARRAY_SIZE(argv), &argc, argv, params);
++	r = split_args(&argc, &argv, params);
 +	if (r) {
-+		tgt->error = "couldn't split parameters";
++		tgt->error = "couldn't split parameters (insufficient memory)";
 +		goto bad;
 +	}
 +
 +	r = tgt->type->ctr(tgt, argc, argv);
++	kfree(argv);
 +	if (r)
 +		goto bad;
 +
@@ -6732,7 +6763,7 @@
 +EXPORT_SYMBOL(dm_table_event);
 +EXPORT_SYMBOL(dm_table_get_mode);
 --- linux-2.4.21/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm-target.c	Wed Aug 13 14:56:12 2003
++++ linux/drivers/md/dm-target.c	Tue Jun 17 17:24:26 2003
 @@ -0,0 +1,188 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited
@@ -6923,7 +6954,7 @@
 +EXPORT_SYMBOL(dm_register_target);
 +EXPORT_SYMBOL(dm_unregister_target);
 --- linux-2.4.21/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.c	Wed Aug 13 14:56:12 2003
++++ linux/drivers/md/dm.c	Fri Jul  4 16:14:39 2003
 @@ -0,0 +1,1115 @@
 +/*
 + * Copyright (C) 2001, 2002 Sistina Software (UK) Limited.
@@ -8041,7 +8072,7 @@
 +
 +EXPORT_SYMBOL(dm_kdevname);
 --- linux-2.4.21/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Wed Aug 13 14:56:12 2003
++++ linux/drivers/md/dm.h	Sat Jul 12 17:06:52 2003
 @@ -0,0 +1,175 @@
 +/*
 + * Internal header file for device mapper
@@ -8219,7 +8250,7 @@
 +
 +#endif
 --- linux-2.4.21/drivers/md/kcopyd.c	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.c	Wed Aug 13 14:58:15 2003
++++ linux/drivers/md/kcopyd.c	Mon Aug 18 20:56:07 2003
 @@ -0,0 +1,650 @@
 +/*
 + * Copyright (C) 2002 Sistina Software (UK) Limited.
@@ -8872,7 +8903,7 @@
 +EXPORT_SYMBOL(kcopyd_copy);
 +EXPORT_SYMBOL(kcopyd_cancel);
 --- linux-2.4.21/drivers/md/kcopyd.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/kcopyd.h	Wed Aug 13 14:56:12 2003
++++ linux/drivers/md/kcopyd.h	Sat Jul 12 17:06:55 2003
 @@ -0,0 +1,47 @@
 +/*
 + * Copyright (C) 2001 Sistina Software
@@ -8922,7 +8953,7 @@
 +
 +#endif
 --- linux-2.4.21/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Wed Aug 13 14:56:12 2003
++++ linux/include/linux/device-mapper.h	Tue Jun 17 17:24:26 2003
 @@ -0,0 +1,104 @@
 +/*
 + * Copyright (C) 2001 Sistina Software (UK) Limited.
@@ -9029,7 +9060,7 @@
 +
 +#endif				/* _LINUX_DEVICE_MAPPER_H */
 --- linux-2.4.21/include/linux/dm-ioctl.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/dm-ioctl.h	Wed Aug 13 14:56:12 2003
++++ linux/include/linux/dm-ioctl.h	Mon Aug 18 21:08:03 2003
 @@ -0,0 +1,237 @@
 +/*
 + * Copyright (C) 2001 - 2003 Sistina Software (UK) Limited.
@@ -9240,8 +9271,8 @@
 +
 +#define DM_VERSION_MAJOR	4
 +#define DM_VERSION_MINOR	0
-+#define DM_VERSION_PATCHLEVEL	1
-+#define DM_VERSION_EXTRA	"-ioctl (2003-07-12)"
++#define DM_VERSION_PATCHLEVEL	2
++#define DM_VERSION_EXTRA	"-ioctl (2003-08-19)"
 +
 +/* Status bits */
 +#define DM_READONLY_FLAG	(1 << 0) /* In/Out */
