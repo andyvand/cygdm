@@ -75,8 +75,8 @@ AC_ARG_ENABLE(debug,    [  --enable-debug          Enable debugging],  \
 DEBUG=yes, DEBUG=no)
 
 dnl Disable Compatibility mode
-AC_ARG_ENABLE(compat,   [  --disable-compat        Disable support for old device-mapper versions],  \
-COMPAT=no, COMPAT=yes)
+AC_ARG_ENABLE(compat,   [  --enable-compat         Enable support for old device-mapper versions],  \
+COMPAT=yes, COMPAT=no)
 
 dnl Clear default exec_prefix - install into /sbin rather than /usr/sbin
 if [[ "x$exec_prefix" = xNONE -a "x$prefix" = xNONE ]];

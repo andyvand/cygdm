@@ -21,7 +21,7 @@ ac_help="$ac_help
 ac_help="$ac_help
   --enable-debug          Enable debugging"
 ac_help="$ac_help
-  --disable-compat        Disable support for old device-mapper versions"
+  --enable-compat         Enable support for old device-mapper versions"
 ac_help="$ac_help
   --with-kernel-dir=DIR   linux kernel source in DIR []"
 ac_help="$ac_help
@@ -1734,9 +1734,9 @@ fi
 if test "${enable_compat+set}" = set; then
   enableval="$enable_compat"
   \
-COMPAT=no
+COMPAT=yes
 else
-  COMPAT=yes
+  COMPAT=no
 fi
 
 
