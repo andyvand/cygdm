@@ -30,15 +30,17 @@ major=2
 #major=`ls src/.libs/lib*.so.* | \
 # awk '{if (match($$0,/\.so\.[0-9]+$$/)) print substr($$0,RSTART+4)}'`
 
+KERNEL=2.4.19
+
 header-update:
 	# This isn't actually used; it's here for my own personal reference.
-	rm -f debian/include/linux/*.h
-	cd debian && tar jxvf /usr/src/kernel-source-2.4.18.tar.bz2 && \
+	rm -rf debian/include/*
+	cd debian && tar jxvf /usr/src/kernel-source-$(KERNEL).tar.bz2 && \
 			./scripts/strippatch.pl \
-			../patches/linux-2.4.18-devmapper-ioctl.patch | \
-			./scripts/includes.pl kernel-source-2.4.18/ | \
+			../patches/linux-$(KERNEL)-devmapper-ioctl.patch  | \
+			./scripts/includes.pl kernel-source-$(KERNEL)/ | \
 			patch -p1 && \
-			rm -rf kernel-source-2.4.18
+			rm -rf kernel-source-$(KERNEL)/
 
 configure: configure-stamp
 configure-stamp:
@@ -50,7 +52,7 @@ configure-stamp:
 			--infodir=\$${prefix}/share/info \
 			--libdir=$(CURDIR)/debian/tmp/lib \
 			--with-kernel-dir=$(CURDIR)/debian \
-			--with-kernel-version=2.4.18
+			--with-kernel-version=$(KERNEL)
 	touch configure-stamp
 
 build: build-stamp
@@ -86,10 +88,12 @@ install: build
 	# Add here commands to install the package into debian/tmp
 	$(MAKE) install prefix=$(CURDIR)/debian/tmp/usr
 
-	# libdevmapper-dev should have its .so in /usr.
+	# libdevmapper-dev should have its .so in /usr/lib.
+	rm -f $(CURDIR)/debian/tmp/lib/libdevmapper.so
 	install -d $(CURDIR)/debian/tmp/usr/lib
-	ln -s /lib/libdevmapper.so.0.95 \
+	ln -s /lib/libdevmapper.so.0.96 \
 			$(CURDIR)/debian/tmp/usr/lib/libdevmapper.so
+	ln -s libdevmapper.so.0.96 $(CURDIR)/debian/tmp/lib/libdevmapper.so.0
 
 # Build architecture-independent files here.
 binary-indep: build install

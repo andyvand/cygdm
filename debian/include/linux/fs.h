@@ -217,13 +217,16 @@ enum bh_state_bits {
 	BH_New,		/* 1 if the buffer is new and not yet written out */
 	BH_Async,	/* 1 if the buffer is under end_buffer_io_async I/O */
 	BH_Wait_IO,	/* 1 if we should write out this buffer */
-	BH_launder,	/* 1 if we should throttle on this buffer */
+	BH_Launder,	/* 1 if we can throttle on this buffer */
 	BH_JBD,		/* 1 if it has an attached journal_head */
+	BH_Inode,	/* 1 if it is attached to i_dirty[_data]_buffers */
 
 	BH_PrivateStart,/* not a state bit, but the first bit available
 			 * for private allocation by other entities
 			 */
 };
+
+#define MAX_BUF_PER_PAGE (PAGE_CACHE_SIZE / 512)
 
 /*
  * Try to keep the most commonly used fields in single cache lines (16
@@ -258,15 +261,11 @@ struct buffer_head {
 	char * b_data;			/* pointer to data block */
 	struct page *b_page;		/* the page this bh is mapped to */
 	void (*b_end_io)(struct buffer_head *bh, int uptodate); /* I/O completion */
- 	void *b_private;		/* reserved for b_end_io, also used by ext3 */
-	void *b_bdev_private;	        /* a hack to get around ext3 using b_private
-					 * after handing the buffer_head to the
-					 * block layer */
-
+ 	void *b_private;		/* reserved for b_end_io */
+ 	void *b_journal_head;		/* ext3 journal_heads */
 	unsigned long b_rsector;	/* Real buffer location on disk */
 	wait_queue_head_t b_wait;
 
-	struct inode *	     b_inode;
 	struct list_head     b_inode_buffers;	/* doubly linked list of inode dirty buffers */
 };
 
@@ -282,6 +281,7 @@ void init_buffer(struct buffer_head *, bh_end_io_t *, void *);
 #define buffer_mapped(bh)	__buffer_state(bh,Mapped)
 #define buffer_new(bh)		__buffer_state(bh,New)
 #define buffer_async(bh)	__buffer_state(bh,Async)
+#define buffer_launder(bh)	__buffer_state(bh,Launder)
 
 #define bh_offset(bh)		((unsigned long)(bh)->b_data & ~PAGE_MASK)
 
@@ -552,6 +552,14 @@ extern spinlock_t files_lock;
 extern int init_private_file(struct file *, struct dentry *, int);
 
 #define	MAX_NON_LFS	((1UL<<31) - 1)
+
+/* Page cache limit. The filesystems should put that into their s_maxbytes 
+   limits, otherwise bad things can happen in VM. */ 
+#if BITS_PER_LONG==32
+#define MAX_LFS_FILESIZE	(((u64)PAGE_CACHE_SIZE << (BITS_PER_LONG-1))-1) 
+#elif BITS_PER_LONG==64
+#define MAX_LFS_FILESIZE 	0x7fffffffffffffff
+#endif
 
 #define FL_POSIX	1
 #define FL_FLOCK	2
@@ -987,6 +995,7 @@ extern int unregister_filesystem(struct file_system_type *);
 extern struct vfsmount *kern_mount(struct file_system_type *);
 extern int may_umount(struct vfsmount *);
 extern long do_mount(char *, char *, char *, unsigned long, void *);
+extern void umount_tree(struct vfsmount *);
 
 #define kern_umount mntput
 
@@ -1105,7 +1114,7 @@ extern struct file_operations rdwr_pipe_fops;
 
 extern int fs_may_remount_ro(struct super_block *);
 
-extern int try_to_free_buffers(struct page *, unsigned int);
+extern int FASTCALL(try_to_free_buffers(struct page *, unsigned int));
 extern void refile_buffer(struct buffer_head * buf);
 extern void create_empty_buffers(struct page *, kdev_t, unsigned long);
 extern void end_buffer_io_sync(struct buffer_head *bh, int uptodate);
@@ -1156,9 +1165,13 @@ static inline void mark_buffer_clean(struct buffer_head * bh)
 extern void FASTCALL(__mark_dirty(struct buffer_head *bh));
 extern void FASTCALL(__mark_buffer_dirty(struct buffer_head *bh));
 extern void FASTCALL(mark_buffer_dirty(struct buffer_head *bh));
+extern void FASTCALL(buffer_insert_inode_queue(struct buffer_head *, struct inode *));
 extern void FASTCALL(buffer_insert_inode_data_queue(struct buffer_head *, struct inode *));
 
-#define atomic_set_buffer_dirty(bh) test_and_set_bit(BH_Dirty, &(bh)->b_state)
+static inline int atomic_set_buffer_dirty(struct buffer_head *bh)
+{
+	return test_and_set_bit(BH_Dirty, &bh->b_state);
+}
 
 static inline void mark_buffer_async(struct buffer_head * bh, int on)
 {
@@ -1166,6 +1179,21 @@ static inline void mark_buffer_async(struct buffer_head * bh, int on)
 		set_bit(BH_Async, &bh->b_state);
 	else
 		clear_bit(BH_Async, &bh->b_state);
+}
+
+static inline void set_buffer_inode(struct buffer_head *bh)
+{
+	set_bit(BH_Inode, &bh->b_state);
+}
+
+static inline void clear_buffer_inode(struct buffer_head *bh)
+{
+	clear_bit(BH_Inode, &bh->b_state);
+}
+
+static inline int buffer_inode(struct buffer_head *bh)
+{
+	return test_bit(BH_Inode, &bh->b_state);
 }
 
 /*
@@ -1183,7 +1211,6 @@ static inline void buffer_IO_error(struct buffer_head * bh)
 	bh->b_end_io(bh, 0);
 }
 
-extern void buffer_insert_inode_queue(struct buffer_head *, struct inode *);
 static inline void mark_buffer_dirty_inode(struct buffer_head *bh, struct inode *inode)
 {
 	mark_buffer_dirty(bh);
@@ -1211,10 +1238,15 @@ extern int fsync_dev(kdev_t);
 extern int fsync_super(struct super_block *);
 extern int fsync_no_super(kdev_t);
 extern void sync_inodes_sb(struct super_block *);
-extern int osync_inode_buffers(struct inode *);
-extern int osync_inode_data_buffers(struct inode *);
-extern int fsync_inode_buffers(struct inode *);
-extern int fsync_inode_data_buffers(struct inode *);
+extern int fsync_buffers_list(struct list_head *);
+static inline int fsync_inode_buffers(struct inode *inode)
+{
+	return fsync_buffers_list(&inode->i_dirty_buffers);
+}
+static inline int fsync_inode_data_buffers(struct inode *inode)
+{
+	return fsync_buffers_list(&inode->i_dirty_data_buffers);
+}
 extern int inode_has_buffers(struct inode *);
 extern int filemap_fdatasync(struct address_space *);
 extern int filemap_fdatawait(struct address_space *);
@@ -1368,6 +1400,8 @@ static inline void bforget(struct buffer_head *buf)
 		__bforget(buf);
 }
 extern int set_blocksize(kdev_t, int);
+extern int sb_set_blocksize(struct super_block *, int);
+extern int sb_min_blocksize(struct super_block *, int);
 extern struct buffer_head * bread(kdev_t, int, int);
 static inline struct buffer_head * sb_bread(struct super_block *sb, int block)
 {
@@ -1430,7 +1464,12 @@ extern int page_follow_link(struct dentry *, struct nameidata *);
 extern struct inode_operations page_symlink_inode_operations;
 
 extern int vfs_readdir(struct file *, filldir_t, void *);
+extern int dcache_dir_open(struct inode *, struct file *);
+extern int dcache_dir_close(struct inode *, struct file *);
+extern loff_t dcache_dir_lseek(struct file *, loff_t, int);
+extern int dcache_dir_fsync(struct file *, struct dentry *, int);
 extern int dcache_readdir(struct file *, void *, filldir_t);
+extern struct file_operations dcache_dir_ops;
 
 extern struct file_system_type *get_fs_type(const char *name);
 extern struct super_block *get_super(kdev_t);
@@ -1451,11 +1490,9 @@ extern char root_device_name[];
 
 
 extern void show_buffers(void);
-extern void mount_root(void);
 
 #ifdef CONFIG_BLK_DEV_INITRD
 extern unsigned int real_root_dev;
-extern int change_root(kdev_t, const char *);
 #endif
 
 extern ssize_t char_read(struct file *, char *, size_t, loff_t *);
