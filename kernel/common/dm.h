@@ -85,8 +85,6 @@ struct mapped_device {
 	kdev_t dev;
 	char name[DM_NAME_LEN];
 
-	atomic_t ref_count;
-
 	int use_count;
 	int suspended;
 	int read_only;
@@ -117,14 +115,26 @@ int split_args(int max, int *argc, char **argv, char *input);
 
 
 /* dm.c */
-struct mapped_device *dm_get(const char *name);
-void dm_put(struct mapped_device *md);
-int dm_create(const char *name, int minor, struct dm_table *table,
-	      struct mapped_device **result);
+struct mapped_device *dm_get_r(int minor);
+struct mapped_device *dm_get_w(int minor);
+struct mapped_device *dm_get_name_r(const char *name);
+struct mapped_device *dm_get_name_w(const char *name);
+
+void dm_put_r(int minor);
+void dm_put_w(int minor);
+
+/*
+ * Call with no lock.
+ */
+int dm_create(const char *name, int minor, struct dm_table *table);
+int dm_set_name(const char *oldname, const char *newname);
+
+/*
+ * You must have the write lock before calling the remaining md
+ * methods.
+ */
 int dm_destroy(struct mapped_device *md);
 void dm_set_ro(struct mapped_device *md, int ro);
-int dm_set_name(struct mapped_device *md, const char *newname);
-void dm_notify(void *target);
 
 /*
  * The device must be suspended before calling this method.
@@ -137,6 +147,12 @@ int dm_swap_table(struct mapped_device *md, struct dm_table *t);
 int dm_suspend(struct mapped_device *md);
 int dm_resume(struct mapped_device *md);
 
+/*
+ * Event notification
+ */
+void dm_notify(void *target);
+
+
 /* dm-table.c */
 int dm_table_create(struct dm_table **result);
 void dm_table_destroy(struct dm_table *t);
@@ -146,7 +162,8 @@ int dm_table_add_target(struct dm_table *t, offset_t highs,
 int dm_table_complete(struct dm_table *t);
 
 /* kcopyd.c */
-int dm_blockcopy(unsigned long fromsec, unsigned long tosec, unsigned long nr_sectors,
+int dm_blockcopy(unsigned long fromsec, unsigned long tosec, 
+		 unsigned long nr_sectors,
 		 kdev_t fromdev, kdev_t todev,
 		 int throttle, void (*callback)(int, void *), void *context);
 

@@ -136,6 +136,8 @@ static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
 		if (r < 0) {
 			*context = "dm-stripe: Couldn't parse stripe "
 				   "destination";
+			while (i--)
+				dm_table_put_device(t, sc->stripe[i].dev);
 			kfree(sc);
 			return r;
 		}

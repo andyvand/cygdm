@@ -115,10 +115,10 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 
 	for (i = 0; i < args->target_count; i++) {
 
-		r = first ? next_target((struct dm_target_spec *)args, 
+		r = first ? next_target((struct dm_target_spec *)args,
 					args->data_start,
 					begin, end, &spec, &params) :
-			    next_target(spec, spec->next, 
+			    next_target(spec, spec->next,
 					begin, end, &spec, &params);
 
 		if (r)
@@ -163,15 +163,17 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
  */
 static int info(const char *name, struct dm_ioctl *user)
 {
+	int minor;
 	struct dm_ioctl param;
-	struct mapped_device *md = dm_get(name);
+	struct mapped_device *md;
 
 	param.flags = 0;
-
 	strncpy(param.version, DM_IOCTL_VERSION, sizeof(param.version));
 
+	md  = dm_get_name_r(name);
 	if (!md)
 		goto out;
+	minor = MINOR(md->dev);
 
 	param.flags |= DM_EXISTS_FLAG;
 	if (md->suspended)
@@ -187,9 +189,9 @@ static int info(const char *name, struct dm_ioctl *user)
 	param.dev = kdev_t_to_nr(md->dev);
 	param.target_count = md->map->num_targets;
 
-	dm_put(md);
+	dm_put_r(minor);
 
-      out:
+ out:
 	return copy_to_user(user, &param, sizeof(param));
 }
 
@@ -205,106 +207,113 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 		return r;
 
 	r = populate_table(t, param);
-	if (r)
-		goto bad;
-
-	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
-		minor = MINOR(to_kdev_t(param->dev)) : -1;
-
-	r = dm_create(param->name, minor, t, &md);
-	if (r)
-		goto bad;
-
-	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
-
-	r = info(param->name, user);
 	if (r) {
-		dm_destroy(md);
-		goto bad;
+		dm_table_destroy(t);
+		return r;
 	}
 
-	dm_put(md);
-	return 0;
+	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
+		MINOR(to_kdev_t(param->dev)) : -1;
 
-      bad:
-	dm_table_destroy(t);
+	r = dm_create(param->name, minor, t);
+	if (r) {
+		dm_table_destroy(t);
+		return r;
+	}
+
+	md = dm_get_name_w(param->name);
+	if (!md)
+		/* shouldn't get here */
+		return -EINVAL;
+
+	minor = MINOR(md->dev);
+	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
+	dm_put_w(minor);
+
+	r = info(param->name, user);
 	return r;
 }
 
 static int remove(struct dm_ioctl *param)
 {
-	struct mapped_device *md = dm_get(param->name);
+	int r, minor;
+	struct mapped_device *md;
 
+	md = dm_get_name_w(param->name);
 	if (!md)
 		return -ENXIO;
 
-	return dm_destroy(md);
+	minor = MINOR(md->dev);
+	r = dm_destroy(md);
+	dm_put_w(minor);
+
+	return r;
 }
 
 static int suspend(struct dm_ioctl *param)
 {
-	int r;
-	struct mapped_device *md = dm_get(param->name);
+	int r, minor;
+	struct mapped_device *md;
 
+	md = dm_get_name_w(param->name);
 	if (!md)
 		return -ENXIO;
 
-	r = (param->flags & DM_SUSPEND_FLAG) ? 
+	minor = MINOR(md->dev);
+	r = (param->flags & DM_SUSPEND_FLAG) ?
 	     dm_suspend(md) : dm_resume(md);
-	dm_put(md);
+	dm_put_w(minor);
+
 	return r;
 }
 
 static int reload(struct dm_ioctl *param)
 {
-	int r;
-	struct mapped_device *md = dm_get(param->name);
+	int r, minor;
+	struct mapped_device *md;
 	struct dm_table *t;
-
-	if (!md)
-		return -ENXIO;
 
 	r = dm_table_create(&t);
 	if (r)
-		goto bad_no_table;
+		return r;
 
 	r = populate_table(t, param);
-	if (r)
-		goto bad;
+	if (r) {
+		dm_table_destroy(t);
+		return r;
+	}
+
+	md = dm_get_name_w(param->name);
+	if (!md) {
+		dm_table_destroy(t);
+		return -ENXIO;
+	}
+
+	minor = MINOR(md->dev);
 
 	r = dm_swap_table(md, t);
-	if (r)
-		goto bad;
+	if (r) {
+		dm_put_w(minor);
+		dm_table_destroy(t);
+		return r;
+	}
 
 	dm_set_ro(md, (param->flags & DM_READONLY_FLAG) ? 1 : 0);
-
-	dm_put(md);
+	dm_put_w(minor);
 	return 0;
-
-      bad:
-	dm_table_destroy(t);
-
-      bad_no_table:
-	dm_put(md);
-	return r;
 }
 
 static int rename(struct dm_ioctl *param)
 {
 	char *newname = (char *) param + param->data_start;
-	struct mapped_device *md = dm_get(param->name);
 
-	if (!md)
-		return -ENXIO;
-
-	if (valid_str(newname, (void *)param, 
-		       (void *)param + param->data_size) ||
-	    dm_set_name(md, newname)) {
+	if (valid_str(newname, (void *) param,
+		      (void *) param + param->data_size) ||
+	    dm_set_name(param->name, newname)) {
 		dm_error("Invalid new logical volume name supplied.");
 		return -EINVAL;
 	}
 
-	dm_put(md);
 	return 0;
 }
 
@@ -410,7 +419,7 @@ int dm_interface_init(void)
 	}
 
 	strncpy(rname + r, "../", 3);
-	r = devfs_mk_symlink(NULL, DM_DIR "/control", 
+	r = devfs_mk_symlink(NULL, DM_DIR "/control",
 			     DEVFS_FL_DEFAULT, rname + r,
 			     &_ctl_handle, NULL);
 	if (r) {
