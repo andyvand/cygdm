@@ -114,6 +114,8 @@ SUBDIRS.distclean := $(SUBDIRS:=.distclean)
 .PHONY: $(SUBDIRS) $(SUBDIRS.install) $(SUBDIRS.clean) $(SUBDIRS.distclean)
 .PHONY: $(SUBDIRS.pofile)
 
+TARGETS += $(LIB_SHARED) $(LIB_STATIC)
+
 all: $(SUBDIRS) $(TARGETS)
 
 install: all $(SUBDIRS.install)
