@@ -16,8 +16,6 @@
 #define DEFAULT_READ_AHEAD 64
 
 static const char *_name = DM_NAME;
-static const char *_version = @DM_DRIVER_VERSION@;
-static const char *_email = "lvm-devel@lists.sistina.com";
 
 static int major = 0;
 static int _major = 0;
@@ -235,7 +233,6 @@ static __init int local_init(void)
 
 	_dev_dir = devfs_mk_dir(0, DM_DIR, NULL);
 
-	DMINFO("%s initialised: %s", _version, _email);
 	return 0;
 }
 
@@ -254,7 +251,7 @@ static void local_exit(void)
 	hardsect_size[_major] = NULL;
 	_major = 0;
 
-	DMINFO("%s cleaned up", _version);
+	DMINFO("cleaned up");
 }
 
 /*
@@ -818,6 +815,14 @@ static int __find_hardsect_size(struct list_head *devices)
 		if (size < result)
 			result = size;
 	}
+
+	/*
+	 * I think it's safe to assume that no block devices have
+	 * a hard sector size this large.
+	 */
+	if (result == INT_MAX)
+		result = 512;
+
 	return result;
 }
 

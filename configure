@@ -1962,16 +1962,6 @@ else
   DM_LIB_VERSION="Unknown version ($interface)"
 fi
 
-if test "-f kernel/VERSION"; then
-  DM_DRIVER_VERSION="\"`cat kernel/VERSION|sed -e \"s/[0-9.]*/\0-$interface/\"`\""
-  DM_IOCTL_VERSION="\"`cat kernel/VERSION| awk -F '.' '{printf \"%s.%s\",\$1,\$2}'`\""
-else
-  DM_DRIVER_VERSION="Unknown"
-  DM_IOCTL_VERSION="Unknown"
-fi
-
-
-
 
 
 
@@ -2102,8 +2092,6 @@ dmsetup/Makefile							\
 lib/Makefile							 	\
 lib/libdm-common.h						 	\
 kernel/Makefile								\
-kernel/common/dm.c							\
-kernel/ioctl/dm-ioctl.h							\
 man/Makefile								\
 " | sed "s/:[^ ]*//g"` conftest*; exit 1' 1 2 15
 EOF
@@ -2153,8 +2141,6 @@ s%@interface@%$interface%g
 s%@kerneldir@%$kerneldir%g
 s%@kernelvsn@%$kernelvsn%g
 s%@tmpdir@%$tmpdir%g
-s%@DM_DRIVER_VERSION@%$DM_DRIVER_VERSION%g
-s%@DM_IOCTL_VERSION@%$DM_IOCTL_VERSION%g
 s%@DM_LIB_VERSION@%$DM_LIB_VERSION%g
 
 CEOF
@@ -2205,8 +2191,6 @@ dmsetup/Makefile							\
 lib/Makefile							 	\
 lib/libdm-common.h						 	\
 kernel/Makefile								\
-kernel/common/dm.c							\
-kernel/ioctl/dm-ioctl.h							\
 man/Makefile								\
 "}
 EOF

@@ -11,59 +11,22 @@
 #include <linux/init.h>
 #include <linux/wait.h>
 
-static void free_params(struct dm_ioctl *param)
+/*-----------------------------------------------------------------
+ * Implementation of the ioctl commands
+ *---------------------------------------------------------------*/
+
+/*
+ * All the ioctl commands get dispatched to functions with this
+ * prototype.
+ */
+typedef int (*ioctl_fn)(struct dm_ioctl *param, struct dm_ioctl *user);
+
+/*
+ * This is really a debug only call.
+ */
+static int remove_all(struct dm_ioctl *param, struct dm_ioctl *user)
 {
-	vfree(param);
-}
-
-static int version(struct dm_ioctl *user)
-{
-	return copy_to_user(user, DM_DRIVER_VERSION, sizeof(DM_DRIVER_VERSION));
-}
-
-static int copy_params(struct dm_ioctl *user, struct dm_ioctl **param)
-{
-	struct dm_ioctl tmp, *dmi;
-
-	if (copy_from_user(&tmp, user, sizeof(tmp)))
-		return -EFAULT;
-
-	if (strcmp(DM_IOCTL_VERSION, tmp.version)) {
-		DMWARN("struct dm_ioctl version incompatible");
-		return -EINVAL;
-	}
-
-	if (tmp.data_size < sizeof(tmp))
-		return -EINVAL;
-
-	dmi = (struct dm_ioctl *) vmalloc(tmp.data_size);
-	if (!dmi)
-		return -ENOMEM;
-
-	if (copy_from_user(dmi, user, tmp.data_size)) {
-		vfree(dmi);
-		return -EFAULT;
-	}
-
-	*param = dmi;
-	return 0;
-}
-
-static int validate_params(uint cmd, struct dm_ioctl *param)
-{
-	/* Unless creating, either name of uuid but not both */
-	if (cmd != DM_CREATE_CMD) {
-		if ((!*param->uuid && !*param->name) ||
-		    (*param->uuid && *param->name)) {
-			DMWARN("one of name or uuid must be supplied");
-			return -EINVAL;
-		}
-	}
-
-	/* Ensure strings are terminated */
-	param->name[DM_NAME_LEN - 1] = '\0';
-	param->uuid[DM_UUID_LEN - 1] = '\0';
-
+	dm_destroy_all();
 	return 0;
 }
 
@@ -80,7 +43,7 @@ static int valid_str(char *str, void *begin, void *end)
 	return -EINVAL;
 }
 
-static int next_target(struct dm_target_spec *last, unsigned long next,
+static int next_target(struct dm_target_spec *last, uint32_t next,
 		       void *begin, void *end,
 		       struct dm_target_spec **spec, char **params)
 {
@@ -130,10 +93,13 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 
 	for (i = 0; i < args->target_count; i++) {
 
-		r = first ? next_target((struct dm_target_spec *) args,
+		if (first)
+			r = next_target((struct dm_target_spec *) args,
 					args->data_start,
-					begin, end, &spec, &params) :
-		    next_target(spec, spec->next, begin, end, &spec, &params);
+					begin, end, &spec, &params);
+		else
+			r = next_target(spec, spec->next, begin, end,
+					&spec, &params);
 
 		if (r)
 			PARSE_ERROR("unable to find target");
@@ -187,26 +153,31 @@ static inline void *align_ptr(void *ptr, unsigned int align)
  * userland.
  */
 static int results_to_user(struct dm_ioctl *user, struct dm_ioctl *param,
-			   void *data, unsigned long len)
+			   void *data, uint32_t len)
 {
 	int r;
 	void *ptr = NULL;
-
-	strncpy(param->version, DM_IOCTL_VERSION, sizeof(param->version));
 
 	if (data) {
 		ptr = align_ptr(user + 1, sizeof(unsigned long));
 		param->data_start = ptr - (void *) user;
 	}
 
-	r = copy_to_user(user, param, sizeof(*param));
+	/*
+	 * The version number has already been filled in, so we
+	 * just copy later fields.
+	 */
+	r = copy_to_user(&user->data_size, &param->data_size,
+			 sizeof(*param) - sizeof(param->version));
 	if (r)
-		return r;
+		return -EFAULT;
 
 	if (data) {
 		if (param->data_start + len > param->data_size)
 			return -ENOSPC;
-		r = copy_to_user(ptr, data, len);
+
+		if (copy_to_user(ptr, data, len))
+			r = -EFAULT;
 	}
 
 	return r;
@@ -258,6 +229,63 @@ static void *_align(void *ptr, unsigned int a)
 }
 
 /*
+ * Copies device info back to user space, used by
+ * the create and info ioctls.
+ */
+static int info(struct dm_ioctl *param, struct dm_ioctl *user)
+{
+	struct mapped_device *md;
+
+	param->flags = 0;
+
+	md = dm_get_name_r(lookup_name(param), lookup_type(param));
+	if (!md)
+		/*
+		 * Device not found - returns cleared exists flag.
+		 */
+		goto out;
+
+	__info(md, param);
+	dm_put_r(md);
+
+      out:
+	return results_to_user(user, param, NULL, 0);
+}
+
+static int create(struct dm_ioctl *param, struct dm_ioctl *user)
+{
+	int r, ro;
+	struct dm_table *t;
+	int minor;
+
+	r = dm_table_create(&t);
+	if (r)
+		return r;
+
+	r = populate_table(t, param);
+	if (r) {
+		dm_table_destroy(t);
+		return r;
+	}
+
+	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
+	    MINOR(to_kdev_t(param->dev)) : -1;
+
+	ro = (param->flags & DM_READONLY_FLAG) ? 1 : 0;
+
+	r = dm_create(param->name, param->uuid, minor, ro, t);
+	if (r) {
+		dm_table_destroy(t);
+		return r;
+	}
+
+	r = info(param, user);
+	return r;
+}
+
+
+
+/*
  * Build up the status struct for each target
  */
 static int __status(struct mapped_device *md, struct dm_ioctl *param,
@@ -265,7 +293,7 @@ static int __status(struct mapped_device *md, struct dm_ioctl *param,
 {
 	int i;
 	struct dm_target_spec *spec;
-	unsigned long long sector = 0LL;
+	uint64_t sector = 0LL;
 	char *outptr;
 	status_type_t type;
 
@@ -397,30 +425,6 @@ static int wait_device_event(struct dm_ioctl *param, struct dm_ioctl *user)
 }
 
 /*
- * Copies device info back to user space, used by
- * the create and info ioctls.
- */
-static int info(struct dm_ioctl *param, struct dm_ioctl *user)
-{
-	struct mapped_device *md;
-
-	param->flags = 0;
-
-	md = dm_get_name_r(lookup_name(param), lookup_type(param));
-	if (!md)
-		/*
-		 * Device not found - returns cleared exists flag.
-		 */
-		goto out;
-
-	__info(md, param);
-	dm_put_r(md);
-
-      out:
-	return results_to_user(user, param, NULL, 0);
-}
-
-/*
  * Retrieves a list of devices used by a particular dm device.
  */
 static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
@@ -481,38 +485,7 @@ static int dep(struct dm_ioctl *param, struct dm_ioctl *user)
 	return r;
 }
 
-static int create(struct dm_ioctl *param, struct dm_ioctl *user)
-{
-	int r, ro;
-	struct dm_table *t;
-	int minor;
-
-	r = dm_table_create(&t);
-	if (r)
-		return r;
-
-	r = populate_table(t, param);
-	if (r) {
-		dm_table_destroy(t);
-		return r;
-	}
-
-	minor = (param->flags & DM_PERSISTENT_DEV_FLAG) ?
-	    MINOR(to_kdev_t(param->dev)) : -1;
-
-	ro = (param->flags & DM_READONLY_FLAG) ? 1 : 0;
-
-	r = dm_create(param->name, param->uuid, minor, ro, t);
-	if (r) {
-		dm_table_destroy(t);
-		return r;
-	}
-
-	r = info(param, user);
-	return r;
-}
-
-static int remove(struct dm_ioctl *param)
+static int remove(struct dm_ioctl *param, struct dm_ioctl *user)
 {
 	int r;
 	struct mapped_device *md;
@@ -529,7 +502,7 @@ static int remove(struct dm_ioctl *param)
 	return r;
 }
 
-static int suspend(struct dm_ioctl *param)
+static int suspend(struct dm_ioctl *param, struct dm_ioctl *user)
 {
 	int r;
 	struct mapped_device *md;
@@ -580,7 +553,7 @@ static int reload(struct dm_ioctl *param, struct dm_ioctl *user)
 	return r;
 }
 
-static int rename(struct dm_ioctl *param)
+static int rename(struct dm_ioctl *param, struct dm_ioctl *user)
 {
 	char *newname = (char *) param + param->data_start;
 
@@ -594,6 +567,11 @@ static int rename(struct dm_ioctl *param)
 	return 0;
 }
 
+
+/*-----------------------------------------------------------------
+ * Implementation of open/close/ioctl on the special char
+ * device.
+ *---------------------------------------------------------------*/
 static int ctl_open(struct inode *inode, struct file *file)
 {
 	/* only root can open this */
@@ -611,97 +589,174 @@ static int ctl_close(struct inode *inode, struct file *file)
 	return 0;
 }
 
+static ioctl_fn lookup_ioctl(unsigned int cmd)
+{
+	static struct {
+		int cmd;
+		ioctl_fn fn;
+	} _ioctls[] = {
+		{DM_VERSION_CMD, NULL},	/* version is dealt with elsewhere */
+		{DM_REMOVE_ALL_CMD, remove_all},
+		{DM_DEV_CREATE_CMD, create},
+		{DM_DEV_REMOVE_CMD, remove},
+		{DM_DEV_RELOAD_CMD, reload},
+		{DM_DEV_RENAME_CMD, rename},
+		{DM_DEV_SUSPEND_CMD, suspend},
+		{DM_DEV_DEPS_CMD, dep},
+		{DM_DEV_STATUS_CMD, info},
+		{DM_TARGET_STATUS_CMD, get_status},
+		{DM_TARGET_WAIT_CMD, wait_device_event},
+	};
+	static int nelts = sizeof(_ioctls) / sizeof(*_ioctls);
+
+	return (cmd >= nelts) ? NULL : _ioctls[cmd].fn;
+}
+
+/*
+ * As well as checking the version compatibility this always
+ * copies the kernel interface version out.
+ */
+static int check_version(int cmd, struct dm_ioctl *user)
+{
+	uint32_t version[3];
+	int r = 0;
+
+	if (copy_from_user(version, user->version, sizeof(version)))
+		return -EFAULT;
+
+	if ((DM_VERSION_MAJOR != version[0]) ||
+	    (DM_VERSION_MINOR < version[1])) {
+		DMWARN("ioctl interface mismatch: "
+		       "kernel(%u.%u.%u), user(%u.%u.%u), cmd(%d)",
+		       DM_VERSION_MAJOR, DM_VERSION_MINOR,
+		       DM_VERSION_PATCHLEVEL,
+		       version[0], version[1], version[2], cmd);
+		r = -EINVAL;
+	}
+
+	/*
+	 * Fill in the kernel version.
+	 */
+	version[0] = DM_VERSION_MAJOR;
+	version[1] = DM_VERSION_MINOR;
+	version[2] = DM_VERSION_PATCHLEVEL;
+	if (copy_to_user(user->version, version, sizeof(version)))
+		return -EFAULT;
+
+	return r;
+}
+
+static void free_params(struct dm_ioctl *param)
+{
+	vfree(param);
+}
+
+static int copy_params(struct dm_ioctl *user, struct dm_ioctl **param)
+{
+	struct dm_ioctl tmp, *dmi;
+
+	if (copy_from_user(&tmp, user, sizeof(tmp)))
+		return -EFAULT;
+
+	if (tmp.data_size < sizeof(tmp))
+		return -EINVAL;
+
+	dmi = (struct dm_ioctl *) vmalloc(tmp.data_size);
+	if (!dmi)
+		return -ENOMEM;
+
+	if (copy_from_user(dmi, user, tmp.data_size)) {
+		vfree(dmi);
+		return -EFAULT;
+	}
+
+	*param = dmi;
+	return 0;
+}
+
+static int validate_params(uint cmd, struct dm_ioctl *param)
+{
+	/* Unless creating, either name of uuid but not both */
+	if (cmd != DM_DEV_CREATE_CMD) {
+		if ((!*param->uuid && !*param->name) ||
+		    (*param->uuid && *param->name)) {
+			DMWARN("one of name or uuid must be supplied");
+			return -EINVAL;
+		}
+	}
+
+	/* Ensure strings are terminated */
+	param->name[DM_NAME_LEN - 1] = '\0';
+	param->uuid[DM_UUID_LEN - 1] = '\0';
+
+	return 0;
+}
+
 static int ctl_ioctl(struct inode *inode, struct file *file,
 		     uint command, ulong u)
 {
-	int r = 0;
+
+	int r = 0, cmd;
 	struct dm_ioctl *param;
 	struct dm_ioctl *user = (struct dm_ioctl *) u;
-	uint cmd = _IOC_NR(command);
+	ioctl_fn fn = NULL;
 
-	/* Process commands without params first - always return version */
-	switch (cmd) {
-	case DM_REMOVE_ALL_CMD:
-		dm_destroy_all();
-	case DM_VERSION_CMD:
-		return version(user);
-	default:
-		break;
+	if (_IOC_TYPE(command) != DM_IOCTL)
+		return -ENOTTY;
+
+	cmd = _IOC_NR(command);
+
+	/*
+	 * Check the interface version passed in.  This also
+	 * writes out the kernel's interface version.
+	 */
+	r = check_version(cmd, user);
+	if (r)
+		return r;
+
+	/*
+	 * Nothing more to do for the version command.
+	 */
+	if (cmd == DM_VERSION_CMD)
+		return 0;
+
+	fn = lookup_ioctl(cmd);
+	if (!fn) {
+		DMWARN("dm_ctl_ioctl: unknown command 0x%x", command);
+		return -ENOTTY;
 	}
 
+	/*
+	 * Copy the parameters into kernel space.
+	 */
 	r = copy_params(user, &param);
 	if (r)
-		goto err;
+		return r;
 
 	r = validate_params(cmd, param);
 	if (r) {
 		free_params(param);
-		goto err;
+		return r;
 	}
 
-	switch (cmd) {
-	case DM_INFO_CMD:
-		r = info(param, user);
-		break;
-
-	case DM_SUSPEND_CMD:
-		r = suspend(param);
-		break;
-
-	case DM_CREATE_CMD:
-		r = create(param, user);
-		break;
-
-	case DM_RELOAD_CMD:
-		r = reload(param, user);
-		break;
-
-	case DM_REMOVE_CMD:
-		r = remove(param);
-		break;
-
-	case DM_RENAME_CMD:
-		r = rename(param);
-		break;
-
-	case DM_DEPS_CMD:
-		r = dep(param, user);
-		break;
-
-	case DM_GET_STATUS_CMD:
-		r = get_status(param, user);
-		break;
-
-	case DM_WAIT_EVENT_CMD:
-		r = wait_device_event(param, user);
-		break;
-
-	default:
-		DMWARN("dm_ctl_ioctl: unknown command 0x%x", command);
-		r = -ENOTTY;
-	}
-
+	r = fn(param, user);
 	free_params(param);
-	return r;
-
-      err:
-	version(user);
 	return r;
 }
 
 static struct file_operations _ctl_fops = {
-	open:	ctl_open,
-	release:ctl_close,
-	ioctl:	ctl_ioctl,
-	owner:	THIS_MODULE,
+	open:	 ctl_open,
+	release: ctl_close,
+	ioctl:	 ctl_ioctl,
+	owner:	 THIS_MODULE,
 };
 
 static devfs_handle_t _ctl_handle;
 
 static struct miscdevice _dm_misc = {
-	minor:	MISC_DYNAMIC_MINOR,
-	name:	DM_NAME,
-	fops:	&_ctl_fops
+	minor: MISC_DYNAMIC_MINOR,
+	name:  DM_NAME,
+	fops:  &_ctl_fops
 };
 
 /* Create misc character device and link to DM_DIR/control */
@@ -735,6 +790,9 @@ int __init dm_interface_init(void)
 	}
 	devfs_auto_unregister(_dm_misc.devfs_handle, _ctl_handle);
 
+	DMINFO("%d.%d.%d%s initialised: %s", DM_VERSION_MAJOR,
+	       DM_VERSION_MINOR, DM_VERSION_PATCHLEVEL, DM_VERSION_EXTRA,
+	       DM_DRIVER_EMAIL);
 	return 0;
 
       failed:

@@ -26,6 +26,7 @@
 #include <linux/init.h>
 
 #define DM_NAME "device-mapper"	/* Name for messaging */
+#define DM_DRIVER_EMAIL "lvm-devel@lists.sistina.com"
 #define MAX_DEPTH 16
 #define NODE_SIZE L1_CACHE_BYTES
 #define KEYS_PER_NODE (NODE_SIZE / sizeof(offset_t))

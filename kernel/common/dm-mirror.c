@@ -93,7 +93,7 @@ static void copy_callback(int err, void *context)
 	}
 
 	if (err) {
-		DMERR("Mirror block IO failed");	/* More detail to follow... */
+		DMERR("Mirror block IO failed"); /* More detail to follow... */
 		lc->error = 1;
 		return;
 	}

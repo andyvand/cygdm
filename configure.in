@@ -149,14 +149,6 @@ else
   DM_LIB_VERSION="Unknown version ($interface)"
 fi
 
-if test "-f kernel/VERSION"; then
-  DM_DRIVER_VERSION="\"`cat kernel/VERSION|sed -e \"s/[[0-9.]]*/\0-$interface/\"`\""
-  DM_IOCTL_VERSION="\"`cat kernel/VERSION| awk -F '.' '{printf \"%s.%s\",\$1,\$2}'`\""
-else
-  DM_DRIVER_VERSION="Unknown"
-  DM_IOCTL_VERSION="Unknown"
-fi
-
 AC_SUBST(JOBS)
 AC_SUBST(OWNER)
 AC_SUBST(GROUP)
@@ -165,8 +157,6 @@ AC_SUBST(interface)
 AC_SUBST(kerneldir)
 AC_SUBST(kernelvsn)
 AC_SUBST(tmpdir)
-AC_SUBST(DM_DRIVER_VERSION)
-AC_SUBST(DM_IOCTL_VERSION)
 AC_SUBST(DM_LIB_VERSION)
 dnl First and last lines should not contain files to generate in order to 
 dnl keep utility scripts running properly
@@ -178,7 +168,5 @@ dmsetup/Makefile							\
 lib/Makefile							 	\
 lib/libdm-common.h						 	\
 kernel/Makefile								\
-kernel/common/dm.c							\
-kernel/ioctl/dm-ioctl.h							\
 man/Makefile								\
 )
