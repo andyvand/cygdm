@@ -1,8 +1,17 @@
-This directory contains the the supporting userspace files (libdevmapper
-and dmsetup) for the device-mapper (for all supported versions of the kernel). 
-Kernel patches for 2.4.20 and 2.4.21 are also included.
+This directory contains the supporting userspace files (libdevmapper and
+dmsetup) for the device-mapper to work with all supported kernel versions.
 
-For more information about the device mapper read the INTRO file.
+Kernel patches for 2.4.20, 2.4.21 and 2.4.22 are also included here in the
+patches subdirectory.
+
+2.6 kernels already contain device-mapper.  For additional patches
+you may wish to apply look at the 2.6 subdirectories under:
+  http://people.sistina.com/~thornber/patches/
+and the dm-devel mailing list archives at:
+  http://lists.sistina.com/pipermail/dm-devel/
+
+
+For more information about the device mapper please read the INTRO file.
 Installation instructions are in INSTALL.
 
 Tarballs are available from ftp://ftp.sistina.com/pub/LVM2/device-mapper/
@@ -12,7 +21,7 @@ To access the CVS tree use:
   CVS password: cvs1
   cvs -d :pserver:cvs@tech.sistina.com:/data/cvs checkout device-mapper
 
-Additional patches (e.g. for development 2.5 kernels) may be found at:
+Additional patches undergoing development/testing may be found at:
   http://people.sistina.com/~thornber/patches/
 
 Mailing list for discussion/bug reports etc.
