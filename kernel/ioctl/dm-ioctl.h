@@ -8,7 +8,7 @@
 #define _LINUX_DM_IOCTL_H
 
 #include "device-mapper.h"
-#include "types.h"
+#include <linux/types.h>
 
 /*
  * Implements a traditional ioctl interface to the device mapper.
