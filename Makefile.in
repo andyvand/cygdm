@@ -32,8 +32,13 @@ include make.tmpl
 lib: include
 dmsetup: lib
 
+.PHONY: apply-patches install_static_lib
+
 apply-patches:
 	patch -d $(kerneldir) -p1 -i \
 		`pwd`/patches/linux-$(kernelvsn)-devmapper-$(interface).patch
 	patch -d $(kerneldir) -p1 -i \
 		`pwd`/patches/linux-$(kernelvsn)-VFS-lock.patch
+
+install_static_lib: all
+	$(MAKE) -C lib install_static

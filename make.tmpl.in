@@ -53,7 +53,7 @@ MAKEFLAGS = @JOBS@
 endif
 
 SUFFIXES=
-SUFFIXES=.c .d .o .so
+SUFFIXES=.c .d .o .so .a
 
 CFLAGS+=-fPIC -Wall -Wundef -Wshadow -Wcast-align -Wwrite-strings -Wmissing-prototypes -Wmissing-declarations -Wnested-externs -Winline
 
@@ -125,6 +125,13 @@ $(TARGETS): $(OBJECTS)
 %.so: %.o
 	$(CC) -shared -Wl,-soname,$(notdir $@).$(LIB_VERSION) \
 	-Wl,--version-script,.export.sym $(OBJECTS) -o $@
+
+%.a: $(OBJECTS)
+
+%.a: %.o
+	$(RM) $@
+	$(AR) r $@ $(OBJECTS)
+	$(RANLIB) $@
 
 %.d: %.c
 	set -e; \
