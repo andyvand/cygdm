@@ -452,9 +452,10 @@ static int request(request_queue_t *q, int rw, struct buffer_head *bh)
 	dm_lock_r();
 
 	md = _devs[minor];
-	__dm_get(md);
 	if (!md)
-		goto bad;
+		goto bad_no_put;
+
+	__dm_get(md);
 
 	/*
 	 * If we're suspended we have to queue
@@ -490,6 +491,11 @@ static int request(request_queue_t *q, int rw, struct buffer_head *bh)
 
       bad:
 	__dm_put(md);
+	dm_unlock_r();
+	buffer_IO_error(bh);
+	return 0;
+
+      bad_no_put:
 	dm_unlock_r();
 	buffer_IO_error(bh);
 	return 0;
