@@ -31,7 +31,7 @@ LN_S = @LN_S@
 FS=dmfs-error.c dmfs-lv.c dmfs-root.c dmfs-status.c \
    dmfs-super.c dmfs-suspend.c dmfs-table.c dmfs.h
 
-COMMON=device-mapper.h dm-linear.c dm-stripe.c \
+COMMON=dm-linear.c dm-stripe.c \
        dm-mirror.c dm-origin.c dm-snapshot.c kcopyd.c \
        dm-table.c dm-target.c dm.c dm.h dm-snapshot.h \
        dm-exception-store.c

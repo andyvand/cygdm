@@ -234,80 +234,59 @@ static void local_exit(void)
 	DMINFO("%s cleaned up", _version);
 }
 
+/*
+ * We have a lot of init/exit functions, so it seems easier to
+ * store them in an array.  The disposable macro 'xx'
+ * expands a prefix into a pair of function names.
+ */
+#define xx(n) {n ## _init, n ## _exit}
+static struct {
+	int (*init)(void);
+	void (*exit)(void);
+
+} _inits[] = {
+	xx(local),
+	xx(dm_target),
+	xx(dm_linear),
+	xx(dm_stripe),
+	xx(kcopyd),
+	xx(dm_snapshot),
+	xx(dm_origin),
+	xx(dm_mirror),
+	xx(dm_interface),
+};
+
+#undef xx
+
 static int __init dm_init(void)
 {
-	int r;
+	const int count = sizeof(_inits) / sizeof(*_inits);
 
-	r = local_init();
-	if (r)
-		goto out;
+	int r, i;
 
-	r = dm_target_init();
-	if (r)
-		goto out_local;
-
-	r = dm_linear_init();
-	if (r)
-		goto out_target;
-
-	r = dm_stripe_init();
-	if (r)
-		goto out_linear;
-
-	r = kcopyd_init();
-	if (r)
-		goto out_stripe;
-
-	r = dm_snapshot_init();
-	if (r)
-		goto out_kcopyd;
-
-	r = dm_origin_init();
-	if (r)
-		goto out_snapshot;
-
-	r = dm_mirror_init();
-	if (r)
-		goto out_origin;
-
-	r = dm_interface_init();
-	if (r)
-		goto out_mirror;
+	for (i = 0; i < count; i++) {
+		r = _inits[i].init();
+		if (r)
+			goto bad;
+	}
 
 	return 0;
 
-      out_mirror:
-	dm_mirror_exit();
-      out_origin:
-	dm_origin_exit();
-      out_snapshot:
-	dm_snapshot_exit();
-      out_kcopyd:
-	kcopyd_exit();
-      out_stripe:
-	dm_stripe_exit();
-      out_linear:
-	dm_linear_exit();
-      out_target:
-	dm_target_exit();
-      out_local:
-	local_exit();
-      out:
+      bad:
+	while (i--)
+		_inits[i].exit();
+
 	return r;
 }
 
 static void __exit dm_exit(void)
 {
+	int i = sizeof(_inits) / sizeof(*_inits);
+
 	dm_destroy_all();
-	dm_interface_exit();
-	dm_stripe_exit();
-	dm_linear_exit();
-	dm_snapshot_exit();
-	dm_origin_exit();
-	dm_mirror_exit();
-	kcopyd_exit();
-	dm_target_exit();
-	local_exit();
+
+	while (i--)
+		_inits[i].exit();
 }
 
 /*
