@@ -34,14 +34,12 @@ configure: configure-stamp
 configure-stamp:
 	dh_testdir
 	
-	# Ok, this sucks; the configure script requires a kernel. 
-	printf "Untarring kernel sources; this may take a loooong time..\n"
 	if test -f /usr/src/kernel-source-2.4.17.tar.bz2; then \
-		tar jxf /usr/src/kernel-source-2.4.17.tar.bz2 -C debian; \
+		tar jxvf /usr/src/kernel-source-2.4.17.tar.bz2 -C debian; \
 	elif test -f /usr/src/kernel-source-2.4.16.tar.bz2; then \
-		tar jxf /usr/src/kernel-source-2.4.16.tar.bz2 -C debian; \
+		tar jxvf /usr/src/kernel-source-2.4.16.tar.bz2 -C debian; \
 	else \
-		printf "*** Error: No kernel-source tarball found!\n"; \
+		printf "\n\n*** Error: No kernel-source tarball found!\n\n"; \
 		exit 2; \
 	fi
 	mv debian/kernel-source-2.4.* debian/kernel-source
@@ -121,7 +119,7 @@ binary-arch: build install
 	dh_strip
 	dh_compress
 	dh_fixperms
-	dh_makeshlibs
+	dh_makeshlibs -V
 	dh_installdeb
 #	dh_perl
 	dh_shlibdeps
