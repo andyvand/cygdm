@@ -615,37 +615,38 @@ static int new_exception(struct dm_snapshot *s, struct buffer_head *bh)
 		pe = list_entry(e, struct pending_exception, e);
 		bh->b_reqnext = pe->bh;
 		pe->bh = bh;
-		return 0;
+
+	} else {
+		/* Create a new pending exception */
+		pe = alloc_pending_exception();
+		if (!pe) {
+			DMWARN("Couldn't allocate pending exception.");
+			return -ENOMEM;
+		}
+
+		pe->e.old_chunk = chunk;
+		pe->snap = s;
+		bh->b_reqnext = NULL;
+		pe->bh = bh;
+
+		if (s->store->prepare_exception &&
+		    s->store->prepare_exception(s->store, &pe->e)) {
+			s->valid = 0;
+			return -ENXIO;
+		}
+
+		insert_exception(&s->pending, &pe->e);
+
+		/* Get kcopyd to do the copy */
+		dm_blockcopy(chunk_to_sector(s, pe->e.old_chunk),
+			     chunk_to_sector(s, pe->e.new_chunk),
+			     s->chunk_size,
+			     s->origin->dev,
+			     s->cow->dev, SNAPSHOT_COPY_PRIORITY, 0,
+			     copy_callback, pe);
 	}
 
-	pe = alloc_pending_exception();
-	if (!pe) {
-		DMWARN("Couldn't allocate inflight_exception.");
-		return -ENOMEM;
-	}
-
-	pe->e.old_chunk = chunk;
-
-	if (s->store->prepare_exception &&
-	    s->store->prepare_exception(s->store, &pe->e)) {
-		s->valid = 0;
-		return -ENXIO;
-	}
-
-	bh->b_reqnext = pe->bh;
-	pe->bh = bh;
-	pe->snap = s;
-
-	insert_exception(&s->pending, &pe->e);
-
-	/* Get kcopyd to do the copy */
-	dm_blockcopy(chunk_to_sector(s, pe->e.old_chunk),
-		     chunk_to_sector(s, pe->e.new_chunk),
-		     s->chunk_size,
-		     s->origin->dev,
-		     s->cow->dev, SNAPSHOT_COPY_PRIORITY, 0, copy_callback, pe);
-
-	return 1;
+	return 0;
 }
 
 static inline void remap_exception(struct dm_snapshot *s, struct exception *e,
@@ -680,31 +681,13 @@ static int snapshot_map(struct buffer_head *bh, int rw, void *context)
 
 		/* If the block is already remapped - use that, else remap it */
 		e = lookup_exception(&s->complete, chunk);
-		if (e) {
+		if (!e)
+			r = new_exception(s, bh);
+
+		else {
 			remap_exception(s, e, bh);
-			up_write(&s->lock);
-			return 1;
+			r = 1;
 		}
-
-		e = lookup_exception(&s->pending, chunk);
-		if (e) {
-			struct pending_exception *pe;
-			pe = list_entry(e, struct pending_exception, e);
-
-			/*
-			 * Exception has not been committed to
-			 * disk - save this bh
-			 */
-			bh->b_reqnext = pe->bh;
-			pe->bh = bh;
-			up_write(&s->lock);
-			return 0;
-		}
-
-		if (new_exception(s, bh))
-			r = -1;
-		else
-			r = 0;
 
 		up_write(&s->lock);
 
