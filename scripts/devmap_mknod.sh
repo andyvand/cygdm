@@ -4,7 +4,7 @@
 # on non-devfs systems.
 # Non-zero exit status indicates failure.
 
-# These correspond to the definitions in device-mapper.h and dm.h
+# These must correspond to the definitions in device-mapper.h and dm.h
 DM_DIR="device-mapper"
 DM_NAME="device-mapper"
 
@@ -15,13 +15,13 @@ control="$dir/control"
 
 # Check for devfs, procfs
 if test -e /dev/.devfsd ; then
-	echo "devfs is in use, no need to create devices."
+	echo "devfs detected: devmap_mknod.sh script not required."
 	exit
 fi
 
 if test ! -e /proc/devices ; then
-	echo "procfs is not being used; you'll have to make $control manually."
-	exit
+	echo "procfs not found: please create $control manually."
+	exit 1
 fi
 
 # Get major, minor, and mknod
@@ -29,8 +29,8 @@ major=$(awk '$2 ~ /^misc$/ {print $1}' /proc/devices)
 minor=$(awk "\$2 ~ /^$DM_NAME\$/ {print \$1}" /proc/misc)
 
 if test -z "$major" -o -z "$minor" ; then
-	echo "$DM_NAME kernel module isn't loaded; refusing to create $control."
-	exit
+	echo "$DM_NAME kernel module not loaded: can't create $control."
+	exit 1
 fi
 
 mkdir -p --mode=755 $dir
