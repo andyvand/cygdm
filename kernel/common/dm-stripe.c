@@ -190,7 +190,7 @@ int __init dm_stripe_init(void)
 	return r;
 }
 
-void __exit dm_stripe_exit(void)
+void dm_stripe_exit(void)
 {
 	if (dm_unregister_target(&stripe_target))
 		DMWARN("striped target unregistration failed");

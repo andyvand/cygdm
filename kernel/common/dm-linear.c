@@ -95,7 +95,7 @@ int __init dm_linear_init(void)
 	return r;
 }
 
-void __exit dm_linear_exit(void)
+void dm_linear_exit(void)
 {
 	int r = dm_unregister_target(&linear_target);
 
