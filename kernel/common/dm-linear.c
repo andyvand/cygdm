@@ -61,7 +61,7 @@ static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
 	start = simple_strtoul(tok, NULL, 10);
 
 	*context = "Cannot allocate linear context private structure";
-	lc = kmalloc(sizeof(lc), GFP_KERNEL);
+	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
 	if (lc == NULL)
 		goto bad;
 
