@@ -50,7 +50,18 @@ Device Mapper installation
 
       Example:  make install
 
-4) You can now use 'dmsetup' to test the API.
+
+4) If you are using the ioctl interface but not devfs then install 
+   scripts/devmap_mknod.sh to run either:
+
+      Each time the kernel boots 
+        e.g. add to /etc/rc*
+
+      Or whenever the device-mapper is loaded (if you built it as a module)
+        e.g. add a "post-install" line to /etc/modules.conf.
+
+
+5) You can now use 'dmsetup' to test the API.
    If you chose the filesystem interface you will first need to mount dmfs.
    e.g. mount -t dmfs dmfs /dmfs
    Read the dmsetup man page for more information.
