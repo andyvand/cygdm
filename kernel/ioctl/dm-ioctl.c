@@ -21,6 +21,9 @@ static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
 	if (copy_from_user(&tmp, user, sizeof(tmp)))
 		return -EFAULT;
 
+	if (tmp.data_size < sizeof(tmp))
+		return -EINVAL;
+
 	dmi = (struct dm_ioctl *) vmalloc(tmp.data_size);
 	if (!dmi)
 		return -ENOMEM;
@@ -35,14 +38,14 @@ static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
 /*
  * Check a string doesn't overrun the chunk of
  * memory we copied from userland.
- * Returns 1 if OK.
  */
 static int valid_str(char *str, void *begin, void *end)
 {
-	while (((void *) str >= begin) && ((void *) str < end) && *str)
-		str++;
+	while (((void *) str >= begin) && ((void *) str < end))
+		if (!*str++)
+			return 0;
 
-	return *str ? 0 : 1;
+	return -EINVAL;
 }
 
 static int first_target(struct dm_ioctl *a, void *begin, void *end,
@@ -51,17 +54,20 @@ static int first_target(struct dm_ioctl *a, void *begin, void *end,
 	*spec = (struct dm_target_spec *) (a + 1);
 	*params = (char *) (*spec + 1);
 
-	return !valid_str(*params, begin, end);
+	return valid_str(*params, begin, end);
 }
 
 static int next_target(struct dm_target_spec *last, void *begin, void *end,
 		       struct dm_target_spec **spec, char **params)
 {
 	*spec = (struct dm_target_spec *)
-	    (((unsigned char *) last) + last->next);
+		(((unsigned char *) last) + last->next);
 	*params = (char *) (*spec + 1);
 
-	return !valid_str(*params, begin, end);
+	if (*spec < (last + 1) || ((void *)*spec > end))
+		return -EINVAL;
+
+	return valid_str(*params, begin, end);
 }
 
 void dm_error(const char *message)
@@ -160,6 +166,7 @@ static int info(const char *name, struct dm_ioctl *user)
 
 	param.data_size = 0;
 	strncpy(param.name, md->name, sizeof(param.name));
+	param.name[sizeof(param.name) - 1] = '\0';
 	param.exists = 1;
 	param.suspend = md->suspended;
 	param.open_count = md->use_count;
@@ -179,18 +186,22 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 	struct mapped_device *md;
 	struct dm_table *t;
 
-	if ((r = dm_table_create(&t)))
+	r = dm_table_create(&t);
+	if (r)
 		return r;
 
-	if ((r = populate_table(t, param)))
+	r = populate_table(t, param);
+	if (r)
 		goto bad;
 
-	if ((r = dm_create(param->name, param->minor, t, &md)))
+	r = dm_create(param->name, param->minor, t, &md);
+	if (r)
 		goto bad;
 
 	dm_set_ro(md, param->read_only);
 
-	if ((r = info(param->name, user))) {
+	r = info(param->name, user);
+	if (r) {
 		dm_destroy(md);
 		goto bad;
 	}
@@ -268,7 +279,7 @@ static int rename(struct dm_ioctl *param)
 	if (!md)
 		return -ENXIO;
 
-	if (!valid_str(newname, (void *)param, 
+	if (valid_str(newname, (void *)param, 
 		       (void *)param + param->data_size) ||
 	    dm_set_name(md, newname)) {
 		dm_error("Invalid new logical volume name supplied.");
@@ -302,7 +313,8 @@ static int ctl_ioctl(struct inode *inode, struct file *file,
 	int r;
 	struct dm_ioctl *p;
 
-	if ((r = copy_params((struct dm_ioctl *) a, &p)))
+	r = copy_params((struct dm_ioctl *) a, &p);
+	if (r)
 		return r;
 
 	if (strcmp(DM_IOCTL_VERSION, p->version)) {
