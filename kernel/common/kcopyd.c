@@ -467,10 +467,6 @@ void kcopyd_exit(void)
 		kmem_cache_destroy(entry_cachep);
 }
 
-MODULE_AUTHOR("Patrick Caulfield <caulfield@sistina.com>");
-MODULE_DESCRIPTION("Device Mapper: Copy thread");
-MODULE_LICENSE("GPL");
-
 EXPORT_SYMBOL(dm_blockcopy);
 
 /*
