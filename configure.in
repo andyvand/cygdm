@@ -208,17 +208,12 @@ if test "x${kerneldir}" != "x" ; then
     echo "WARNING: kernel directory $kerneldir not found"
     echo
   fi
-fi
-
-if test "x${kernelvsn}" = "xUNKNOWN"; then
-  echo "WARNING: kernel version not detected: 'make apply-patches' won't work."
-  echo
-fi
-
-if test "x${missingkernel}" = "xyes"; then
-  echo "WARNING: Using local copy of linux/dm-ioctl.h"
-  echo "         Check it's compatible with the one compiled into your kernel."
-  echo
+  if test "x${kernelvsn}" = "xUNKNOWN"; then
+    echo "WARNING: kernel version not detected: 'make apply-patches' won't work."
+    echo "         If your kernel already contains device-mapper it may be OK,"
+    echo "         otherwise you'll need to apply the device-mapper patches by hand."
+    echo
+  fi
 fi
 
 

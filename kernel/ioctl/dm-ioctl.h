@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001 Sistina Software (UK) Limited.
+ * Copyright (C) 2001 - 2003 Sistina Software (UK) Limited.
  *
  * This file is released under the LGPL.
  */
@@ -15,7 +15,67 @@
 #define DM_UUID_LEN 129
 
 /*
- * Implements a traditional ioctl interface to the device mapper.
+ * A traditional ioctl interface for the device mapper.
+ *
+ * Each device can have two tables associated with it, an
+ * 'active' table which is the one currently used by io passing
+ * through the device, and an 'inactive' one which is a table
+ * that is being prepared as a replacement for the 'active' one.
+ *
+ * DM_VERSION:
+ * Just get the version information for the ioctl interface.
+ *
+ * DM_REMOVE_ALL:
+ * Remove all dm devices, destroy all tables.  Only really used
+ * for debug.
+ *
+ * DM_LIST_DEVICES:
+ * Get a list of all the dm device names.
+ *
+ * DM_DEV_CREATE:
+ * Create a new device, neither the 'active' or 'inactive' table
+ * slots will be filled.  The device will be in suspended state
+ * after creation, however any io to the device will get errored
+ * since it will be out-of-bounds.
+ *
+ * DM_DEV_REMOVE:
+ * Remove a device, destroy any tables.
+ *
+ * DM_DEV_RENAME:
+ * Rename a device.
+ *
+ * DM_SUSPEND:
+ * This performs both suspend and resume, depending which flag is
+ * passed in.
+ * Suspend: This command will not return until all pending io to
+ * the device has completed.  Further io will be deferred until
+ * the device is resumed.
+ * Resume: It is no longer an error to issue this command on an
+ * unsuspended device.  If a table is present in the 'inactive'
+ * slot, it will be moved to the active slot, then the old table
+ * from the active slot will be _destroyed_.  Finally the device
+ * is resumed.
+ *
+ * DM_DEV_STATUS:
+ * Retrieves the status for the table in the 'active' slot.
+ *
+ * DM_DEV_WAIT:
+ * Wait for a significant event to occur to the device.  This
+ * could either be caused by an event triggered by one of the
+ * targets of the table in the 'active' slot, or a table change.
+ *
+ * DM_TABLE_LOAD:
+ * Load a table into the 'inactive' slot for the device.  The
+ * device does _not_ need to be suspended prior to this command.
+ *
+ * DM_TABLE_CLEAR:
+ * Destroy any table in the 'inactive' slot (ie. abort).
+ *
+ * DM_TABLE_DEPS:
+ * Return a set of device dependencies for the 'active' table.
+ *
+ * DM_TABLE_STATUS:
+ * Return the targets status for the 'active' table.
  */
 
 /*
@@ -49,7 +109,7 @@ struct dm_ioctl {
 	uint32_t target_count;	/* in/out */
 	int32_t open_count;	/* out */
 	uint32_t flags;		/* in/out */
-	uint32_t event_nr;      /* in/out */
+	uint32_t event_nr;	/* in/out */
 	uint32_t padding;
 
 	uint64_t dev;		/* in/out */
@@ -93,6 +153,16 @@ struct dm_target_deps {
 };
 
 /*
+ * Used to get a list of all dm devices.
+ */
+struct dm_name_list {
+	uint64_t dev;
+	uint32_t next;		/* offset to the next record from
+				   the _start_ of this */
+	char name[0];
+};
+
+/*
  * If you change this make sure you make the corresponding change
  * to dm-ioctl.c:lookup_ioctl()
  */
@@ -100,60 +170,68 @@ enum {
 	/* Top level cmds */
 	DM_VERSION_CMD = 0,
 	DM_REMOVE_ALL_CMD,
+	DM_LIST_DEVICES_CMD,
 
 	/* device level cmds */
 	DM_DEV_CREATE_CMD,
 	DM_DEV_REMOVE_CMD,
-	DM_DEV_RELOAD_CMD,
 	DM_DEV_RENAME_CMD,
 	DM_DEV_SUSPEND_CMD,
-	DM_DEV_DEPS_CMD,
 	DM_DEV_STATUS_CMD,
+	DM_DEV_WAIT_CMD,
 
-	/* target level cmds */
-	DM_TARGET_STATUS_CMD,
-	DM_TARGET_WAIT_CMD
+	/* Table level cmds */
+	DM_TABLE_LOAD_CMD,
+	DM_TABLE_CLEAR_CMD,
+	DM_TABLE_DEPS_CMD,
+	DM_TABLE_STATUS_CMD,
 };
 
 #define DM_IOCTL 0xfd
 
 #define DM_VERSION       _IOWR(DM_IOCTL, DM_VERSION_CMD, struct dm_ioctl)
 #define DM_REMOVE_ALL    _IOWR(DM_IOCTL, DM_REMOVE_ALL_CMD, struct dm_ioctl)
+#define DM_LIST_DEVICES  _IOWR(DM_IOCTL, DM_LIST_DEVICES_CMD, struct dm_ioctl)
 
 #define DM_DEV_CREATE    _IOWR(DM_IOCTL, DM_DEV_CREATE_CMD, struct dm_ioctl)
 #define DM_DEV_REMOVE    _IOWR(DM_IOCTL, DM_DEV_REMOVE_CMD, struct dm_ioctl)
-#define DM_DEV_RELOAD    _IOWR(DM_IOCTL, DM_DEV_RELOAD_CMD, struct dm_ioctl)
-#define DM_DEV_SUSPEND   _IOWR(DM_IOCTL, DM_DEV_SUSPEND_CMD, struct dm_ioctl)
 #define DM_DEV_RENAME    _IOWR(DM_IOCTL, DM_DEV_RENAME_CMD, struct dm_ioctl)
-#define DM_DEV_DEPS      _IOWR(DM_IOCTL, DM_DEV_DEPS_CMD, struct dm_ioctl)
+#define DM_DEV_SUSPEND   _IOWR(DM_IOCTL, DM_DEV_SUSPEND_CMD, struct dm_ioctl)
 #define DM_DEV_STATUS    _IOWR(DM_IOCTL, DM_DEV_STATUS_CMD, struct dm_ioctl)
+#define DM_DEV_WAIT      _IOWR(DM_IOCTL, DM_DEV_WAIT_CMD, struct dm_ioctl)
 
-#define DM_TARGET_STATUS _IOWR(DM_IOCTL, DM_TARGET_STATUS_CMD, struct dm_ioctl)
-#define DM_TARGET_WAIT   _IOWR(DM_IOCTL, DM_TARGET_WAIT_CMD, struct dm_ioctl)
+#define DM_TABLE_LOAD    _IOWR(DM_IOCTL, DM_TABLE_LOAD_CMD, struct dm_ioctl)
+#define DM_TABLE_CLEAR   _IOWR(DM_IOCTL, DM_TABLE_CLEAR_CMD, struct dm_ioctl)
+#define DM_TABLE_DEPS    _IOWR(DM_IOCTL, DM_TABLE_DEPS_CMD, struct dm_ioctl)
+#define DM_TABLE_STATUS  _IOWR(DM_IOCTL, DM_TABLE_STATUS_CMD, struct dm_ioctl)
 
 #define DM_VERSION_MAJOR	4
 #define DM_VERSION_MINOR	0
 #define DM_VERSION_PATCHLEVEL	0
-#define DM_VERSION_EXTRA	"-ioctl-cvs (2003-04-29)"
+#define DM_VERSION_EXTRA	"-ioctl-cvs (2003-07-01)"
 
 /* Status bits */
-#define DM_READONLY_FLAG	0x00000001	/* In/Out */
-#define DM_SUSPEND_FLAG		0x00000002	/* In/Out */
-#define DM_PERSISTENT_DEV_FLAG	0x00000008	/* In     */
+#define DM_READONLY_FLAG	 (1 << 0)	/* In/Out */
+#define DM_SUSPEND_FLAG		 (1 << 1)	/* In/Out */
+#define DM_PERSISTENT_DEV_FLAG	 (1 << 3)	/* In */
 
 /*
  * Flag passed into ioctl STATUS command to get table information
  * rather than current status.
  */
-#define DM_STATUS_TABLE_FLAG	0x00000010	/* In     */
+#define DM_STATUS_TABLE_FLAG	 (1 << 4)	/* In */
 
-/* For future use */
-#define DM_ERROR_DEFERRED_FLAG	0x00000020	/* In     */
+/*
+ * Flags that indicate whether a table is present in either of
+ * the two table slots that a device has.
+ */
+#define DM_ACTIVE_PRESENT_FLAG   (1 << 5)	/* Out */
+#define DM_INACTIVE_PRESENT_FLAG (1 << 6)	/* Out */
 
 /*
  * Indicates that the buffer passed in wasn't big enough for the
  * results.
  */
-#define DM_BUFFER_FULL_FLAG	0x00000100	/*    Out */
+#define DM_BUFFER_FULL_FLAG	 (1 << 8)	/* Out */
 
 #endif				/* _LINUX_DM_IOCTL_H */

@@ -5,17 +5,19 @@ Device Mapper installation
 
    Run the 'configure' script from the top directory.
 
-   If your kernel already contains an up-to-date version of device-mapper,
-   or you intend to patch your kernel by hand, then no arguments to 
-   'configure' should be necessary.
+   Example:
+   ./configure
 
-   Otherwise you need to tell 'configure' where your kernel source
-   directory is using --with-kernel-dir.
+   If your kernel does NOT yet contain the device-mapper source
+   AND you want to try patching it automatically (described 
+   in step 2) then you need to tell 'configure' where your kernel 
+   source directory is using --with-kernel-dir.  Otherwise, don't
+   supply this parameter or you may get compilation failures.
 
    Example:  
    ./configure --with-kernel-dir=/usr/src/linux-2.4.20
 
-   Other flags let you change the installation & working directories.
+   Other parameters let you change the installation & working directories.
 
 
 2) If your kernel does not already contain device-mapper, patch,
@@ -83,8 +85,8 @@ Device Mapper installation
    Or proceed to install the new LVM2 tools.
 
 
-Note if you are upgrading
-=========================
+Note if you are upgrading from an old release
+=============================================
    /dev/mapper was called /dev/device-mapper prior to 0.96.04.
    Consequently scripts/devmap_mknod.sh has been updated.
 
@@ -93,8 +95,8 @@ Notes about the alternative filesystem interface
 The original 2.4 filesystem interface has not been updated for many
 months, requires an old kernel, and is missing lots of features.
 
-A new filesystem interface is under development for 2.5 kernels (and
-will get back-ported to 2.4 if it's successful).
+A new filesystem interface was developed which mapped device-mapper
+operations into filesystem operations, but work on this has stopped.
 Look for "dmfs" patches at:
    http://people.sistina.com/~thornber/patches/
 

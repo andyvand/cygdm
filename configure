@@ -1322,7 +1322,7 @@ else
 int main() {
 
 /* Ultrix mips cc rejects this.  */
-typedef int charset[2]; const charset x;
+typedef int charset[2]; const charset x = {0,0};
 /* SunOS 4.1.1 cc rejects this.  */
 char const *const *ccp;
 char **p;
@@ -1397,7 +1397,7 @@ for ac_kw in inline __inline__ __inline; do
 #include "confdefs.h"
 
 int main() {
-} $ac_kw foo() {
+} int $ac_kw foo() {
 ; return 0; }
 EOF
 if { (eval echo configure:1404: \"$ac_compile\") 1>&5; (eval $ac_compile) 2>&5; }; then
@@ -2319,17 +2319,12 @@ if test "x${kerneldir}" != "x" ; then
     echo "WARNING: kernel directory $kerneldir not found"
     echo
   fi
-fi
-
-if test "x${kernelvsn}" = "xUNKNOWN"; then
-  echo "WARNING: kernel version not detected: 'make apply-patches' won't work."
-  echo
-fi
-
-if test "x${missingkernel}" = "xyes"; then
-  echo "WARNING: Using local copy of linux/dm-ioctl.h"
-  echo "         Check it's compatible with the one compiled into your kernel."
-  echo
+  if test "x${kernelvsn}" = "xUNKNOWN"; then
+    echo "WARNING: kernel version not detected: 'make apply-patches' won't work."
+    echo "         If your kernel already contains device-mapper it may be OK,"
+    echo "         otherwise you'll need to apply the device-mapper patches by hand."
+    echo
+  fi
 fi
 
 

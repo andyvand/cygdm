@@ -1,6 +1,6 @@
 This directory contains the the supporting userspace files (libdevmapper
 and dmsetup) for the device-mapper (for all supported versions of the kernel). 
-The kernel patch for 2.4.20 is also included.
+Kernel patches for 2.4.20 and 2.4.21 are also included.
 
 For more information about the device mapper read the INTRO file.
 Installation instructions are in INSTALL.
