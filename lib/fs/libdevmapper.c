@@ -76,6 +76,12 @@ int dm_task_get_info(struct dm_task *dmt, struct dm_info *info)
 	return 1;
 }
 
+int dm_task_set_ro(struct dm_task *dmt)
+{
+	log("Read-only attribute ignored by filesystem interface");
+	return 1;
+}
+
 struct target *create_target(uint64_t start,
 			     uint64_t len, const char *type, const char *params)
 {
@@ -211,6 +217,7 @@ static int do_info(char *mnt, char *name, struct dm_info *info)
 	/* Unsupported */
 	info->target_count = -1;
 	info->open_count = -1;
+	info->read_only = 0;
 
 	return 1;
 }
