@@ -593,7 +593,7 @@ static int dev_rename(struct dm_ioctl *param, size_t param_size)
 	return dm_hash_rename(param->name, new_name);
 }
 
-static int suspend(struct dm_ioctl *param)
+static int do_suspend(struct dm_ioctl *param)
 {
 	int r = 0;
 	struct mapped_device *md;
@@ -612,7 +612,7 @@ static int suspend(struct dm_ioctl *param)
 	return r;
 }
 
-static int resume(struct dm_ioctl *param)
+static int do_resume(struct dm_ioctl *param)
 {
 	int r = 0;
 	struct hash_cell *hc;
@@ -675,9 +675,9 @@ static int resume(struct dm_ioctl *param)
 static int dev_suspend(struct dm_ioctl *param, size_t param_size)
 {
 	if (param->flags & DM_SUSPEND_FLAG)
-		return suspend(param);
+		return do_suspend(param);
 
-	return resume(param);
+	return do_resume(param);
 }
 
 /*
@@ -694,40 +694,6 @@ static int dev_status(struct dm_ioctl *param, size_t param_size)
 		return -ENXIO;
 
 	r = __dev_status(md, param);
-	dm_put(md);
-	return r;
-}
-
-/*
- * Wait for a device to report an event
- */
-static int dev_wait(struct dm_ioctl *param, size_t param_size)
-{
-	int r;
-	struct mapped_device *md;
-	DECLARE_WAITQUEUE(wq, current);
-
-	md = find_device(param);
-	if (!md)
-		return -ENXIO;
-
-	/*
-	 * Wait for a notification event
-	 */
-	set_current_state(TASK_INTERRUPTIBLE);
-	if (!dm_add_wait_queue(md, &wq, param->event_nr)) {
-		schedule();
-		dm_remove_wait_queue(md, &wq);
-	}
-	set_current_state(TASK_RUNNING);
-
-	/*
-	 * The userland program is going to want to know what
-	 * changed to trigger the event, so we may as well tell
-	 * him and save an ioctl.
-	 */
-	r = __dev_status(md, param);
-
 	dm_put(md);
 	return r;
 }
@@ -816,6 +782,8 @@ static int table_load(struct dm_ioctl *param, size_t param_size)
 		return -ENXIO;
 	}
 
+	if (hc->new_map)
+		dm_table_put(hc->new_map);
 	hc->new_map = t;
 	param->flags |= DM_INACTIVE_PRESENT_FLAG;
 
@@ -997,6 +965,50 @@ static int table_status(struct dm_ioctl *param, size_t param_size)
 	if (r)
 		goto out;
  
+	table = dm_get_table(md);
+	if (table) {
+		retrieve_status(table, param, param_size);
+		dm_table_put(table);
+	}
+
+ out:
+	dm_put(md);
+	return r;
+}
+
+/*
+ * Wait for a device to report an event
+ */
+static int dev_wait(struct dm_ioctl *param, size_t param_size)
+{
+	int r;
+	struct mapped_device *md;
+	struct dm_table *table;
+	DECLARE_WAITQUEUE(wq, current);
+
+	md = find_device(param);
+	if (!md)
+		return -ENXIO;
+
+	/*
+	 * Wait for a notification event
+	 */
+	set_current_state(TASK_INTERRUPTIBLE);
+	if (!dm_add_wait_queue(md, &wq, param->event_nr)) {
+		schedule();
+		dm_remove_wait_queue(md, &wq);
+	}
+	set_current_state(TASK_RUNNING);
+
+	/*
+	 * The userland program is going to want to know what
+	 * changed to trigger the event, so we may as well tell
+	 * him and save an ioctl.
+	 */
+	r = __dev_status(md, param);
+	if (r)
+		goto out;
+
 	table = dm_get_table(md);
 	if (table) {
 		retrieve_status(table, param, param_size);

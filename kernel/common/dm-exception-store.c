@@ -369,8 +369,6 @@ static int read_exceptions(struct pstore *ps)
 		r = insert_exceptions(ps, &full);
 		if (r)
 			return r;
-
-		area++;
 	}
 
 	return 0;

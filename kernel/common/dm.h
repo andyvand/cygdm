@@ -53,7 +53,7 @@ struct mapped_device;
  * Functions for manipulating a struct mapped_device.
  * Drop the reference with dm_put when you finish with the object.
  *---------------------------------------------------------------*/
-int dm_create(kdev_t dev, struct dm_table *table, struct mapped_device **md);
+int dm_create(kdev_t dev, struct mapped_device **md);
 
 /*
  * Reference counting for md.
@@ -150,6 +150,8 @@ static inline unsigned long dm_div_up(unsigned long n, unsigned long size)
 {
 	return dm_round_up(n, size) / size;
 }
+
+const char *dm_kdevname(kdev_t dev);
 
 /*
  * The device-mapper can be driven through one of two interfaces;

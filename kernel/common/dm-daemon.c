@@ -81,7 +81,7 @@ int dm_daemon_start(struct dm_daemon *dd, const char *name, void (*fn)(void))
 	down(&dd->start_lock);
 	pid = kernel_thread(daemon, dd, 0);
 	if (pid <= 0) {
-		DMERR("Failed to start kcopyd thread");
+		DMERR("Failed to start %s thread", name);
 		return -EAGAIN;
 	}
 

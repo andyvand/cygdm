@@ -588,6 +588,17 @@ static void queue_buffer(struct buffer_head **queue, struct buffer_head *bh)
 }
 
 /*
+ * FIXME: inefficient.
+ */
+static void queue_buffers(struct buffer_head **queue, struct buffer_head *bhs)
+{
+	while (*queue)
+		queue = &((*queue)->b_reqnext);
+
+	*queue = bhs;
+}
+
+/*
  * Flush a list of buffers.
  */
 static void flush_buffers(struct buffer_head *bh)
@@ -621,31 +632,54 @@ static void error_buffers(struct buffer_head *bh)
 	}
 }
 
+static struct buffer_head *__flush_bhs(struct pending_exception *pe)
+{
+	struct pending_exception *sibling;
+
+	if (list_empty(&pe->siblings))
+		return pe->origin_bhs;
+
+	sibling = list_entry(pe->siblings.next,
+			     struct pending_exception, siblings);
+
+	list_del(&pe->siblings);
+
+	/* FIXME: I think there's a race on SMP machines here, add spin lock */
+	queue_buffers(&sibling->origin_bhs, pe->origin_bhs);
+
+	return NULL;
+}
+
 static void pending_complete(struct pending_exception *pe, int success)
 {
 	struct exception *e;
 	struct dm_snapshot *s = pe->snap;
+	struct buffer_head *flush = NULL;
 
 	if (success) {
 		e = alloc_exception();
 		if (!e) {
-			printk("Unable to allocate exception.");
+			DMWARN("Unable to allocate exception.");
 			down_write(&s->lock);
 			s->store.drop_snapshot(&s->store);
 			s->valid = 0;
+			flush = __flush_bhs(pe);
 			up_write(&s->lock);
-			return;
+
+			error_buffers(pe->snapshot_bhs);
+			goto out;
 		}
 
 		/*
 		 * Add a proper exception, and remove the
-		 * inflight exception from the list.
+		 * in-flight exception from the list.
 		 */
 		down_write(&s->lock);
 
 		memcpy(e, &pe->e, sizeof(*e));
 		insert_exception(&s->complete, e);
 		remove_exception(&pe->e);
+		flush = __flush_bhs(pe);
 
 		/* Submit any pending write BHs */
 		up_write(&s->lock);
@@ -676,6 +710,7 @@ static void pending_complete(struct pending_exception *pe, int success)
 		s->store.drop_snapshot(&s->store);
 		s->valid = 0;
 		remove_exception(&pe->e);
+		flush = __flush_bhs(pe);
 		up_write(&s->lock);
 
 		error_buffers(pe->snapshot_bhs);
@@ -684,10 +719,9 @@ static void pending_complete(struct pending_exception *pe, int success)
 		DMDEBUG("Exception failed.");
 	}
 
-	if (list_empty(&pe->siblings))
-		flush_buffers(pe->origin_bhs);
-	else
-		list_del(&pe->siblings);
+ out:
+	if (flush)
+		flush_buffers(flush);
 
 	free_pending_exception(pe);
 }
@@ -727,6 +761,12 @@ static inline void start_copy(struct pending_exception *pe)
 	int *sizes = blk_size[major(dev)];
 	sector_t dev_size = (sector_t) -1;
 
+	if (pe->started)
+		return;
+
+	/* this is protected by snap->lock */
+	pe->started = 1;
+
 	if (sizes && sizes[minor(dev)])
 		dev_size = sizes[minor(dev)] << 1;
 
@@ -738,12 +778,9 @@ static inline void start_copy(struct pending_exception *pe)
 	dest.sector = chunk_to_sector(s, pe->e.new_chunk);
 	dest.count = src.count;
 
-	if (!pe->started) {
-		/* Hand over to kcopyd */
-		kcopyd_copy(s->kcopyd_client,
-			    &src, 1, &dest, 0, copy_callback, pe);
-		pe->started = 1;
-	}
+	/* Hand over to kcopyd */
+	kcopyd_copy(s->kcopyd_client,
+		    &src, 1, &dest, 0, copy_callback, pe);
 }
 
 /*
@@ -832,6 +869,7 @@ static int snapshot_map(struct dm_target *ti, struct buffer_head *bh, int rw,
 				s->valid = 0;
 				r = -EIO;
 			} else {
+				remap_exception(s, &pe->e, bh);
 				queue_buffer(&pe->snapshot_bhs, bh);
 				start_copy(pe);
 				r = 0;
@@ -880,6 +918,51 @@ void snapshot_resume(struct dm_target *ti)
 	s->have_metadata = 1;
 }
 
+static int snapshot_status(struct dm_target *ti, status_type_t type,
+			   char *result, unsigned int maxlen)
+{
+	struct dm_snapshot *snap = (struct dm_snapshot *) ti->private;
+	char cow[16];
+	char org[16];
+
+	switch (type) {
+	case STATUSTYPE_INFO:
+		if (!snap->valid)
+			snprintf(result, maxlen, "Invalid");
+		else {
+			if (snap->store.fraction_full) {
+				sector_t numerator, denominator;
+				snap->store.fraction_full(&snap->store,
+							  &numerator,
+							  &denominator);
+				snprintf(result, maxlen,
+					 SECTOR_FORMAT "/" SECTOR_FORMAT,
+					 numerator, denominator);
+			}
+			else
+				snprintf(result, maxlen, "Unknown");
+		}
+		break;
+
+	case STATUSTYPE_TABLE:
+		/*
+		 * kdevname returns a static pointer so we need
+		 * to make private copies if the output is to
+		 * make sense.
+		 */
+		strncpy(cow, dm_kdevname(snap->cow->dev), sizeof(cow));
+		strncpy(org, dm_kdevname(snap->origin->dev), sizeof(org));
+		snprintf(result, maxlen, "%s %s %c %ld", org, cow,
+			 snap->type, snap->chunk_size);
+		break;
+	}
+
+	return 0;
+}
+
+/*-----------------------------------------------------------------
+ * Origin methods
+ *---------------------------------------------------------------*/
 static void list_merge(struct list_head *l1, struct list_head *l2)
 {
 	struct list_head *l1_n, *l2_p;
@@ -896,7 +979,7 @@ static void list_merge(struct list_head *l1, struct list_head *l2)
 
 static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 {
-	int r = 1;
+	int r = 1, first = 1;
 	struct list_head *sl;
 	struct dm_snapshot *snap;
 	struct exception *e;
@@ -951,9 +1034,11 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 		pe = last;
 		do {
 			down_write(&pe->snap->lock);
-			queue_buffer(&pe->origin_bhs, bh);
+			if (first)
+				queue_buffer(&pe->origin_bhs, bh);
 			start_copy(pe);
 			up_write(&pe->snap->lock);
+			first = 0;
 			pe = list_entry(pe->siblings.next,
 					struct pending_exception, siblings);
 
@@ -961,48 +1046,6 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 	}
 
 	return r;
-}
-
-static int snapshot_status(struct dm_target *ti, status_type_t type,
-			   char *result, unsigned int maxlen)
-{
-	struct dm_snapshot *snap = (struct dm_snapshot *) ti->private;
-	char cow[16];
-	char org[16];
-
-	switch (type) {
-	case STATUSTYPE_INFO:
-		if (!snap->valid)
-			snprintf(result, maxlen, "Invalid");
-		else {
-			if (snap->store.fraction_full) {
-				sector_t numerator, denominator;
-				snap->store.fraction_full(&snap->store,
-							  &numerator,
-							  &denominator);
-				snprintf(result, maxlen,
-					 SECTOR_FORMAT "/" SECTOR_FORMAT,
-					 numerator, denominator);
-			}
-			else
-				snprintf(result, maxlen, "Unknown");
-		}
-		break;
-
-	case STATUSTYPE_TABLE:
-		/*
-		 * kdevname returns a static pointer so we need
-		 * to make private copies if the output is to
-		 * make sense.
-		 */
-		strncpy(cow, dm_kdevname(snap->cow->dev), sizeof(cow));
-		strncpy(org, dm_kdevname(snap->origin->dev), sizeof(org));
-		snprintf(result, maxlen, "%s %s %c %ld", org, cow,
-			 snap->type, snap->chunk_size);
-		break;
-	}
-
-	return 0;
 }
 
 /*
