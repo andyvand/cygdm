@@ -21,7 +21,8 @@ static int copy_params(struct dm_ioctl *user, struct dm_ioctl **result)
 	if (copy_from_user(&tmp, user, sizeof(tmp)))
 		return -EFAULT;
 
-	if (!(dmi = (struct dm_ioctl *) vmalloc(tmp.data_size)))
+	dmi = (struct dm_ioctl *) vmalloc(tmp.data_size);
+	if (!dmi)
 		return -ENOMEM;
 
 	if (copy_from_user(dmi, user, tmp.data_size))
@@ -350,6 +351,9 @@ int dm_interface_init(void)
 
 	r = devfs_generate_path(_dm_misc.devfs_handle, rname + 3,
 				sizeof rname - 3);
+	if (r == -ENOSYS)
+		return 0; 	/* devfs not present */
+
 	if (r < 0) {
 		DMERR("devfs_generate_path failed for control device");
 		goto failed;

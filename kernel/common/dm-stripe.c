@@ -179,7 +179,7 @@ static struct target_type stripe_target = {
 	map:	stripe_map,
 };
 
-static int __init stripe_init(void)
+int __init dm_stripe_init(void)
 {
 	int r;
 
@@ -190,7 +190,7 @@ static int __init stripe_init(void)
 	return r;
 }
 
-static void __exit stripe_exit(void)
+void __exit dm_stripe_exit(void)
 {
 	if (dm_unregister_target(&stripe_target))
 		DMWARN("striped target unregistration failed");
@@ -198,9 +198,3 @@ static void __exit stripe_exit(void)
 	return;
 }
 
-module_init(stripe_init);
-module_exit(stripe_exit);
-
-MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
-MODULE_DESCRIPTION(DM_NAME ": striped mapping");
-MODULE_LICENSE("GPL");

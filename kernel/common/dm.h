@@ -170,4 +170,13 @@ static inline offset_t *get_node(struct dm_table *t, int l, int n)
 int dm_interface_init(void);
 void dm_interface_exit(void);
 
+/* 
+ * Targets for linear and striped mappings
+ */
+int dm_linear_init(void);
+void dm_linear_exit(void);
+int dm_stripe_init(void);
+void dm_stripe_exit(void);
+
+
 #endif

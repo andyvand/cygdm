@@ -85,7 +85,7 @@ static struct target_type linear_target = {
 	map:	linear_map,
 };
 
-static int __init linear_init(void)
+int __init dm_linear_init(void)
 {
 	int r = dm_register_target(&linear_target);
 
@@ -95,7 +95,7 @@ static int __init linear_init(void)
 	return r;
 }
 
-static void __exit linear_exit(void)
+void __exit dm_linear_exit(void)
 {
 	int r = dm_unregister_target(&linear_target);
 
@@ -103,9 +103,3 @@ static void __exit linear_exit(void)
 		DMERR("linear: unregister failed %d", r);
 }
 
-module_init(linear_init);
-module_exit(linear_exit);
-
-MODULE_AUTHOR("Joe Thornber <thornber@uk.sistina.com>");
-MODULE_DESCRIPTION(DM_NAME ": linear mapping");
-MODULE_LICENSE("GPL");

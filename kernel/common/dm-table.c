@@ -79,9 +79,11 @@ static int alloc_targets(struct dm_table *t, int num)
 	int n = t->num_targets;
 	unsigned long size = (sizeof(struct target) + sizeof(offset_t)) * num;
 
-	n_highs = vmalloc(size);
+	n_highs = (offset_t *) vmalloc(size);
 	if (!n_highs)
 		return -ENOMEM;
+
+	memset(n_highs, 0, size);
 
 	n_targets = (struct target *) (n_highs + num);
 
@@ -363,7 +365,8 @@ static int setup_indexes(struct dm_table *t)
 		total += t->counts[i];
 	}
 
-	if (!(indexes = vmalloc(NODE_SIZE * total)))
+	indexes = (offset_t *) vmalloc((unsigned long)NODE_SIZE * total);
+	if (!indexes)
 		return -ENOMEM;
 
 	/* set up internal nodes, bottom-up */
