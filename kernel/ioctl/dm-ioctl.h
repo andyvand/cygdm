@@ -7,7 +7,9 @@
 #ifndef _LINUX_DM_IOCTL_V4_H
 #define _LINUX_DM_IOCTL_V4_H
 
-#include <linux/types.h>
+#ifdef linux
+#  include <linux/types.h>
+#endif
 
 #define DM_DIR "mapper"		/* Slashes not supported */
 #define DM_MAX_TYPE_NAME 16

@@ -309,7 +309,7 @@ ac_includes_default="\
 #endif"
 
 ac_default_prefix=/usr
-ac_subst_vars='SHELL PATH_SEPARATOR PACKAGE_NAME PACKAGE_TARNAME PACKAGE_VERSION PACKAGE_STRING PACKAGE_BUGREPORT exec_prefix prefix program_transform_name bindir sbindir libexecdir datadir sysconfdir sharedstatedir localstatedir libdir includedir oldincludedir infodir mandir build_alias host_alias target_alias DEFS ECHO_C ECHO_N ECHO_T LIBS build build_cpu build_vendor build_os host host_cpu host_vendor host_os target target_cpu target_vendor target_os AWK CC CFLAGS LDFLAGS CPPFLAGS ac_ct_CC EXEEXT OBJEXT CPP EGREP INSTALL_PROGRAM INSTALL_SCRIPT INSTALL_DATA LN_S SET_MAKE RANLIB ac_ct_RANLIB LIBOBJS MSGFMT JOBS STATIC_LINK OWNER GROUP interface kerneldir missingkernel kernelvsn tmpdir COPTIMISE_FLAG CLDFLAGS LDDEPS SOFLAG DEBUG DM_LIB_VERSION COMPAT LOCALEDIR INTL_PACKAGE INTL DEVICE_UID DEVICE_GID DEVICE_MODE LTLIBOBJS'
+ac_subst_vars='SHELL PATH_SEPARATOR PACKAGE_NAME PACKAGE_TARNAME PACKAGE_VERSION PACKAGE_STRING PACKAGE_BUGREPORT exec_prefix prefix program_transform_name bindir sbindir libexecdir datadir sysconfdir sharedstatedir localstatedir libdir includedir oldincludedir infodir mandir build_alias host_alias target_alias DEFS ECHO_C ECHO_N ECHO_T LIBS build build_cpu build_vendor build_os host host_cpu host_vendor host_os target target_cpu target_vendor target_os AWK CC CFLAGS LDFLAGS CPPFLAGS ac_ct_CC EXEEXT OBJEXT CPP EGREP INSTALL_PROGRAM INSTALL_SCRIPT INSTALL_DATA LN_S SET_MAKE RANLIB ac_ct_RANLIB LIBOBJS MSGFMT JOBS STATIC_LINK OWNER GROUP interface kerneldir missingkernel kernelvsn tmpdir COPTIMISE_FLAG CLDFLAGS LDDEPS LIB_SUFFIX DEBUG DM_LIB_VERSION COMPAT DMIOCTLS LOCALEDIR INTL_PACKAGE INTL DEVICE_UID DEVICE_GID DEVICE_MODE LTLIBOBJS'
 ac_subst_files=''
 
 # Initialize some variables set by options.
@@ -848,6 +848,7 @@ Optional Features:
   --enable-jobs=NUM       Number of jobs to run simultaneously
   --enable-debug          Enable debugging
   --enable-compat         Enable support for old device-mapper versions
+  --disable-driver        Disable calls to device-mapper in the kernel
   --enable-static_link    Use this to link the tools to their libraries
                           statically.  Default is dynamic linking
   --enable-nls            Enable Native Language Support
@@ -859,7 +860,7 @@ Optional Packages:
   --with-group=GROUP      Set the group owner of installed files [GROUP=root]
   --with-device-uid=UID   Set the owner used for new device nodes [UID=0]
   --with-device-gid=UID   Set the group used for new device nodes [GID=0]
-  --with-device-mode=MODE  Set the mode used for new device nodes [MODE=0600]
+  --with-device-mode=MODE Set the mode used for new device nodes [MODE=0600]
   --with-optimisation=OPT C optimisation flag OPT=-O2
   --with-localedir=DIR    Translation files in DIR PREFIX/share/locale
   --with-kernel-dir=DIR   linux kernel source in DIR
@@ -1400,13 +1401,15 @@ case "$host_os" in
 		COPTIMISE_FLAG="-O2"
 		CLDFLAGS="$CLDFLAGS -Wl,--version-script,.export.sym"
 		LDDEPS="$LDDEPS .export.sym"
-		SOFLAG="-shared" ;;
+		LIB_SUFFIX="so"
+		DMIOCTLS="yes" ;;
 	darwin*)
 		CFLAGS="$CFLAGS -no-cpp-precomp -fno-common"
 		COPTIMISE_FLAG="-O2"
 		CLDFLAGS="$CLDFLAGS"
 		LDDEPS="$LDDEPS"
-		SOFLAG="-dynamiclib" ;;
+		LIB_SUFFIX="dylib"
+		DMIOCTLS="no" ;;
 esac
 
 ################################################################################
@@ -4834,6 +4837,13 @@ else
 fi;
 
 ################################################################################
+# Check whether --enable-ioctl or --disable-ioctl was given.
+if test "${enable_ioctl+set}" = set; then
+  enableval="$enable_ioctl"
+  DMIOCTLS=$enableval
+fi;
+
+################################################################################
 # Check whether --enable-static_link or --disable-static_link was given.
 if test "${enable_static_link+set}" = set; then
   enableval="$enable_static_link"
@@ -5247,6 +5257,7 @@ fi
 
 
 ################################################################################
+
 
 
 
@@ -5961,10 +5972,11 @@ s,@tmpdir@,$tmpdir,;t t
 s,@COPTIMISE_FLAG@,$COPTIMISE_FLAG,;t t
 s,@CLDFLAGS@,$CLDFLAGS,;t t
 s,@LDDEPS@,$LDDEPS,;t t
-s,@SOFLAG@,$SOFLAG,;t t
+s,@LIB_SUFFIX@,$LIB_SUFFIX,;t t
 s,@DEBUG@,$DEBUG,;t t
 s,@DM_LIB_VERSION@,$DM_LIB_VERSION,;t t
 s,@COMPAT@,$COMPAT,;t t
+s,@DMIOCTLS@,$DMIOCTLS,;t t
 s,@LOCALEDIR@,$LOCALEDIR,;t t
 s,@INTL_PACKAGE@,$INTL_PACKAGE,;t t
 s,@INTL@,$INTL,;t t

@@ -28,7 +28,7 @@ CFLAGS += @CFLAGS@
 CLDFLAGS += @CLDFLAGS@
 LDDEPS += @LDDEPS@
 LDFLAGS += @LDFLAGS@
-SOFLAG += @SOFLAG@
+LIB_SUFFIX = @LIB_SUFFIX@
 
 # Setup directory variables
 prefix = @prefix@
@@ -54,7 +54,7 @@ ifndef MAKEFLAGS
 MAKEFLAGS = @JOBS@
 endif
 
-SUFFIXES = .c .d .o .so .a .po .pot .mo
+.SUFFIXES: .c .d .o .so .a .po .pot .mo .dylib
 
 CFLAGS += -fPIC -Wall -Wundef -Wshadow -Wcast-align -Wwrite-strings -Wmissing-prototypes -Wmissing-declarations -Wnested-externs -Winline
 
@@ -74,6 +74,10 @@ LDFLAGS += -L$(interfacedir)
 
 ifeq ("@COMPAT@", "yes")
   CFLAGS += -DDM_COMPAT
+endif
+
+ifeq ("@DMIOCTLS@", "yes")
+  CFLAGS += -DDM_IOCTLS
 endif
 
 #CFLAGS += -pg
@@ -148,9 +152,17 @@ $(TARGETS): $(OBJECTS)
 %.so: %.o
 	$(CC) -c $(INCLUDES) $(CFLAGS) $< -o $@
 
+ifeq ("@LIB_SUFFIX@","so")
 $(LIB_SHARED): $(OBJECTS) $(LDDEPS)
-	$(CC) $(SOFLAG) -Wl,-soname,$(notdir $@).$(LIB_VERSION) \
+	$(CC) -shared -Wl,-soname,$(notdir $@).$(LIB_VERSION) \
 	$(CLDFLAGS) $(OBJECTS) $(LIBS) -o $@
+endif
+
+ifeq ("@LIB_SUFFIX@","dylib")
+$(LIB_SHARED): $(OBJECTS) $(LDDEPS)
+	$(CC) -dynamiclib -dylib_current_version,$(LIB_VERSION) \
+	$(CLDFLAGS) $(OBJECTS) $(LIBS) -o $@
+endif
 
 $(LIB_STATIC): $(OBJECTS)
 	$(RM) $@
