@@ -12,13 +12,13 @@ SHELL = /bin/sh
 CC = gcc
 RANLIB = ranlib
 SHELL = /bin/sh
-INSTALL = /usr/bin/install -c
+INSTALL = /usr/bin/install
 LN_S = ln -s
 
 prefix = /usr
 libdir = ${prefix}/lib
 incdir = ${prefix}/include
-kernelsrcdir = /scratch/alphalinux/linux
+kernelsrcdir = /usr/src/linux
 
 OWNER=root
 GROUP=root
@@ -36,11 +36,11 @@ SUFFIXES=.c .o .so
 %.o: %.c
 	$(CC) -c $(INCLUDES) $(CFLAGS) $< -o $@
 
-dmsetup: dmsetup.o libdevmapper.so
+dmsetup: dmsetup.o ../lib/libdevmapper.so
 	$(CC) -o dmsetup dmsetup.o $(LD_FLAGS) -L../lib -ldevmapper
 
 clean:
-	$(RM) dmsetup
+	$(RM) dmsetup dmsetup.o
 
 distclean: clean
 
