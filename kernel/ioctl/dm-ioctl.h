@@ -49,6 +49,8 @@ struct dm_ioctl {
 	uint32_t target_count;	/* in/out */
 	int32_t open_count;	/* out */
 	uint32_t flags;		/* in/out */
+	uint32_t event_nr;      /* in/out */
+	uint32_t padding;
 
 	uint64_t dev;		/* in/out */
 
@@ -131,7 +133,7 @@ enum {
 
 #define DM_VERSION_MAJOR	3
 #define DM_VERSION_MINOR	0
-#define DM_VERSION_PATCHLEVEL	5
+#define DM_VERSION_PATCHLEVEL	6
 #define DM_VERSION_EXTRA	"-ioctl-cvs (2003-04-26)"
 
 /* Status bits */
