@@ -45,6 +45,7 @@ struct dm_table {
 	 * A waitqueue for processes waiting for something
 	 * interesting to happen to this table.
 	 */
+	struct semaphore event_lock;
 	wait_queue_head_t eventq;
 };
 
@@ -175,6 +176,7 @@ int dm_table_create(struct dm_table **result, int mode)
 		return -ENOMEM;
 	}
 
+	init_MUTEX(&t->event_lock);
 	init_waitqueue_head(&t->eventq);
 	t->mode = mode;
 	*result = t;
@@ -198,6 +200,9 @@ void table_destroy(struct dm_table *t)
 
 	/* destroying the table counts as an event */
 	dm_table_event(t);
+
+	/* wait for eventq to empty */
+	down(&t->event_lock);
 
 	/* free the indexes (see dm_table_complete) */
 	if (t->depth >= 2)
@@ -658,14 +663,25 @@ int dm_table_get_mode(struct dm_table *t)
 	return t->mode;
 }
 
+static spinlock_t _wq_lock = SPIN_LOCK_UNLOCKED;
 void dm_table_add_wait_queue(struct dm_table *t, wait_queue_t *wq)
 {
+	spin_lock(&_wq_lock);
+	if (!waitqueue_active(&t->eventq))
+		down(&t->event_lock);
+	spin_unlock(&_wq_lock);
+
 	add_wait_queue(&t->eventq, wq);
 }
 
 void dm_table_remove_wait_queue(struct dm_table *t, wait_queue_t *wq)
 {
 	remove_wait_queue(&t->eventq, wq);
+
+	spin_lock(&_wq_lock);
+	if (!waitqueue_active(&t->eventq))
+		up(&t->event_lock);
+	spin_unlock(&_wq_lock);
 }
 
 EXPORT_SYMBOL(dm_get_device);
