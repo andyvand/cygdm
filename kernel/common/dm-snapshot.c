@@ -132,7 +132,7 @@ static struct origin *__lookup_origin(kdev_t origin)
 	struct origin *o;
 
 	ol = &_origins[origin_hash(origin)];
-	list_for_each(slist, ol) {
+	list_for_each (slist, ol) {
 		o = list_entry(slist, struct origin, hash_list);
 
 		if (o->dev == origin)
@@ -225,7 +225,7 @@ static void exit_exception_table(struct exception_table *et, kmem_cache_t *mem)
 	for (i = 0; i < size; i++) {
 		slot = et->table + i;
 
-		list_for_each_safe(entry, temp, slot) {
+		list_for_each_safe (entry, temp, slot) {
 			ex = list_entry(entry, struct exception, hash_list);
 			kmem_cache_free(mem, ex);
 		}
@@ -264,7 +264,7 @@ static struct exception *lookup_exception(struct exception_table *et,
 	struct exception *e;
 
 	slot = &et->table[exception_hash(et, chunk)];
-	list_for_each(el, slot) {
+	list_for_each (el, slot) {
 		e = list_entry(el, struct exception, hash_list);
 		if (e->old_chunk == chunk)
 			return e;
@@ -881,7 +881,7 @@ static int __origin_write(struct list_head *snapshots, struct buffer_head *bh)
 	chunk_t chunk;
 
 	/* Do all the snapshots on this origin */
-	list_for_each(sl, snapshots) {
+	list_for_each (sl, snapshots) {
 		snap = list_entry(sl, struct dm_snapshot, list);
 
 		/* Only deal with valid snapshots */

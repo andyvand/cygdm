@@ -93,54 +93,55 @@ struct major_details {
 };
 
 static struct rw_semaphore _dev_lock;
-
 static struct major_details *_majors[MAX_BLKDEV];
 
 static LIST_HEAD(_transients_free);
 
-static int __alloc_major(unsigned int major, struct major_details **maj)
+static int __alloc_major(unsigned int major, struct major_details **result)
 {
 	int r;
 	unsigned int transient = !major;
+	struct major_details *maj;
 
 	/* Major already allocated? */
 	if (major && _majors[major])
 		return 0;
 
-	*maj = kmalloc(sizeof(**maj), GFP_KERNEL);
-	if (!*maj)
+	maj = kmalloc(sizeof(*maj), GFP_KERNEL);
+	if (!maj)
 		return -ENOMEM;
 
-	memset(*maj, 0, sizeof(**maj));
-	INIT_LIST_HEAD(&(*maj)->transient_list);
+	memset(maj, 0, sizeof(*maj));
+	INIT_LIST_HEAD(&maj->transient_list);
 
-	(*maj)->nr_free_minors = MAX_MINORS;
+	maj->nr_free_minors = MAX_MINORS;
 
 	r = register_blkdev(major, _name, &dm_blk_dops);
 	if (r < 0) {
 		DMERR("register_blkdev failed for %d", major);
-		kfree(*maj);
+		kfree(maj);
 		return r;
 	}
 	if (r > 0)
 		major = r;
 
-	(*maj)->major = major;
+	maj->major = major;
 
 	if (transient) {
-		(*maj)->transient = transient;
-		list_add_tail(&(*maj)->transient_list, &_transients_free);
+		maj->transient = transient;
+		list_add_tail(&maj->transient_list, &_transients_free);
 	}
 
-	_majors[major] = *maj;
+	_majors[major] = maj;
 
-	blk_size[major] = (*maj)->blk_size;
-	blksize_size[major] = (*maj)->blksize_size;
-	hardsect_size[major] = (*maj)->hardsect_size;
+	blk_size[major] = maj->blk_size;
+	blksize_size[major] = maj->blksize_size;
+	hardsect_size[major] = maj->hardsect_size;
 	read_ahead[major] = DEFAULT_READ_AHEAD;
 
 	blk_queue_make_request(BLK_DEFAULT_QUEUE(major), dm_request);
 
+	*result = maj;
 	return 0;
 }
 
@@ -215,14 +216,12 @@ static void __alloc_minor(struct major_details *maj, unsigned int minor,
 	md->dev = mk_kdev(maj->major, minor);
 	maj->nr_free_minors--;
 
-	if (maj->transient && !maj->nr_free_minors) {
-		list_del(&maj->transient_list);
-		INIT_LIST_HEAD(&maj->transient_list);
-	}
+	if (maj->transient && !maj->nr_free_minors)
+		list_del_init(&maj->transient_list);
 }
 
 /*
- * See if requested kdev_t is available
+ * See if requested kdev_t is available.
  */
 static int specific_dev(kdev_t dev, struct mapped_device *md)
 {
@@ -244,19 +243,19 @@ static int specific_dev(kdev_t dev, struct mapped_device *md)
 	if (!maj) {
 		r = __alloc_major(major, &maj);
 		if (r)
-			goto error;
+			goto out;
 
 		major = maj->major;
 	}
 
 	if (maj->mds[minor]) {
 		r = -EBUSY;
-		goto error;
+		goto out;
 	}
 
 	__alloc_minor(maj, minor, md);
 
-      error:
+      out:
 	up_write(&_dev_lock);
 
 	return r;
@@ -317,7 +316,6 @@ static struct mapped_device *get_kdev(kdev_t dev)
 
 static __init int local_init(void)
 {
-	memset(&_majors, 0, sizeof(_majors));
 	init_rwsem(&_dev_lock);
 
 	/* allocate a slab for the dm_ios */
@@ -786,7 +784,7 @@ static int __find_hardsect_size(struct list_head *devices)
 	int result = 512, size;
 	struct list_head *tmp;
 
-	list_for_each(tmp, devices) {
+	list_for_each (tmp, devices) {
 		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
 		size = get_hardsect_size(dd->dev);
 		if (size > result)

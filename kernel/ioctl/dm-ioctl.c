@@ -95,7 +95,7 @@ static struct hash_cell *__get_name_cell(const char *str)
 	struct hash_cell *hc;
 	unsigned int h = hash_str(str);
 
-	list_for_each(tmp, _name_buckets + h) {
+	list_for_each (tmp, _name_buckets + h) {
 		hc = list_entry(tmp, struct hash_cell, name_list);
 		if (!strcmp(hc->name, str))
 			return hc;
@@ -110,7 +110,7 @@ static struct hash_cell *__get_uuid_cell(const char *str)
 	struct hash_cell *hc;
 	unsigned int h = hash_str(str);
 
-	list_for_each(tmp, _uuid_buckets + h) {
+	list_for_each (tmp, _uuid_buckets + h) {
 		hc = list_entry(tmp, struct hash_cell, uuid_list);
 		if (!strcmp(hc->uuid, str))
 			return hc;
@@ -254,7 +254,7 @@ void dm_hash_remove_all(void)
 
 	down_write(&_hash_lock);
 	for (i = 0; i < NUM_BUCKETS; i++) {
-		list_for_each_safe(tmp, n, _name_buckets + i) {
+		list_for_each_safe (tmp, n, _name_buckets + i) {
 			hc = list_entry(tmp, struct hash_cell, name_list);
 			__hash_remove(hc);
 		}
@@ -398,18 +398,12 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 }
 
 /*
- * Round up the ptr to the next alignment boundary (power of 2).
+ * Round up the ptr to an 8-byte boundary.
  */
-static inline void *_align(void *ptr, size_t alignment)
+#define ALIGN_MASK 7
+static inline void *align_ptr(void *ptr)
 {
-	register size_t a = alignment - 1;
-
-	return (void *) (((size_t) (ptr + a)) & ~a);
-}
-
-static inline void *_align_ptr(void *ptr)
-{
-	return _align(ptr, 8);
+	return (void *) (((size_t) (ptr + ALIGN_MASK)) & ~ALIGN_MASK);
 }
 
 /*
@@ -422,7 +416,7 @@ static int results_to_user(struct dm_ioctl *user, struct dm_ioctl *param,
 	void *ptr = NULL;
 
 	if (data) {
-		ptr = _align_ptr(user + 1);
+		ptr = align_ptr(user + 1);
 		param->data_start = ptr - (void *) user;
 	}
 
@@ -657,7 +651,7 @@ static int __status(struct mapped_device *md, struct dm_ioctl *param,
 			outptr[0] = '\0';
 
 		outptr += strlen(outptr) + 1;
-		_align_ptr(outptr);
+		align_ptr(outptr);
 		spec->next = outptr - outbuf;
 	}
 
@@ -767,7 +761,7 @@ static int deps(struct dm_ioctl *param, struct dm_ioctl *user)
 	 * Count the devices.
 	 */
 	count = 0;
-	list_for_each(tmp, dm_table_get_devices(table))
+	list_for_each (tmp, dm_table_get_devices(table))
 	    count++;
 
 	/*
@@ -792,7 +786,7 @@ static int deps(struct dm_ioctl *param, struct dm_ioctl *user)
 	 */
 	tdeps->count = count;
 	count = 0;
-	list_for_each(tmp, dm_table_get_devices(table)) {
+	list_for_each (tmp, dm_table_get_devices(table)) {
 		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
 		tdeps->dev[count++] = dd->bdev->bd_dev;
 	}
