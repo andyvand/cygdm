@@ -27,4 +27,4 @@ include make.tmpl
 
 apply-patches:
 	patch -d $(kerneldir) -p1 -i \
-		patches/linux-$(kernelvsn)-devmapper-$(interface).patch
+		`pwd`/patches/linux-$(kernelvsn)-devmapper-$(interface).patch

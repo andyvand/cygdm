@@ -12,6 +12,8 @@
 #define DM_DIR "device-mapper"
 #define DM_MAX_TYPE_NAME 16
 
+#ifdef __KERNEL__
+
 struct dm_table;
 struct dm_dev;
 typedef unsigned int offset_t;
@@ -54,6 +56,8 @@ struct target_type {
 
 int dm_register_target(struct target_type *t);
 int dm_unregister_target(struct target_type *t);
+
+#endif /* __KERNEL__ */
 
 #endif /* DEVICE_MAPPER_H */
 

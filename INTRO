@@ -43,8 +43,8 @@ is useful for defining gaps in the new logical device.
 In normal scenarios the mapping tables will remain small.
 A btree structure is used to hold the sector range -> target mapping.
 Since we know all the entries in the btree in advance we can make a
-very compact tree, omitting pointers to child nodes, (child nodes
-locations can be calculated).
+very compact tree, omitting pointers to child nodes as child node
+locations can be calculated.
 
 Benchmarking with bonnie++ suggests that this is certainly no slower
 than current LVM.

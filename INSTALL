@@ -22,7 +22,7 @@ Device Mapper installation
 
 2) Patch, configure and build a new kernel containing device-mapper.
 
-   If there is already a patch for your kernel and you gave 'configure'
+   If there is already a patch for your kernel and you give 'configure'
    appropriate parameters in step 1, you can just run 'make apply-patches' 
    from the top directory.
    

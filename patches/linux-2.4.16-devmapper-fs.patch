@@ -1,6 +1,6 @@
 diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
 --- linux-2.4.16/drivers/md/Config.in	Fri Sep 14 22:22:18 2001
-+++ linux/drivers/md/Config.in	Thu Dec  6 18:11:27 2001
++++ linux/drivers/md/Config.in	Thu Dec  6 22:02:23 2001
 @@ -14,5 +14,6 @@
  dep_tristate '  Multipath I/O support' CONFIG_MD_MULTIPATH $CONFIG_BLK_DEV_MD
  
@@ -10,7 +10,7 @@ diff -ruN linux-2.4.16/drivers/md/Config.in linux/drivers/md/Config.in
  endmenu
 diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 --- linux-2.4.16/drivers/md/Makefile	Thu Dec  6 15:57:55 2001
-+++ linux/drivers/md/Makefile	Thu Dec  6 18:11:28 2001
++++ linux/drivers/md/Makefile	Thu Dec  6 22:02:23 2001
 @@ -4,9 +4,12 @@
  
  O_TARGET	:= mddev.o
@@ -19,18 +19,17 @@ diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 +export-objs	:= md.o xor.o dm-table.o dm-target.o
  list-multi	:= lvm-mod.o
  lvm-mod-objs	:= lvm.o lvm-snap.o lvm-fs.o
-+dm-mod-objs	:= dm.o dm-table.o dm-target.o dmfs-super.o dmfs-root.o \
-+		dmfs-lv.o dmfs-table.o dmfs-error.o dmfs-status.o \
-+		dmfs-active.o
++dm-mod-objs	:= dm.o dm-linear.o dm-stripe.o dm-table.o dm-target.o \
++		   dmfs-root.o dmfs-lv.o dmfs-table.o dmfs-error.o \
++		   dmfs-status.o dmfs-super.o dmfs-suspend.o
  
  # Note: link order is important.  All raid personalities
  # and xor.o must come before md.o, as they each initialise 
-@@ -20,8 +23,14 @@
+@@ -20,8 +23,13 @@
  obj-$(CONFIG_MD_MULTIPATH)	+= multipath.o
  obj-$(CONFIG_BLK_DEV_MD)	+= md.o
  obj-$(CONFIG_BLK_DEV_LVM)	+= lvm-mod.o
-+obj-$(CONFIG_BLK_DEV_DM)        += dm-mod.o
-+obj-$(CONFIG_BLK_DEV_DM_LINEAR) += dm-linear.o
++obj-$(CONFIG_BLK_DEV_DM)	+= dm-mod.o
  
  include $(TOPDIR)/Rules.make
  
@@ -42,8 +41,8 @@ diff -ruN linux-2.4.16/drivers/md/Makefile linux/drivers/md/Makefile
 +
 diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper.h
 --- linux-2.4.16/drivers/md/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/device-mapper.h	Wed Dec  5 23:13:28 2001
-@@ -0,0 +1,59 @@
++++ linux/drivers/md/device-mapper.h	Thu Dec  6 21:58:48 2001
+@@ -0,0 +1,63 @@
 +/*
 + * device-mapper.h
 + *
@@ -57,6 +56,8 @@ diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +
 +#define DM_DIR "device-mapper"
 +#define DM_MAX_TYPE_NAME 16
++
++#ifdef __KERNEL__
 +
 +struct dm_table;
 +struct dm_dev;
@@ -100,6 +101,8 @@ diff -ruN linux-2.4.16/drivers/md/device-mapper.h linux/drivers/md/device-mapper
 +
 +int dm_register_target(struct target_type *t);
 +int dm_unregister_target(struct target_type *t);
++
++#endif /* __KERNEL__ */
 +
 +#endif /* DEVICE_MAPPER_H */
 +
@@ -1943,7 +1946,7 @@ diff -ruN linux-2.4.16/drivers/md/dm.c linux/drivers/md/dm.c
 +
 diff -ruN linux-2.4.16/drivers/md/dm.h linux/drivers/md/dm.h
 --- linux-2.4.16/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
-+++ linux/drivers/md/dm.h	Wed Dec  5 23:12:36 2001
++++ linux/drivers/md/dm.h	Thu Dec  6 20:36:54 2001
 @@ -0,0 +1,243 @@
 +/*
 + * dm.h
@@ -3438,7 +3441,7 @@ diff -ruN linux-2.4.16/drivers/md/dmfs.h linux/drivers/md/dmfs.h
 +#endif /* LINUX_DMFS_H */
 diff -ruN linux-2.4.16/fs/namespace.c linux/fs/namespace.c
 --- linux-2.4.16/fs/namespace.c	Thu Dec  6 15:57:56 2001
-+++ linux/fs/namespace.c	Thu Dec  6 18:11:27 2001
++++ linux/fs/namespace.c	Thu Dec  6 22:02:23 2001
 @@ -332,7 +332,7 @@
  	}
  }
@@ -3450,8 +3453,8 @@ diff -ruN linux-2.4.16/fs/namespace.c linux/fs/namespace.c
  	int retval = 0;
 diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-mapper.h
 --- linux-2.4.16/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
-+++ linux/include/linux/device-mapper.h	Wed Dec  5 23:13:28 2001
-@@ -0,0 +1,59 @@
++++ linux/include/linux/device-mapper.h	Thu Dec  6 21:58:48 2001
+@@ -0,0 +1,63 @@
 +/*
 + * device-mapper.h
 + *
@@ -3465,6 +3468,8 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +
 +#define DM_DIR "device-mapper"
 +#define DM_MAX_TYPE_NAME 16
++
++#ifdef __KERNEL__
 +
 +struct dm_table;
 +struct dm_dev;
@@ -3509,11 +3514,13 @@ diff -ruN linux-2.4.16/include/linux/device-mapper.h linux/include/linux/device-
 +int dm_register_target(struct target_type *t);
 +int dm_unregister_target(struct target_type *t);
 +
++#endif /* __KERNEL__ */
++
 +#endif /* DEVICE_MAPPER_H */
 +
 diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
 --- linux-2.4.16/include/linux/fs.h	Thu Dec  6 15:57:58 2001
-+++ linux/include/linux/fs.h	Thu Dec  6 18:11:27 2001
++++ linux/include/linux/fs.h	Thu Dec  6 22:02:23 2001
 @@ -980,6 +980,7 @@
  extern struct vfsmount *kern_mount(struct file_system_type *);
  extern int may_umount(struct vfsmount *);
@@ -3524,7 +3531,7 @@ diff -ruN linux-2.4.16/include/linux/fs.h linux/include/linux/fs.h
  
 diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
 --- linux-2.4.16/include/linux/seq_file.h	Thu Dec  6 15:57:56 2001
-+++ linux/include/linux/seq_file.h	Thu Dec  6 18:11:28 2001
++++ linux/include/linux/seq_file.h	Thu Dec  6 22:02:23 2001
 @@ -12,6 +12,7 @@
  	loff_t index;
  	struct semaphore sem;
@@ -3535,7 +3542,7 @@ diff -ruN linux-2.4.16/include/linux/seq_file.h linux/include/linux/seq_file.h
  struct seq_operations {
 diff -ruN linux-2.4.16/kernel/ksyms.c linux/kernel/ksyms.c
 --- linux-2.4.16/kernel/ksyms.c	Thu Dec  6 15:57:56 2001
-+++ linux/kernel/ksyms.c	Thu Dec  6 18:11:28 2001
++++ linux/kernel/ksyms.c	Thu Dec  6 22:02:23 2001
 @@ -46,6 +46,7 @@
  #include <linux/tty.h>
  #include <linux/in6.h>
