@@ -11,7 +11,7 @@ diff -ruN linux-2.4.18/drivers/md/Makefile linux/drivers/md/Makefile
  lvm-mod-objs	:= lvm.o lvm-snap.o lvm-fs.o
 +dm-mod-objs	:= dm.o dm-table.o dm-target.o dm-ioctl.o \
 +		   dm-linear.o dm-stripe.o dm-snapshot.o dm-exception-store.o \
-+		   dm-origin.o dm-mirror.o kcopyd.o
++		   dm-mirror.o kcopyd.o
  
  # Note: link order is important.  All raid personalities
  # and xor.o must come before md.o, as they each initialise 
