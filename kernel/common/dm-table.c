@@ -77,7 +77,7 @@ static int alloc_targets(struct dm_table *t, int num)
 	offset_t *n_highs;
 	struct target *n_targets;
 	int n = t->num_targets;
-	int size = (sizeof(struct target) + sizeof(offset_t)) * num;
+	unsigned long size = (sizeof(struct target) + sizeof(offset_t)) * num;
 
 	n_highs = vmalloc(size);
 	if (!n_highs)
@@ -91,7 +91,8 @@ static int alloc_targets(struct dm_table *t, int num)
 	}
 
 	memset(n_highs + n, -1, sizeof(*n_highs) * (num - n));
-	vfree(t->highs);
+	if (t->highs)
+		vfree(t->highs);
 
 	t->num_allocated = num;
 	t->highs = n_highs;

@@ -15,7 +15,7 @@
 
 struct dm_table;
 struct dm_dev;
-typedef unsigned int offset_t;
+typedef unsigned long offset_t;
 
 
 /*

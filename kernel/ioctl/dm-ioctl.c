@@ -228,15 +228,17 @@ static int reload(struct dm_ioctl *param)
 		return -ENXIO;
 
 	r = dm_table_create(&t);
-	if ((r = dm_table_create(&t)))
+	if (r)
 		return r;
 
-	if ((r = populate_table(t, param))) {
+	r = populate_table(t, param);
+	if (r) {
 		dm_table_destroy(t);
 		return r;
 	}
 
-	if ((r = dm_swap_table(md, t))) {
+	r = dm_swap_table(md, t);
+	if (r) {
 		dm_table_destroy(t);
 		return r;
 	}
