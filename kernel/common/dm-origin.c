@@ -54,25 +54,20 @@ static inline char *next_token(char **p)
  * Construct a origin mapping: <dev_path> <offset>
  */
 static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
-		      char *args, void **context)
+		      int argc, char **argv, void **context)
 {
 	struct origin_c *lc;
 	unsigned int start;
 	int r = -EINVAL;
-	char *tok;
 	char *path;
-	char *p = args;
 
-	*context = "No device path given";
-	path = next_token(&p);
-	if (!path)
-		goto bad;
+	if (argc < 2) {
+		*context = "dm-stripe: Not enough arguments";
+		return -EINVAL;
+	}
 
-	*context = "No initial offset given";
-	tok = next_token(&p);
-	if (!tok)
-		goto bad;
-	start = simple_strtoul(tok, NULL, 10);
+	path = argv[0];
+	start = simple_strtoul(argv[1], NULL, 10);
 
 	*context = "Cannot allocate origin context private structure";
 	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
@@ -111,7 +106,7 @@ static int origin_map(struct buffer_head *bh, int rw, void *context)
 
 	/* Only tell snapshots if this is a write */
 	if (rw != READ && rw != READA) {
-	        dm_do_snapshot(lc->target_dev, bh);
+	        return dm_do_snapshot(lc->target_dev, bh);
 	}
 
 	return 1;
