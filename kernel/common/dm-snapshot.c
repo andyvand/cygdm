@@ -314,8 +314,7 @@ static int read_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, in
 	return (status != (nr_sectors << 9));
 }
 
-/* Write out blocks - we only ever write to the COW device
-   so we don't expect the kdev_t as an arg */
+/* Write out blocks */
 static int write_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, int nr_sectors)
 {
 	int i, sectors_per_block, nr_blocks;
@@ -1133,11 +1132,11 @@ static int __init snapshot_init(void)
 	int r = dm_register_target(&snapshot_target);
 
 	if (r < 0)
-		printk(KERN_ERR "Device mapper: Snapshot: register failed %d\n", r);
+		DMERR("Device mapper: Snapshot: register failed %d\n", r);
 	else {
 		snapshot_origins = kmalloc(ORIGIN_HASH_SIZE * sizeof(struct list_head), GFP_KERNEL);
 		if (snapshot_origins == NULL) {
-			printk(KERN_ERR "Device mapper: Snapshot: unable to allocate memory\n");
+			DMERR("Device mapper: Snapshot: unable to allocate memory\n");
 			r = -1;
 		}
 		else {
@@ -1157,7 +1156,7 @@ static void snapshot_exit(void)
 	int r = dm_unregister_target(&snapshot_target);
 
 	if (r < 0)
-		printk(KERN_ERR
+		DMERR(
 		       "Device mapper: Snapshot: unregister failed %d\n", r);
 
 	if (snapshot_origins)
