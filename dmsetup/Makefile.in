@@ -13,8 +13,11 @@ TARGETS=dmsetup
 
 include ../make.tmpl
 
-dmsetup: $(OBJECTS)
-	$(CC) -o dmsetup dmsetup.o $(LD_FLAGS) -ldevmapper
+dmsetup: $(OBJECTS) $(interfacedir)/libdevmapper.so \
+	 $(interfacedir)/libdevmapper.a
+	$(CC) -o dmsetup $(OBJECTS) $(LD_FLAGS) \
+	      -L$(interfacedir) -L$(DESTDIR)/lib $(LIBS) \
+	      -ldevmapper
 
 install: dmsetup
 	$(INSTALL) -D -o $(OWNER) -g $(GROUP) -m 555 $(STRIP) $< $(sbindir)/$<

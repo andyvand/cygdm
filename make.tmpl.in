@@ -79,6 +79,10 @@ LIB_VERSION := $(shell cat $(top_srcdir)/VERSION | \
 
 INCLUDES+=-I. -I$(top_srcdir)/include
 
+ifdef DESTDIR
+  INCLUDES+=-I$(DESTDIR)/usr/include
+endif
+
 ifneq ("@missingkernel@", "yes")
   INCLUDES+=-I$(kerneldir)/include
 endif
@@ -134,10 +138,8 @@ $(TARGETS): $(OBJECTS)
 
 %.d: %.c
 	set -e; \
-	FILE=`echo $@ | \
-		sed 's/\\//\\\\\\//g;s/\\.d//g'`; \
-	DEPS=`echo $(DEPS) | \
-		sed -e 's/\\//\\\\\\//g'`; \
+	FILE=`echo $@ | sed 's/\\//\\\\\\//g;s/\\.d//g'`; \
+	DEPS=`echo $(DEPS) | sed -e 's/\\//\\\\\\//g'`; \
 	$(CC) -MM $(INCLUDES) $(CFLAGS) $< | \
 	sed "s/\(.*\)\.o[ :]*/$$FILE.o $$FILE.d : $$DEPS /g" > $@; \
 		[ -s $@ ] || $(RM) $@
