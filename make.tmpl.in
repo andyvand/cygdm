@@ -100,8 +100,8 @@ $(SUBDIRS.distclean):
 %.o: %.c
 	$(CC) -c $(INCLUDES) $(CFLAGS) $< -o $@
 
-%.so: %.o
-	$(CC) -shared $< -o $@
+%.so: $(OBJECTS)
+	$(CC) -shared $(OBJECTS) -o $@
 
 %.d: %.c
 	set -e; FILE=`echo $@ | sed 's/\\//\\\\\\//g;s/\\.d//g'`; \
