@@ -61,7 +61,6 @@ static int origin_map(struct buffer_head *bh, int rw, void *context)
 	struct dm_dev *dev = (struct dm_dev *) context;
 
 	bh->b_rdev = dev->dev;
-	bh->b_rsector = bh->b_rsector;
 
 	/* Only tell snapshots if this is a write */
 	return (rw == WRITE) ? dm_do_snapshot(dev, bh) : 1;
