@@ -1,7 +1,7 @@
 /*
  * dm-origin.c
  *
- * Copyright (C) 2001 Sistina Software (UK) Limited.
+ * Copyright (C) 2001-2002 Sistina Software (UK) Limited.
  *
  * This file is released under the GPL.
  */
@@ -38,14 +38,14 @@ static int origin_ctr(struct dm_table *t, offset_t b, offset_t l,
 	char *path;
 
 	if (argc < 2) {
-		*context = "dm-stripe: Not enough arguments";
+		*context = "dm-origin: Not enough arguments";
 		return -EINVAL;
 	}
 
 	path = argv[0];
 	start = simple_strtoul(argv[1], &value, 10);
 	if (value == NULL) {
-		*context = "Invalid segment size";
+		*context = "Invalid offset";
 		goto bad;
 	}
 

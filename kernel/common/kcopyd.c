@@ -21,9 +21,9 @@
 #define SECTOR_SIZE 512
 
 /* Number of entries in the free list to start with */
-#define FREE_LIST_SIZE 10
+#define FREE_LIST_SIZE 32
 
-/* Slab cache for work/freelist entries */
+/* Slab cache for work entries when the freelist runs out */
 static kmem_cache_t *entry_cachep;
 
 /* Structure of work to do in the list */
@@ -58,7 +58,9 @@ static int thread_exit = 0;
 static long last_jiffies = 0;
 
 
-/* Find a free entry from the free-list */
+/* Find a free entry from the free-list or allocate a new one
+   This routine always returns a valid pointer even if it has to wait
+   for one */
 static struct copy_work *get_work_struct(void)
 {
 	struct copy_work *entry = NULL;
@@ -74,7 +76,7 @@ static struct copy_work *get_work_struct(void)
 	if (!entry) {
 		entry = kmem_cache_alloc(entry_cachep, GFP_NOIO);
 
-		/* Make sure know it didn't come from the free list */
+		/* Make sure we know it didn't come from the free list */
 		if (entry) {
 			entry->freelist = 0;
 		}
@@ -157,7 +159,7 @@ static void add_to_work_list(struct copy_work *item)
 	list_add_tail(&item->list, &work_list);
 }
 
-/* Read in a chunk from the origin device */
+/* Read in a chunk from the source device */
 static int read_blocks(struct kiobuf *iobuf, kdev_t dev, unsigned long start, int nr_sectors)
 {
 	int i, sectors_per_block, nr_blocks;
