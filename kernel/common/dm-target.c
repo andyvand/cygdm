@@ -32,15 +32,15 @@ int split_args(int max, int *argc, char **argv, char *input)
 		start = end;
 
 		/* Skip whitespace */
-		while(*start && isspace(*start))
+		while (*start && isspace(*start))
 			start++;
 
 		if (!*start)
-			break; /* success, we hit the end */
+			break;	/* success, we hit the end */
 
 		/* 'out' is used to remove any back-quotes */
 		end = out = start;
-		while(*end) {
+		while (*end) {
 			/* Everything apart from '\0' can be quoted */
 			if (*end == '\\' && *(end + 1)) {
 				*out++ = *(end + 1);
@@ -49,7 +49,7 @@ int split_args(int max, int *argc, char **argv, char *input)
 			}
 
 			if (isspace(*end))
-				break; /* end of token */
+				break;	/* end of token */
 
 			*out++ = *end++;
 		}
@@ -58,9 +58,12 @@ int split_args(int max, int *argc, char **argv, char *input)
 		if ((*argc + 1) > max)
 			return -EINVAL;
 
+		/* we know this is whitespace */
+		if (*end)
+			end++;
+
 		/* terminate the string and put it in the array */
 		*out = '\0';
-		end++;
 		argv[*argc] = start;
 		(*argc)++;
 	}
