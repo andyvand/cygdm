@@ -370,9 +370,9 @@ static struct exception *add_exception(struct snapshot_c *sc, unsigned long org,
 static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 {
 	struct inflight_exception *iex = (struct inflight_exception *)context;
-	struct buffer_head *bh;
 
 	if (reason == COPY_CB_COMPLETE) {
+		struct buffer_head *bh;
 
 		/* Update the metadata if we are persistent */
 		if (iex->snap->persistent)
@@ -389,6 +389,7 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 		bh = iex->bh;
 		iex->bh = NULL;
 		up_write(&iex->snap->origin->lock);
+		kfree(iex);
 
 		while (bh) {
 			struct buffer_head *nextbh = bh->b_reqnext;
@@ -396,13 +397,15 @@ static void copy_callback(copy_cb_reason_t reason, void *context, long arg)
 			generic_make_request(WRITE, bh);
 			bh = nextbh;
 		}
-		kfree(iex);
+
 	}
 
 	/* Read/write error - snapshot is unusable */
 	if (reason == COPY_CB_FAILED_WRITE || reason == COPY_CB_FAILED_READ) {
 		DMERR("Error reading/writing snapshot");
 		iex->snap->full = 1;
+		if (iex->snap->persistent)
+			write_header(iex->snap);
 		list_del(&iex->list);
 		kfree(iex);
 	}
@@ -894,7 +897,7 @@ static int setup_persistent_snapshot(struct snapshot_c *lc, int blocksize, void 
 	lc->highest_metadata_entry = (lc->extent_size*SECTOR_SIZE) / sizeof(struct disk_exception) - 1;
 	lc->md_entries_per_block   = blocksize / sizeof(struct disk_exception);
 
-	/* Allocate and set up iobuf for metadata I/O*/
+	/* Allocate and set up iobuf for metadata I/O */
 	*context = "Unable to allocate COW iovec";
 	if (alloc_kiovec(1, &lc->cow_iobuf))
 		return -1;
@@ -1257,7 +1260,7 @@ int dm_do_snapshot(struct dm_dev *origin, struct buffer_head *bh)
 	ol = __lookup_snapshot_list(origin->dev);
 	up_read(&origin_hash_lock);
 
-	if (ol) {
+	if (ol && !list_empty(&ol->snap_list)) {
 		struct list_head *origin_snaps = &ol->snap_list;
 		struct snapshot_c *lock_snap;
 
