@@ -11,7 +11,7 @@ Device Mapper installation
    Other flags let you change the installation & working directories.
 
    Example:  
-   ./configure --with-kernel-dir=/usr/src/linux-2.4.19
+   ./configure --with-kernel-dir=/usr/src/linux-2.4.20
 
 
 2) Patch, configure and build a new kernel containing device-mapper
@@ -40,6 +40,8 @@ Device Mapper installation
 
    Running 'make symlinks' from the 'kernel' subdirectory will put symbolic 
    links into your kernel tree pointing back at the device-mapper source files.
+   If you do this, you'll probably also need to apply the VFS patch and all
+   the constituent patches in patches/common except for the devmapper one.
    
 
 3) Build and install the shared library (libdevmapper.so) that
