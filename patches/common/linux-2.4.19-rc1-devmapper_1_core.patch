@@ -1,0 +1,2149 @@
+diff -ruN linux-2.4.19-rc1/drivers/md/Makefile linux/drivers/md/Makefile
+--- linux-2.4.19-rc1/drivers/md/Makefile	Tue Jun 25 22:14:21 2002
++++ linux/drivers/md/Makefile	Tue Jun 25 22:09:23 2002
+@@ -4,9 +4,10 @@
+ 
+ O_TARGET	:= mddev.o
+ 
+-export-objs	:= md.o xor.o
++export-objs	:= md.o xor.o dm-table.o dm-target.o
+ list-multi	:= lvm-mod.o
+ lvm-mod-objs	:= lvm.o lvm-snap.o lvm-fs.o
++dm-mod-objs	:= dm.o dm-table.o dm-target.o
+ 
+ # Note: link order is important.  All raid personalities
+ # and xor.o must come before md.o, as they each initialise 
+@@ -20,8 +21,12 @@
+ obj-$(CONFIG_MD_MULTIPATH)	+= multipath.o
+ obj-$(CONFIG_BLK_DEV_MD)	+= md.o
+ obj-$(CONFIG_BLK_DEV_LVM)	+= lvm-mod.o
++obj-$(CONFIG_BLK_DEV_DM)	+= dm-mod.o
+ 
+ include $(TOPDIR)/Rules.make
+ 
+ lvm-mod.o: $(lvm-mod-objs)
+ 	$(LD) -r -o $@ $(lvm-mod-objs)
++
++dm-mod.o: $(dm-mod-objs)
++	$(LD) -r -o $@ $(dm-mod-objs)
+diff -ruN linux-2.4.19-rc1/drivers/md/dm-table.c linux/drivers/md/dm-table.c
+--- linux-2.4.19-rc1/drivers/md/dm-table.c	Thu Jan  1 01:00:00 1970
++++ linux/drivers/md/dm-table.c	Tue Jun 25 22:02:56 2002
+@@ -0,0 +1,421 @@
++/*
++ * Copyright (C) 2001 Sistina Software (UK) Limited.
++ *
++ * This file is released under the GPL.
++ */
++
++#include "dm.h"
++
++#include <linux/blkdev.h>
++
++/* ceiling(n / size) * size */
++static inline unsigned long round_up(unsigned long n, unsigned long size)
++{
++	unsigned long r = n % size;
++	return n + (r ? (size - r) : 0);
++}
++
++/* ceiling(n / size) */
++static inline unsigned long div_up(unsigned long n, unsigned long size)
++{
++	return round_up(n, size) / size;
++}
++
++/* similar to ceiling(log_size(n)) */
++static uint int_log(unsigned long n, unsigned long base)
++{
++	int result = 0;
++
++	while (n > 1) {
++		n = div_up(n, base);
++		result++;
++	}
++
++	return result;
++}
++
++/*
++ * return the highest key that you could lookup
++ * from the n'th node on level l of the btree.
++ */
++static offset_t high(struct dm_table *t, int l, int n)
++{
++	for (; l < t->depth - 1; l++)
++		n = get_child(n, CHILDREN_PER_NODE - 1);
++
++	if (n >= t->counts[l])
++		return (offset_t) - 1;
++
++	return get_node(t, l, n)[KEYS_PER_NODE - 1];
++}
++
++/*
++ * fills in a level of the btree based on the
++ * highs of the level below it.
++ */
++static int setup_btree_index(int l, struct dm_table *t)
++{
++	int n, k;
++	offset_t *node;
++
++	for (n = 0; n < t->counts[l]; n++) {
++		node = get_node(t, l, n);
++
++		for (k = 0; k < KEYS_PER_NODE; k++)
++			node[k] = high(t, l + 1, get_child(n, k));
++	}
++
++	return 0;
++}
++
++/*
++ * highs, and targets are managed as dynamic
++ * arrays during a table load.
++ */
++static int alloc_targets(struct dm_table *t, int num)
++{
++	offset_t *n_highs;
++	struct target *n_targets;
++	int n = t->num_targets;
++
++	/*
++	 * Allocate both the target array and offset array at once.
++	 */
++	n_highs = (offset_t *) vcalloc(sizeof(struct target) + sizeof(offset_t),
++				       num);
++	if (!n_highs)
++		return -ENOMEM;
++
++	n_targets = (struct target *) (n_highs + num);
++
++	if (n) {
++		memcpy(n_highs, t->highs, sizeof(*n_highs) * n);
++		memcpy(n_targets, t->targets, sizeof(*n_targets) * n);
++	}
++
++	memset(n_highs + n, -1, sizeof(*n_highs) * (num - n));
++	if (t->highs)
++		vfree(t->highs);
++
++	t->num_allocated = num;
++	t->highs = n_highs;
++	t->targets = n_targets;
++
++	return 0;
++}
++
++int dm_table_create(struct dm_table **result)
++{
++	struct dm_table *t = kmalloc(sizeof(*t), GFP_NOIO);
++
++	if (!t)
++		return -ENOMEM;
++
++	memset(t, 0, sizeof(*t));
++	INIT_LIST_HEAD(&t->devices);
++
++	/* allocate a single node's worth of targets to begin with */
++	if (alloc_targets(t, KEYS_PER_NODE)) {
++		kfree(t);
++		t = NULL;
++		return -ENOMEM;
++	}
++
++	init_waitqueue_head(&t->eventq);
++	*result = t;
++	return 0;
++}
++
++static void free_devices(struct list_head *devices)
++{
++	struct list_head *tmp, *next;
++
++	for (tmp = devices->next; tmp != devices; tmp = next) {
++		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
++		next = tmp->next;
++		kfree(dd);
++	}
++}
++
++void dm_table_destroy(struct dm_table *t)
++{
++	int i;
++
++	/* destroying the table counts as an event */
++	dm_table_event(t);
++
++	/* free the indexes (see dm_table_complete) */
++	if (t->depth >= 2)
++		vfree(t->index[t->depth - 2]);
++
++	/* free the targets */
++	for (i = 0; i < t->num_targets; i++) {
++		struct target *tgt = &t->targets[i];
++
++		dm_put_target_type(t->targets[i].type);
++
++		if (tgt->type->dtr)
++			tgt->type->dtr(t, tgt->private);
++	}
++
++	vfree(t->highs);
++
++	/* free the device list */
++	if (t->devices.next != &t->devices) {
++		DMWARN("devices still present during destroy: "
++		       "dm_table_remove_device calls missing");
++
++		free_devices(&t->devices);
++	}
++
++	kfree(t);
++}
++
++/*
++ * Checks to see if we need to extend highs or targets.
++ */
++static inline int check_space(struct dm_table *t)
++{
++	if (t->num_targets >= t->num_allocated)
++		return alloc_targets(t, t->num_allocated * 2);
++
++	return 0;
++}
++
++/*
++ * Convert a device path to a kdev_t.
++ */
++int lookup_device(const char *path, kdev_t *dev)
++{
++	int r;
++	struct nameidata nd;
++	struct inode *inode;
++
++	if (!path_init(path, LOOKUP_FOLLOW, &nd))
++		return 0;
++
++	if ((r = path_walk(path, &nd)))
++		goto bad;
++
++	inode = nd.dentry->d_inode;
++	if (!inode) {
++		r = -ENOENT;
++		goto bad;
++	}
++
++	if (!S_ISBLK(inode->i_mode)) {
++		r = -EINVAL;
++		goto bad;
++	}
++
++	*dev = inode->i_rdev;
++
++      bad:
++	path_release(&nd);
++	return r;
++}
++
++/*
++ * See if we've already got a device in the list.
++ */
++static struct dm_dev *find_device(struct list_head *l, kdev_t dev)
++{
++	struct list_head *tmp;
++
++	list_for_each(tmp, l) {
++		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
++		if (dd->dev == dev)
++			return dd;
++	}
++
++	return NULL;
++}
++
++/*
++ * Open a device so we can use it as a map destination.
++ */
++static int open_dev(struct dm_dev *d)
++{
++	int err;
++
++	if (d->bd)
++		BUG();
++
++	if (!(d->bd = bdget(kdev_t_to_nr(d->dev))))
++		return -ENOMEM;
++
++	if ((err = blkdev_get(d->bd, FMODE_READ | FMODE_WRITE, 0, BDEV_FILE)))
++		return err;
++
++	return 0;
++}
++
++/*
++ * Close a device that we've been using.
++ */
++static void close_dev(struct dm_dev *d)
++{
++	if (!d->bd)
++		return;
++
++	blkdev_put(d->bd, BDEV_FILE);
++	d->bd = NULL;
++}
++
++/*
++ * If possible (ie. blk_size[major] is set), this
++ * checks an area of a destination device is
++ * valid.
++ */
++static int check_device_area(kdev_t dev, offset_t start, offset_t len)
++{
++	int *sizes;
++	offset_t dev_size;
++
++	if (!(sizes = blk_size[MAJOR(dev)]) || !(dev_size = sizes[MINOR(dev)]))
++		/* we don't know the device details,
++		 * so give the benefit of the doubt */
++		return 1;
++
++	/* convert to 512-byte sectors */
++	dev_size <<= 1;
++
++	return ((start < dev_size) && (len <= (dev_size - start)));
++}
++
++/*
++ * Add a device to the list, or just increment the usage count
++ * if it's already present.
++ */
++int dm_table_get_device(struct dm_table *t, const char *path,
++			offset_t start, offset_t len, struct dm_dev **result)
++{
++	int r;
++	kdev_t dev;
++	struct dm_dev *dd;
++	int major, minor;
++
++	if (sscanf(path, "%x:%x", &major, &minor) == 2) {
++		/* Extract the major/minor numbers */
++		dev = MKDEV(major, minor);
++	} else {
++		/* convert the path to a device */
++		if ((r = lookup_device(path, &dev)))
++			return r;
++	}
++
++	dd = find_device(&t->devices, dev);
++	if (!dd) {
++		dd = kmalloc(sizeof(*dd), GFP_KERNEL);
++		if (!dd)
++			return -ENOMEM;
++
++		dd->dev = dev;
++		dd->bd = NULL;
++
++		if ((r = open_dev(dd))) {
++			kfree(dd);
++			return r;
++		}
++
++		atomic_set(&dd->count, 0);
++		list_add(&dd->list, &t->devices);
++	}
++	atomic_inc(&dd->count);
++
++	if (!check_device_area(dd->dev, start, len)) {
++		DMWARN("device %s too small for target", path);
++		dm_table_put_device(t, dd);
++		return -EINVAL;
++	}
++
++	*result = dd;
++
++	return 0;
++}
++
++/*
++ * Decrement a devices use count and remove it if neccessary.
++ */
++void dm_table_put_device(struct dm_table *t, struct dm_dev *dd)
++{
++	if (atomic_dec_and_test(&dd->count)) {
++		close_dev(dd);
++		list_del(&dd->list);
++		kfree(dd);
++	}
++}
++
++/*
++ * Adds a target to the map
++ */
++int dm_table_add_target(struct dm_table *t, offset_t highs,
++			struct target_type *type, void *private)
++{
++	int r, n;
++
++	if ((r = check_space(t)))
++		return r;
++
++	n = t->num_targets++;
++	t->highs[n] = highs;
++	t->targets[n].type = type;
++	t->targets[n].private = private;
++
++	return 0;
++}
++
++static int setup_indexes(struct dm_table *t)
++{
++	int i, total = 0;
++	offset_t *indexes;
++
++	/* allocate the space for *all* the indexes */
++	for (i = t->depth - 2; i >= 0; i--) {
++		t->counts[i] = div_up(t->counts[i + 1], CHILDREN_PER_NODE);
++		total += t->counts[i];
++	}
++
++	indexes = (offset_t *) vcalloc(total, (unsigned long) NODE_SIZE);
++	if (!indexes)
++		return -ENOMEM;
++
++	/* set up internal nodes, bottom-up */
++	for (i = t->depth - 2, total = 0; i >= 0; i--) {
++		t->index[i] = indexes;
++		indexes += (KEYS_PER_NODE * t->counts[i]);
++		setup_btree_index(i, t);
++	}
++
++	return 0;
++}
++
++/*
++ * Builds the btree to index the map
++ */
++int dm_table_complete(struct dm_table *t)
++{
++	int leaf_nodes, r = 0;
++
++	/* how many indexes will the btree have ? */
++	leaf_nodes = div_up(t->num_targets, KEYS_PER_NODE);
++	t->depth = 1 + int_log(leaf_nodes, CHILDREN_PER_NODE);
++
++	/* leaf layer has already been set up */
++	t->counts[t->depth - 1] = leaf_nodes;
++	t->index[t->depth - 1] = t->highs;
++
++	if (t->depth >= 2)
++		r = setup_indexes(t);
++
++	return r;
++}
++
++void dm_table_event(struct dm_table *t)
++{
++	wake_up_interruptible(&t->eventq);
++}
++
++EXPORT_SYMBOL(dm_table_get_device);
++EXPORT_SYMBOL(dm_table_put_device);
++EXPORT_SYMBOL(dm_table_event);
+diff -ruN linux-2.4.19-rc1/drivers/md/dm-target.c linux/drivers/md/dm-target.c
+--- linux-2.4.19-rc1/drivers/md/dm-target.c	Thu Jan  1 01:00:00 1970
++++ linux/drivers/md/dm-target.c	Tue Jun 25 22:02:56 2002
+@@ -0,0 +1,242 @@
++/*
++ * Copyright (C) 2001 Sistina Software (UK) Limited
++ *
++ * This file is released under the GPL.
++ */
++
++#include "dm.h"
++
++#include <linux/kmod.h>
++
++struct tt_internal {
++	struct target_type tt;
++
++	struct list_head list;
++	long use;
++};
++
++static LIST_HEAD(_targets);
++static rwlock_t _lock = RW_LOCK_UNLOCKED;
++
++#define DM_MOD_NAME_SIZE 32
++
++/*
++ * Destructively splits up the argument list to pass to ctr.
++ */
++int split_args(int max, int *argc, char **argv, char *input)
++{
++	char *start, *end = input, *out;
++	*argc = 0;
++
++	while (1) {
++		start = end;
++
++		/* Skip whitespace */
++		while (*start && isspace(*start))
++			start++;
++
++		if (!*start)
++			break;	/* success, we hit the end */
++
++		/* 'out' is used to remove any back-quotes */
++		end = out = start;
++		while (*end) {
++			/* Everything apart from '\0' can be quoted */
++			if (*end == '\\' && *(end + 1)) {
++				*out++ = *(end + 1);
++				end += 2;
++				continue;
++			}
++
++			if (isspace(*end))
++				break;	/* end of token */
++
++			*out++ = *end++;
++		}
++
++		/* have we already filled the array ? */
++		if ((*argc + 1) > max)
++			return -EINVAL;
++
++		/* we know this is whitespace */
++		if (*end)
++			end++;
++
++		/* terminate the string and put it in the array */
++		*out = '\0';
++		argv[*argc] = start;
++		(*argc)++;
++	}
++
++	return 0;
++}
++
++static inline struct tt_internal *__find_target_type(const char *name)
++{
++	struct list_head *tih;
++	struct tt_internal *ti;
++
++	list_for_each(tih, &_targets) {
++		ti = list_entry(tih, struct tt_internal, list);
++
++		if (!strcmp(name, ti->tt.name))
++			return ti;
++	}
++
++	return NULL;
++}
++
++static struct tt_internal *get_target_type(const char *name)
++{
++	struct tt_internal *ti;
++
++	read_lock(&_lock);
++	ti = __find_target_type(name);
++
++	if (ti) {
++		if (ti->use == 0 && ti->tt.module)
++			__MOD_INC_USE_COUNT(ti->tt.module);
++		ti->use++;
++	}
++	read_unlock(&_lock);
++
++	return ti;
++}
++
++static void load_module(const char *name)
++{
++	char module_name[DM_MOD_NAME_SIZE] = "dm-";
++
++	/* Length check for strcat() below */
++	if (strlen(name) > (DM_MOD_NAME_SIZE - 4))
++		return;
++
++	strcat(module_name, name);
++	request_module(module_name);
++
++	return;
++}
++
++struct target_type *dm_get_target_type(const char *name)
++{
++	struct tt_internal *ti = get_target_type(name);
++
++	if (!ti) {
++		load_module(name);
++		ti = get_target_type(name);
++	}
++
++	return ti ? &ti->tt : NULL;
++}
++
++void dm_put_target_type(struct target_type *t)
++{
++	struct tt_internal *ti = (struct tt_internal *) t;
++
++	read_lock(&_lock);
++	if (--ti->use == 0 && ti->tt.module)
++		__MOD_DEC_USE_COUNT(ti->tt.module);
++
++	if (ti->use < 0)
++		BUG();
++	read_unlock(&_lock);
++
++	return;
++}
++
++static struct tt_internal *alloc_target(struct target_type *t)
++{
++	struct tt_internal *ti = kmalloc(sizeof(*ti), GFP_KERNEL);
++
++	if (ti) {
++		memset(ti, 0, sizeof(*ti));
++		ti->tt = *t;
++	}
++
++	return ti;
++}
++
++int dm_register_target(struct target_type *t)
++{
++	int rv = 0;
++	struct tt_internal *ti = alloc_target(t);
++
++	if (!ti)
++		return -ENOMEM;
++
++	write_lock(&_lock);
++	if (__find_target_type(t->name))
++		rv = -EEXIST;
++	else
++		list_add(&ti->list, &_targets);
++
++	write_unlock(&_lock);
++	return rv;
++}
++
++int dm_unregister_target(struct target_type *t)
++{
++	struct tt_internal *ti;
++
++	write_lock(&_lock);
++	if (!(ti = __find_target_type(t->name))) {
++		write_unlock(&_lock);
++		return -EINVAL;
++	}
++
++	if (ti->use) {
++		write_unlock(&_lock);
++		return -ETXTBSY;
++	}
++
++	list_del(&ti->list);
++	kfree(ti);
++
++	write_unlock(&_lock);
++	return 0;
++}
++
++/*
++ * io-err: always fails an io, useful for bringing
++ * up LV's that have holes in them.
++ */
++static int io_err_ctr(struct dm_table *t, offset_t b, offset_t l,
++		      int argc, char **args, void **context)
++{
++	*context = NULL;
++	return 0;
++}
++
++static void io_err_dtr(struct dm_table *t, void *c)
++{
++	/* empty */
++	return;
++}
++
++static int io_err_map(struct buffer_head *bh, int rw, void *context)
++{
++	buffer_IO_error(bh);
++	return 0;
++}
++
++static struct target_type error_target = {
++	name:	"error",
++	ctr:	io_err_ctr,
++	dtr:	io_err_dtr,
++	map:	io_err_map,
++	status:	NULL,
++};
++
++int dm_target_init(void)
++{
++	return dm_register_target(&error_target);
++}
++
++void dm_target_exit(void)
++{
++	if (dm_unregister_target(&error_target))
++		DMWARN("error target unregistration failed");
++}
++
++EXPORT_SYMBOL(dm_register_target);
++EXPORT_SYMBOL(dm_unregister_target);
+diff -ruN linux-2.4.19-rc1/drivers/md/dm.c linux/drivers/md/dm.c
+--- linux-2.4.19-rc1/drivers/md/dm.c	Thu Jan  1 01:00:00 1970
++++ linux/drivers/md/dm.c	Tue Jun 25 22:12:09 2002
+@@ -0,0 +1,1168 @@
++/*
++ * Copyright (C) 2001 Sistina Software (UK) Limited.
++ *
++ * This file is released under the GPL.
++ */
++
++#include "dm.h"
++
++#include <linux/blk.h>
++#include <linux/blkpg.h>
++
++/* we only need this for the lv_bmap struct definition, not happy */
++#include <linux/lvm.h>
++
++#define DEFAULT_READ_AHEAD 64
++
++static const char *_name = DM_NAME;
++
++static int major = 0;
++static int _major = 0;
++
++struct io_hook {
++	struct mapped_device *md;
++	struct target *target;
++	int rw;
++
++	void (*end_io) (struct buffer_head * bh, int uptodate);
++	void *context;
++};
++
++static kmem_cache_t *_io_hook_cache;
++
++static struct mapped_device *_devs[MAX_DEVICES];
++static struct rw_semaphore _dev_locks[MAX_DEVICES];
++
++/*
++ * This lock is only held by dm_create and dm_set_name to avoid
++ * race conditions where someone else may create a device with
++ * the same name.
++ */
++static spinlock_t _create_lock = SPIN_LOCK_UNLOCKED;
++
++/* block device arrays */
++static int _block_size[MAX_DEVICES];
++static int _blksize_size[MAX_DEVICES];
++static int _hardsect_size[MAX_DEVICES];
++
++static devfs_handle_t _dev_dir;
++
++static int request(request_queue_t * q, int rw, struct buffer_head *bh);
++static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb);
++
++/*
++ * Protect the mapped_devices referenced from _dev[]
++ */
++struct mapped_device *dm_get_r(int minor)
++{
++	struct mapped_device *md;
++
++	if (minor >= MAX_DEVICES)
++		return NULL;
++
++	down_read(_dev_locks + minor);
++	md = _devs[minor];
++	if (!md)
++		up_read(_dev_locks + minor);
++	return md;
++}
++
++struct mapped_device *dm_get_w(int minor)
++{
++	struct mapped_device *md;
++
++	if (minor >= MAX_DEVICES)
++		return NULL;
++
++	down_write(_dev_locks + minor);
++	md = _devs[minor];
++	if (!md)
++		up_write(_dev_locks + minor);
++	return md;
++}
++
++static int namecmp(struct mapped_device *md, const char *name, int nametype)
++{
++	switch (nametype) {
++	case DM_LOOKUP_BY_NAME:
++		return strcmp(md->name, name);
++		break;
++
++	case DM_LOOKUP_BY_UUID:
++		if (!md->uuid)
++			return -1;	/* never equal */
++
++		return strcmp(md->uuid, name);
++		break;
++
++	default:
++		DMWARN("Unknown comparison type in namecmp: %d", nametype);
++		BUG();
++	}
++
++	return -1;
++}
++
++/*
++ * The interface (eg, ioctl) will probably access the devices
++ * through these slow 'by name' locks, this needs improving at
++ * some point if people start playing with *large* numbers of dm
++ * devices.
++ */
++struct mapped_device *dm_get_name_r(const char *name, int nametype)
++{
++	int i;
++	struct mapped_device *md;
++
++	for (i = 0; i < MAX_DEVICES; i++) {
++		md = dm_get_r(i);
++		if (md) {
++			if (!namecmp(md, name, nametype))
++				return md;
++
++			dm_put_r(md);
++		}
++	}
++
++	return NULL;
++}
++
++struct mapped_device *dm_get_name_w(const char *name, int nametype)
++{
++	int i;
++	struct mapped_device *md;
++
++	/*
++	 * To avoid getting write locks on all the devices we try
++	 * and promote a read lock to a write lock, this can
++	 * fail, in which case we just start again.
++	 */
++
++      restart:
++	for (i = 0; i < MAX_DEVICES; i++) {
++		md = dm_get_r(i);
++		if (!md)
++			continue;
++
++		if (namecmp(md, name, nametype)) {
++			dm_put_r(md);
++			continue;
++		}
++
++		/* found it */
++		dm_put_r(md);
++
++		md = dm_get_w(i);
++		if (!md)
++			goto restart;
++
++		if (namecmp(md, name, nametype)) {
++			dm_put_w(md);
++			goto restart;
++		}
++
++		return md;
++	}
++
++	return NULL;
++}
++
++void dm_put_r(struct mapped_device *md)
++{
++	int minor = MINOR(md->dev);
++
++	if (minor >= MAX_DEVICES)
++		return;
++
++	up_read(_dev_locks + minor);
++}
++
++void dm_put_w(struct mapped_device *md)
++{
++	int minor = MINOR(md->dev);
++
++	if (minor >= MAX_DEVICES)
++		return;
++
++	up_write(_dev_locks + minor);
++}
++
++/*
++ * Setup and tear down the driver
++ */
++static __init void init_locks(void)
++{
++	int i;
++
++	for (i = 0; i < MAX_DEVICES; i++)
++		init_rwsem(_dev_locks + i);
++}
++
++static __init int local_init(void)
++{
++	int r;
++
++	init_locks();
++
++	/* allocate a slab for the io-hooks */
++	if (!_io_hook_cache &&
++	    !(_io_hook_cache = kmem_cache_create("dm io hooks",
++						 sizeof(struct io_hook),
++						 0, 0, NULL, NULL)))
++		return -ENOMEM;
++
++	_major = major;
++	r = devfs_register_blkdev(_major, _name, &dm_blk_dops);
++	if (r < 0) {
++		DMERR("register_blkdev failed");
++		kmem_cache_destroy(_io_hook_cache);
++		return r;
++	}
++
++	if (!_major)
++		_major = r;
++
++	/* set up the arrays */
++	read_ahead[_major] = DEFAULT_READ_AHEAD;
++	blk_size[_major] = _block_size;
++	blksize_size[_major] = _blksize_size;
++	hardsect_size[_major] = _hardsect_size;
++
++	blk_queue_make_request(BLK_DEFAULT_QUEUE(_major), request);
++
++	_dev_dir = devfs_mk_dir(0, DM_DIR, NULL);
++
++	return 0;
++}
++
++static void local_exit(void)
++{
++	if (kmem_cache_destroy(_io_hook_cache))
++		DMWARN("io_hooks still allocated during unregistration");
++	_io_hook_cache = NULL;
++
++	if (devfs_unregister_blkdev(_major, _name) < 0)
++		DMERR("devfs_unregister_blkdev failed");
++
++	read_ahead[_major] = 0;
++	blk_size[_major] = NULL;
++	blksize_size[_major] = NULL;
++	hardsect_size[_major] = NULL;
++	_major = 0;
++
++	DMINFO("cleaned up");
++}
++
++/*
++ * We have a lot of init/exit functions, so it seems easier to
++ * store them in an array.  The disposable macro 'xx'
++ * expands a prefix into a pair of function names.
++ */
++static struct {
++	int (*init)(void);
++	void (*exit)(void);
++
++} _inits[] = {
++#define xx(n) {n ## _init, n ## _exit},
++	xx(local)
++	xx(dm_target)
++#undef xx
++};
++
++static int __init dm_init(void)
++{
++	const int count = sizeof(_inits) / sizeof(*_inits);
++
++	int r, i;
++
++	for (i = 0; i < count; i++) {
++		r = _inits[i].init();
++		if (r)
++			goto bad;
++	}
++
++	return 0;
++
++      bad:
++	while (i--)
++		_inits[i].exit();
++
++	return r;
++}
++
++static void __exit dm_exit(void)
++{
++	int i = sizeof(_inits) / sizeof(*_inits);
++
++	dm_destroy_all();
++	while (i--)
++		_inits[i].exit();
++}
++
++/*
++ * Block device functions
++ */
++static int dm_blk_open(struct inode *inode, struct file *file)
++{
++	struct mapped_device *md;
++
++	md = dm_get_w(MINOR(inode->i_rdev));
++	if (!md)
++		return -ENXIO;
++
++	md->use_count++;
++	dm_put_w(md);
++
++	return 0;
++}
++
++static int dm_blk_close(struct inode *inode, struct file *file)
++{
++	struct mapped_device *md;
++
++	md = dm_get_w(MINOR(inode->i_rdev));
++	if (!md)
++		return -ENXIO;
++
++	if (md->use_count < 1)
++		DMWARN("incorrect reference count found in mapped_device");
++
++	md->use_count--;
++	dm_put_w(md);
++
++	return 0;
++}
++
++/* In 512-byte units */
++#define VOLUME_SIZE(minor) (_block_size[(minor)] << 1)
++
++static int dm_blk_ioctl(struct inode *inode, struct file *file,
++			uint command, unsigned long a)
++{
++	int minor = MINOR(inode->i_rdev);
++	long size;
++
++	if (minor >= MAX_DEVICES)
++		return -ENXIO;
++
++	switch (command) {
++	case BLKROSET:
++	case BLKROGET:
++	case BLKRASET:
++	case BLKRAGET:
++	case BLKFLSBUF:
++	case BLKSSZGET:
++		//case BLKRRPART: /* Re-read partition tables */
++		//case BLKPG:
++	case BLKELVGET:
++	case BLKELVSET:
++	case BLKBSZGET:
++	case BLKBSZSET:
++		return blk_ioctl(inode->i_rdev, command, a);
++		break;
++
++	case BLKGETSIZE:
++		size = VOLUME_SIZE(minor);
++		if (copy_to_user((void *) a, &size, sizeof(long)))
++			return -EFAULT;
++		break;
++
++	case BLKGETSIZE64:
++		size = VOLUME_SIZE(minor);
++		if (put_user((u64) ((u64) size) << 9, (u64 *) a))
++			return -EFAULT;
++		break;
++
++	case BLKRRPART:
++		return -ENOTTY;
++
++	case LV_BMAP:
++		return dm_user_bmap(inode, (struct lv_bmap *) a);
++
++	default:
++		DMWARN("unknown block ioctl 0x%x", command);
++		return -ENOTTY;
++	}
++
++	return 0;
++}
++
++static inline struct io_hook *alloc_io_hook(void)
++{
++	return kmem_cache_alloc(_io_hook_cache, GFP_NOIO);
++}
++
++static inline void free_io_hook(struct io_hook *ih)
++{
++	kmem_cache_free(_io_hook_cache, ih);
++}
++
++/*
++ * FIXME: We need to decide if deferred_io's need
++ * their own slab, I say no for now since they are
++ * only used when the device is suspended.
++ */
++static inline struct deferred_io *alloc_deferred(void)
++{
++	return kmalloc(sizeof(struct deferred_io), GFP_NOIO);
++}
++
++static inline void free_deferred(struct deferred_io *di)
++{
++	kfree(di);
++}
++
++/*
++ * Call a target's optional error function if an I/O failed.
++ */
++static inline int call_err_fn(struct io_hook *ih, struct buffer_head *bh)
++{
++	dm_err_fn err = ih->target->type->err;
++
++	if (err)
++		return err(bh, ih->rw, ih->target->private);
++
++	return 0;
++}
++
++/*
++ * bh->b_end_io routine that decrements the pending count
++ * and then calls the original bh->b_end_io fn.
++ */
++static void dec_pending(struct buffer_head *bh, int uptodate)
++{
++	struct io_hook *ih = bh->b_bdev_private;
++
++	if (!uptodate && call_err_fn(ih, bh))
++		return;
++
++	if (atomic_dec_and_test(&ih->md->pending))
++		/* nudge anyone waiting on suspend queue */
++		wake_up(&ih->md->wait);
++
++	bh->b_end_io = ih->end_io;
++	bh->b_bdev_private = ih->context;
++	free_io_hook(ih);
++
++	bh->b_end_io(bh, uptodate);
++}
++
++/*
++ * Add the bh to the list of deferred io.
++ */
++static int queue_io(struct buffer_head *bh, int rw)
++{
++	struct deferred_io *di = alloc_deferred();
++	struct mapped_device *md;
++
++	if (!di)
++		return -ENOMEM;
++
++	md = dm_get_w(MINOR(bh->b_rdev));
++	if (!md) {
++		free_deferred(di);
++		return -ENXIO;
++	}
++
++	if (!md->suspended) {
++		dm_put_w(md);
++		free_deferred(di);
++		return 1;
++	}
++
++	di->bh = bh;
++	di->rw = rw;
++	di->next = md->deferred;
++	md->deferred = di;
++
++	dm_put_w(md);
++
++	return 0;		/* deferred successfully */
++}
++
++/*
++ * Do the bh mapping for a given leaf
++ */
++static inline int __map_buffer(struct mapped_device *md,
++			       struct buffer_head *bh, int rw, int leaf)
++{
++	int r;
++	dm_map_fn fn;
++	void *context;
++	struct io_hook *ih = NULL;
++	struct target *ti = md->map->targets + leaf;
++
++	fn = ti->type->map;
++	context = ti->private;
++
++	ih = alloc_io_hook();
++
++	if (!ih)
++		return -1;
++
++	ih->md = md;
++	ih->rw = rw;
++	ih->target = ti;
++	ih->end_io = bh->b_end_io;
++	ih->context = bh->b_bdev_private;
++
++	r = fn(bh, rw, context);
++
++	if (r > 0) {
++		/* hook the end io request fn */
++		atomic_inc(&md->pending);
++		bh->b_end_io = dec_pending;
++		bh->b_bdev_private = ih;
++
++	} else if (r == 0)
++		/* we don't need to hook */
++		free_io_hook(ih);
++
++	else if (r < 0) {
++		free_io_hook(ih);
++		return -1;
++	}
++
++	return r;
++}
++
++/*
++ * Search the btree for the correct target.
++ */
++static inline int __find_node(struct dm_table *t, struct buffer_head *bh)
++{
++	int l, n = 0, k = 0;
++	offset_t *node;
++
++	for (l = 0; l < t->depth; l++) {
++		n = get_child(n, k);
++		node = get_node(t, l, n);
++
++		for (k = 0; k < KEYS_PER_NODE; k++)
++			if (node[k] >= bh->b_rsector)
++				break;
++	}
++
++	return (KEYS_PER_NODE * n) + k;
++}
++
++static int request(request_queue_t * q, int rw, struct buffer_head *bh)
++{
++	struct mapped_device *md;
++	int r, minor = MINOR(bh->b_rdev);
++	unsigned int block_size = _blksize_size[minor];
++
++	md = dm_get_r(minor);
++	if (!md) {
++		buffer_IO_error(bh);
++		return 0;
++	}
++
++	/*
++	 * Sanity checks.
++	 */
++	if (bh->b_size > block_size)
++		DMERR("request is larger than block size "
++		      "b_size (%d), block size (%d)",
++		      bh->b_size, block_size);
++
++	if (bh->b_rsector & ((bh->b_size >> 9) - 1))
++		DMERR("misaligned block requested logical "
++		      "sector (%lu), b_size (%d)",
++		      bh->b_rsector, bh->b_size);
++
++	/*
++	 * If we're suspended we have to queue
++	 * this io for later.
++	 */
++	while (md->suspended) {
++		dm_put_r(md);
++
++		if (rw == READA)
++			goto bad_no_lock;
++
++		r = queue_io(bh, rw);
++
++		if (r < 0)
++			goto bad_no_lock;
++
++		else if (r == 0)
++			return 0;	/* deferred successfully */
++
++		/*
++		 * We're in a while loop, because someone could suspend
++		 * before we get to the following read lock.
++		 */
++		md = dm_get_r(minor);
++		if (!md) {
++			buffer_IO_error(bh);
++			return 0;
++		}
++	}
++
++	if ((r = __map_buffer(md, bh, rw, __find_node(md->map, bh))) < 0)
++		goto bad;
++
++	dm_put_r(md);
++	return r;
++
++      bad:
++	dm_put_r(md);
++
++      bad_no_lock:
++	buffer_IO_error(bh);
++	return 0;
++}
++
++static int check_dev_size(int minor, unsigned long block)
++{
++	/* FIXME: check this */
++	unsigned long max_sector = (_block_size[minor] << 1) + 1;
++	unsigned long sector = (block + 1) * (_blksize_size[minor] >> 9);
++
++	return (sector > max_sector) ? 0 : 1;
++}
++
++/*
++ * Creates a dummy buffer head and maps it (for lilo).
++ */
++static int do_bmap(kdev_t dev, unsigned long block,
++		   kdev_t * r_dev, unsigned long *r_block)
++{
++	struct mapped_device *md;
++	struct buffer_head bh;
++	int minor = MINOR(dev), r;
++	struct target *t;
++
++	md = dm_get_r(minor);
++	if (!md)
++		return -ENXIO;
++
++	if (md->suspended) {
++		dm_put_r(md);
++		return -EPERM;
++	}
++
++	if (!check_dev_size(minor, block)) {
++		dm_put_r(md);
++		return -EINVAL;
++	}
++
++	/* setup dummy bh */
++	memset(&bh, 0, sizeof(bh));
++	bh.b_blocknr = block;
++	bh.b_dev = bh.b_rdev = dev;
++	bh.b_size = _blksize_size[minor];
++	bh.b_rsector = block * (bh.b_size >> 9);
++
++	/* find target */
++	t = md->map->targets + __find_node(md->map, &bh);
++
++	/* do the mapping */
++	r = t->type->map(&bh, READ, t->private);
++
++	*r_dev = bh.b_rdev;
++	*r_block = bh.b_rsector / (bh.b_size >> 9);
++
++	dm_put_r(md);
++	return r;
++}
++
++/*
++ * Marshals arguments and results between user and kernel space.
++ */
++static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb)
++{
++	unsigned long block, r_block;
++	kdev_t r_dev;
++	int r;
++
++	if (get_user(block, &lvb->lv_block))
++		return -EFAULT;
++
++	if ((r = do_bmap(inode->i_rdev, block, &r_dev, &r_block)))
++		return r;
++
++	if (put_user(kdev_t_to_nr(r_dev), &lvb->lv_dev) ||
++	    put_user(r_block, &lvb->lv_block))
++		return -EFAULT;
++
++	return 0;
++}
++
++/*
++ * See if the device with a specific minor # is free.  The write
++ * lock is held when it returns successfully.
++ */
++static inline int specific_dev(int minor, struct mapped_device *md)
++{
++	if (minor >= MAX_DEVICES) {
++		DMWARN("request for a mapped_device beyond MAX_DEVICES (%d)",
++		       MAX_DEVICES);
++		return -1;
++	}
++
++	down_write(_dev_locks + minor);
++	if (_devs[minor]) {
++		/* in use */
++		up_write(_dev_locks + minor);
++		return -1;
++	}
++
++	return minor;
++}
++
++/*
++ * Find the first free device.  Again the write lock is held on
++ * success.
++ */
++static int any_old_dev(struct mapped_device *md)
++{
++	int i;
++
++	for (i = 0; i < MAX_DEVICES; i++)
++		if (specific_dev(i, md) != -1)
++			return i;
++
++	return -1;
++}
++
++/*
++ * Allocate and initialise a blank device.
++ * Caller must ensure uuid is null-terminated.
++ * Device is returned with a write lock held.
++ */
++static struct mapped_device *alloc_dev(const char *name, const char *uuid,
++				       int minor)
++{
++	struct mapped_device *md = kmalloc(sizeof(*md), GFP_KERNEL);
++	int len;
++
++	if (!md) {
++		DMWARN("unable to allocate device, out of memory.");
++		return NULL;
++	}
++
++	memset(md, 0, sizeof(*md));
++
++	/*
++	 * This grabs the write lock if it succeeds.
++	 */
++	minor = (minor < 0) ? any_old_dev(md) : specific_dev(minor, md);
++	if (minor < 0) {
++		kfree(md);
++		return NULL;
++	}
++
++	md->dev = MKDEV(_major, minor);
++	md->suspended = 0;
++
++	strncpy(md->name, name, sizeof(md->name) - 1);
++	md->name[sizeof(md->name) - 1] = '\0';
++
++	/*
++	 * Copy in the uuid.
++	 */
++	if (uuid && *uuid) {
++		len = strlen(uuid) + 1;
++		if (!(md->uuid = kmalloc(len, GFP_KERNEL))) {
++			DMWARN("unable to allocate uuid - out of memory.");
++			kfree(md);
++			return NULL;
++		}
++		strcpy(md->uuid, uuid);
++	}
++
++	init_waitqueue_head(&md->wait);
++	return md;
++}
++
++static int __register_device(struct mapped_device *md)
++{
++	md->devfs_entry =
++	    devfs_register(_dev_dir, md->name, DEVFS_FL_CURRENT_OWNER,
++			   MAJOR(md->dev), MINOR(md->dev),
++			   S_IFBLK | S_IRUSR | S_IWUSR | S_IRGRP,
++			   &dm_blk_dops, NULL);
++
++	return 0;
++}
++
++static int __unregister_device(struct mapped_device *md)
++{
++	devfs_unregister(md->devfs_entry);
++	return 0;
++}
++
++/*
++ * The hardsect size for a mapped device is the smallest hardsect size
++ * from the devices it maps onto.
++ */
++static int __find_hardsect_size(struct list_head *devices)
++{
++	int result = INT_MAX, size;
++	struct list_head *tmp;
++
++	list_for_each(tmp, devices) {
++		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
++		size = get_hardsect_size(dd->dev);
++		if (size < result)
++			result = size;
++	}
++
++	/*
++	 * I think it's safe to assume that no block devices have
++	 * a hard sector size this large.
++	 */
++	if (result == INT_MAX)
++		result = 512;
++
++	return result;
++}
++
++/*
++ * Bind a table to the device.
++ */
++static int __bind(struct mapped_device *md, struct dm_table *t)
++{
++	int minor = MINOR(md->dev);
++
++	md->map = t;
++
++	if (!t->num_targets) {
++		_block_size[minor] = 0;
++		_blksize_size[minor] = BLOCK_SIZE;
++		_hardsect_size[minor] = 0;
++		return 0;
++	}
++
++	/* in k */
++	_block_size[minor] = (t->highs[t->num_targets - 1] + 1) >> 1;
++
++	_blksize_size[minor] = BLOCK_SIZE;
++	_hardsect_size[minor] = __find_hardsect_size(&t->devices);
++	register_disk(NULL, md->dev, 1, &dm_blk_dops, _block_size[minor]);
++
++	return 0;
++}
++
++static void __unbind(struct mapped_device *md)
++{
++	int minor = MINOR(md->dev);
++
++	dm_table_destroy(md->map);
++	md->map = NULL;
++
++	_block_size[minor] = 0;
++	_blksize_size[minor] = 0;
++	_hardsect_size[minor] = 0;
++}
++
++static int check_name(const char *name)
++{
++	struct mapped_device *md;
++
++	if (strchr(name, '/') || strlen(name) > DM_NAME_LEN) {
++		DMWARN("invalid device name");
++		return -1;
++	}
++
++	md = dm_get_name_r(name, DM_LOOKUP_BY_NAME);
++	if (md) {
++		dm_put_r(md);
++		DMWARN("device name already in use");
++		return -1;
++	}
++
++	return 0;
++}
++
++static int check_uuid(const char *uuid)
++{
++	struct mapped_device *md;
++
++	if (uuid) {
++		md = dm_get_name_r(uuid, DM_LOOKUP_BY_UUID);
++		if (md) {
++			dm_put_r(md);
++			DMWARN("device uuid already in use");
++			return -1;
++		}
++	}
++
++	return 0;
++}
++
++/*
++ * Constructor for a new device.
++ */
++int dm_create(const char *name, const char *uuid, int minor, int ro,
++	      struct dm_table *table)
++{
++	int r;
++	struct mapped_device *md;
++
++	spin_lock(&_create_lock);
++	if (check_name(name) || check_uuid(uuid)) {
++		spin_unlock(&_create_lock);
++		return -EINVAL;
++	}
++
++	md = alloc_dev(name, uuid, minor);
++	if (!md) {
++		spin_unlock(&_create_lock);
++		return -ENXIO;
++	}
++	minor = MINOR(md->dev);
++	_devs[minor] = md;
++
++	r = __register_device(md);
++	if (r)
++		goto err;
++
++	r = __bind(md, table);
++	if (r)
++		goto err;
++
++	dm_set_ro(md, ro);
++
++	spin_unlock(&_create_lock);
++	dm_put_w(md);
++	return 0;
++
++      err:
++	_devs[minor] = NULL;
++	if (md->uuid)
++		kfree(md->uuid);
++
++	dm_put_w(md);
++	kfree(md);
++	spin_unlock(&_create_lock);
++	return r;
++}
++
++/*
++ * Renames the device.  No lock held.
++ */
++int dm_set_name(const char *name, int nametype, const char *newname)
++{
++	int r;
++	struct mapped_device *md;
++
++	spin_lock(&_create_lock);
++	if (check_name(newname) < 0) {
++		spin_unlock(&_create_lock);
++		return -EINVAL;
++	}
++
++	md = dm_get_name_w(name, nametype);
++	if (!md) {
++		spin_unlock(&_create_lock);
++		return -ENXIO;
++	}
++
++	r = __unregister_device(md);
++	if (r)
++		goto out;
++
++	strcpy(md->name, newname);
++	r = __register_device(md);
++
++      out:
++	dm_put_w(md);
++	spin_unlock(&_create_lock);
++	return r;
++}
++
++/*
++ * Destructor for the device.  You cannot destroy an open
++ * device.  Write lock must be held before calling.
++ * Caller must dm_put_w(md) then kfree(md) if call was successful.
++ */
++int dm_destroy(struct mapped_device *md)
++{
++	int minor, r;
++
++	if (md->use_count)
++		return -EPERM;
++
++	r = __unregister_device(md);
++	if (r)
++		return r;
++
++	minor = MINOR(md->dev);
++	_devs[minor] = NULL;
++	__unbind(md);
++
++	if (md->uuid)
++		kfree(md->uuid);
++
++	return 0;
++}
++
++/*
++ * Destroy all devices - except open ones
++ */
++void dm_destroy_all(void)
++{
++	int i, some_destroyed, r;
++	struct mapped_device *md;
++
++	do {
++		some_destroyed = 0;
++		for (i = 0; i < MAX_DEVICES; i++) {
++			md = dm_get_w(i);
++			if (!md)
++				continue;
++
++			r = dm_destroy(md);
++			dm_put_w(md);
++
++			if (!r) {
++				kfree(md);
++				some_destroyed = 1;
++			}
++		}
++	} while (some_destroyed);
++}
++
++/*
++ * Sets or clears the read-only flag for the device.  Write lock
++ * must be held.
++ */
++void dm_set_ro(struct mapped_device *md, int ro)
++{
++	md->read_only = ro;
++	set_device_ro(md->dev, ro);
++}
++
++/*
++ * A target is notifying us of some event
++ */
++void dm_notify(void *target)
++{
++}
++
++/*
++ * Requeue the deferred buffer_heads by calling generic_make_request.
++ */
++static void flush_deferred_io(struct deferred_io *c)
++{
++	struct deferred_io *n;
++
++	while (c) {
++		n = c->next;
++		generic_make_request(c->rw, c->bh);
++		free_deferred(c);
++		c = n;
++	}
++}
++
++/*
++ * Swap in a new table (destroying old one).  Write lock must be
++ * held.
++ */
++int dm_swap_table(struct mapped_device *md, struct dm_table *table)
++{
++	int r;
++
++	/* device must be suspended */
++	if (!md->suspended)
++		return -EPERM;
++
++	__unbind(md);
++
++	r = __bind(md, table);
++	if (r)
++		return r;
++
++	return 0;
++}
++
++/*
++ * We need to be able to change a mapping table under a mounted
++ * filesystem.  for example we might want to move some data in
++ * the background.  Before the table can be swapped with
++ * dm_bind_table, dm_suspend must be called to flush any in
++ * flight buffer_heads and ensure that any further io gets
++ * deferred.  Write lock must be held.
++ */
++int dm_suspend(struct mapped_device *md)
++{
++	int minor = MINOR(md->dev);
++	DECLARE_WAITQUEUE(wait, current);
++
++	if (md->suspended)
++		return -EINVAL;
++
++	md->suspended = 1;
++	dm_put_w(md);
++
++	/* wait for all the pending io to flush */
++	add_wait_queue(&md->wait, &wait);
++	current->state = TASK_UNINTERRUPTIBLE;
++	do {
++		md = dm_get_w(minor);
++		if (!md) {
++			/* Caller expects to free this lock. Yuck. */
++			down_write(_dev_locks + minor);
++			return -ENXIO;
++		}
++
++		if (!atomic_read(&md->pending))
++			break;
++
++		dm_put_w(md);
++		schedule();
++
++	} while (1);
++
++	current->state = TASK_RUNNING;
++	remove_wait_queue(&md->wait, &wait);
++
++	return 0;
++}
++
++int dm_resume(struct mapped_device *md)
++{
++	int minor = MINOR(md->dev);
++	struct deferred_io *def;
++
++	if (!md->suspended || !md->map->num_targets)
++		return -EINVAL;
++
++	md->suspended = 0;
++	def = md->deferred;
++	md->deferred = NULL;
++
++	dm_put_w(md);
++	flush_deferred_io(def);
++	run_task_queue(&tq_disk);
++
++	if (!dm_get_w(minor)) {
++		/* FIXME: yuck */
++		down_write(_dev_locks + minor);
++		return -ENXIO;
++	}
++
++	return 0;
++}
++
++struct block_device_operations dm_blk_dops = {
++	open:		dm_blk_open,
++	release:	dm_blk_close,
++	ioctl:		dm_blk_ioctl,
++	owner:		THIS_MODULE
++};
++
++/*
++ * module hooks
++ */
++module_init(dm_init);
++module_exit(dm_exit);
++
++MODULE_PARM(major, "i");
++MODULE_PARM_DESC(major, "The major number of the device mapper");
++MODULE_DESCRIPTION(DM_NAME " driver");
++MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
++MODULE_LICENSE("GPL");
+diff -ruN linux-2.4.19-rc1/drivers/md/dm.h linux/drivers/md/dm.h
+--- linux-2.4.19-rc1/drivers/md/dm.h	Thu Jan  1 01:00:00 1970
++++ linux/drivers/md/dm.h	Tue Jun 25 22:11:46 2002
+@@ -0,0 +1,208 @@
++/*
++ * Internal header file for device mapper
++ *
++ * Copyright (C) 2001 Sistina Software
++ *
++ * This file is released under the LGPL.
++ */
++
++#ifndef DM_INTERNAL_H
++#define DM_INTERNAL_H
++
++#include <linux/config.h>
++#include <linux/version.h>
++#include <linux/major.h>
++#include <linux/iobuf.h>
++#include <linux/module.h>
++#include <linux/fs.h>
++#include <linux/slab.h>
++#include <linux/vmalloc.h>
++#include <linux/compatmac.h>
++#include <linux/cache.h>
++#include <linux/devfs_fs_kernel.h>
++#include <linux/ctype.h>
++#include <linux/device-mapper.h>
++#include <linux/list.h>
++#include <linux/init.h>
++
++#define DM_NAME "device-mapper"	/* Name for messaging */
++#define DM_DRIVER_EMAIL "lvm-devel@lists.sistina.com"
++#define MAX_DEPTH 16
++#define NODE_SIZE L1_CACHE_BYTES
++#define KEYS_PER_NODE (NODE_SIZE / sizeof(offset_t))
++#define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
++#define MAX_ARGS 32
++#define MAX_DEVICES 256
++
++/*
++ * List of devices that a metadevice uses and should open/close.
++ */
++struct dm_dev {
++	atomic_t count;
++	struct list_head list;
++
++	kdev_t dev;
++	struct block_device *bd;
++};
++
++/*
++ * I/O that had to be deferred while we were suspended
++ */
++struct deferred_io {
++	int rw;
++	struct buffer_head *bh;
++	struct deferred_io *next;
++};
++
++/*
++ * Btree leaf - this does the actual mapping
++ */
++struct target {
++	struct target_type *type;
++	void *private;
++};
++
++/*
++ * The btree
++ */
++struct dm_table {
++	/* btree table */
++	int depth;
++	int counts[MAX_DEPTH];	/* in nodes */
++	offset_t *index[MAX_DEPTH];
++
++	int num_targets;
++	int num_allocated;
++	offset_t *highs;
++	struct target *targets;
++
++	/* a list of devices used by this table */
++	struct list_head devices;
++
++	/*
++	 * A waitqueue for processes waiting for something
++	 * interesting to happen to this table.
++	 */
++	wait_queue_head_t eventq;
++};
++
++/*
++ * The actual device struct
++ */
++struct mapped_device {
++	kdev_t dev;
++	char name[DM_NAME_LEN];
++	char *uuid;
++
++	int use_count;
++	int suspended;
++	int read_only;
++
++	/* a list of io's that arrived while we were suspended */
++	atomic_t pending;
++	wait_queue_head_t wait;
++	struct deferred_io *deferred;
++
++	struct dm_table *map;
++
++	/* used by dm-fs.c */
++	devfs_handle_t devfs_entry;
++};
++
++extern struct block_device_operations dm_blk_dops;
++
++/* dm-target.c */
++int dm_target_init(void);
++struct target_type *dm_get_target_type(const char *name);
++void dm_put_target_type(struct target_type *t);
++void dm_target_exit(void);
++
++/*
++ * Destructively splits argument list to pass to ctr.
++ */
++int split_args(int max, int *argc, char **argv, char *input);
++
++/* dm.c */
++struct mapped_device *dm_get_r(int minor);
++struct mapped_device *dm_get_w(int minor);
++
++/*
++ * There are two ways to lookup a device.
++ */
++enum {
++	DM_LOOKUP_BY_NAME,
++	DM_LOOKUP_BY_UUID
++};
++
++struct mapped_device *dm_get_name_r(const char *name, int nametype);
++struct mapped_device *dm_get_name_w(const char *name, int nametype);
++
++void dm_put_r(struct mapped_device *md);
++void dm_put_w(struct mapped_device *md);
++
++/*
++ * Call with no lock.
++ */
++int dm_create(const char *name, const char *uuid, int minor, int ro,
++	      struct dm_table *table);
++int dm_set_name(const char *name, int nametype, const char *newname);
++void dm_destroy_all(void);
++
++/*
++ * You must have the write lock before calling the remaining md
++ * methods.
++ */
++int dm_destroy(struct mapped_device *md);
++void dm_set_ro(struct mapped_device *md, int ro);
++
++/*
++ * The device must be suspended before calling this method.
++ */
++int dm_swap_table(struct mapped_device *md, struct dm_table *t);
++
++/*
++ * A device can still be used while suspended, but I/O is deferred.
++ */
++int dm_suspend(struct mapped_device *md);
++int dm_resume(struct mapped_device *md);
++
++/* dm-table.c */
++int dm_table_create(struct dm_table **result);
++void dm_table_destroy(struct dm_table *t);
++
++int dm_table_add_target(struct dm_table *t, offset_t highs,
++			struct target_type *type, void *private);
++int dm_table_complete(struct dm_table *t);
++
++/*
++ * Event handling
++ */
++void dm_table_event(struct dm_table *t);
++
++#define DMWARN(f, x...) printk(KERN_WARNING DM_NAME ": " f "\n" , ## x)
++#define DMERR(f, x...) printk(KERN_ERR DM_NAME ": " f "\n" , ## x)
++#define DMINFO(f, x...) printk(KERN_INFO DM_NAME ": " f "\n" , ## x)
++
++/*
++ * Calculate the index of the child node of the n'th node k'th key.
++ */
++static inline int get_child(int n, int k)
++{
++	return (n * CHILDREN_PER_NODE) + k;
++}
++
++/*
++ * Return the n'th node of level l from table t.
++ */
++static inline offset_t *get_node(struct dm_table *t, int l, int n)
++{
++	return t->index[l] + (n * KEYS_PER_NODE);
++}
++
++static inline int array_too_big(unsigned long fixed, unsigned long obj,
++				unsigned long num)
++{
++	return (num > (ULONG_MAX - fixed) / obj);
++}
++
++#endif
+diff -ruN linux-2.4.19-rc1/include/linux/device-mapper.h linux/include/linux/device-mapper.h
+--- linux-2.4.19-rc1/include/linux/device-mapper.h	Thu Jan  1 01:00:00 1970
++++ linux/include/linux/device-mapper.h	Tue Jun 25 22:02:56 2002
+@@ -0,0 +1,62 @@
++/*
++ * Copyright (C) 2001 Sistina Software (UK) Limited.
++ *
++ * This file is released under the LGPL.
++ */
++
++#ifndef _LINUX_DEVICE_MAPPER_H
++#define _LINUX_DEVICE_MAPPER_H
++
++#define DM_DIR "device-mapper"	/* Slashes not supported */
++#define DM_MAX_TYPE_NAME 16
++#define DM_NAME_LEN 128
++#define DM_UUID_LEN 129
++
++#ifdef __KERNEL__
++
++struct dm_table;
++struct dm_dev;
++typedef unsigned long offset_t;
++
++typedef enum { STATUSTYPE_INFO, STATUSTYPE_TABLE } status_type_t;
++
++/*
++ * Prototypes for functions for a target
++ */
++typedef int (*dm_ctr_fn) (struct dm_table *t, offset_t b, offset_t l,
++			  int argc, char **argv, void **context);
++typedef void (*dm_dtr_fn) (struct dm_table *t, void *c);
++typedef int (*dm_map_fn) (struct buffer_head *bh, int rw, void *context);
++typedef int (*dm_err_fn) (struct buffer_head *bh, int rw, void *context);
++typedef int (*dm_status_fn) (status_type_t status_type, char *result,
++			     int maxlen, void *context);
++
++void dm_error(const char *message);
++
++/*
++ * Constructors should call these functions to ensure destination devices
++ * are opened/closed correctly
++ */
++int dm_table_get_device(struct dm_table *t, const char *path,
++			offset_t start, offset_t len, struct dm_dev **result);
++void dm_table_put_device(struct dm_table *table, struct dm_dev *d);
++
++/*
++ * Information about a target type
++ */
++struct target_type {
++	const char *name;
++	struct module *module;
++	dm_ctr_fn ctr;
++	dm_dtr_fn dtr;
++	dm_map_fn map;
++	dm_err_fn err;
++	dm_status_fn status;
++};
++
++int dm_register_target(struct target_type *t);
++int dm_unregister_target(struct target_type *t);
++
++#endif				/* __KERNEL__ */
++
++#endif				/* _LINUX_DEVICE_MAPPER_H */

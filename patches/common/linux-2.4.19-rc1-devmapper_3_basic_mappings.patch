@@ -1,0 +1,410 @@
+diff -ruN linux-2.4.19-rc1/drivers/md/Makefile linux/drivers/md/Makefile
+--- linux-2.4.19-rc1/drivers/md/Makefile	Tue Jun 25 22:18:35 2002
++++ linux/drivers/md/Makefile	Tue Jun 25 22:28:32 2002
+@@ -7,7 +7,8 @@
+ export-objs	:= md.o xor.o dm-table.o dm-target.o
+ list-multi	:= lvm-mod.o
+ lvm-mod-objs	:= lvm.o lvm-snap.o lvm-fs.o
+-dm-mod-objs	:= dm.o dm-table.o dm-target.o dm-ioctl.o
++dm-mod-objs	:= dm.o dm-table.o dm-target.o dm-ioctl.o \
++		   dm-linear.o dm-stripe.o
+ 
+ # Note: link order is important.  All raid personalities
+ # and xor.o must come before md.o, as they each initialise 
+diff -ruN linux-2.4.19-rc1/drivers/md/dm-linear.c linux/drivers/md/dm-linear.c
+--- linux-2.4.19-rc1/drivers/md/dm-linear.c	Thu Jan  1 01:00:00 1970
++++ linux/drivers/md/dm-linear.c	Tue Jun 25 22:28:43 2002
+@@ -0,0 +1,125 @@
++/*
++ * Copyright (C) 2001 Sistina Software (UK) Limited.
++ *
++ * This file is released under the GPL.
++ */
++
++#include "dm.h"
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/blkdev.h>
++
++/*
++ * Linear: maps a linear range of a device.
++ */
++struct linear_c {
++	long delta;		/* FIXME: we need a signed offset type */
++	long start;		/* For display only */
++	struct dm_dev *dev;
++};
++
++/*
++ * Construct a linear mapping: <dev_path> <offset>
++ */
++static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
++		      int argc, char **argv, void **context)
++{
++	struct linear_c *lc;
++	unsigned long start;	/* FIXME: unsigned long long */
++	char *end;
++
++	if (argc != 2) {
++		*context = "dm-linear: Not enough arguments";
++		return -EINVAL;
++	}
++
++	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
++	if (lc == NULL) {
++		*context = "dm-linear: Cannot allocate linear context";
++		return -ENOMEM;
++	}
++
++	start = simple_strtoul(argv[1], &end, 10);
++	if (*end) {
++		*context = "dm-linear: Invalid device sector";
++		goto bad;
++	}
++
++	if (dm_table_get_device(t, argv[0], start, l, &lc->dev)) {
++		*context = "dm-linear: Device lookup failed";
++		goto bad;
++	}
++
++	lc->delta = (int) start - (int) b;
++	lc->start = start;
++	*context = lc;
++	return 0;
++
++      bad:
++	kfree(lc);
++	return -EINVAL;
++}
++
++static void linear_dtr(struct dm_table *t, void *c)
++{
++	struct linear_c *lc = (struct linear_c *) c;
++
++	dm_table_put_device(t, lc->dev);
++	kfree(c);
++}
++
++static int linear_map(struct buffer_head *bh, int rw, void *context)
++{
++	struct linear_c *lc = (struct linear_c *) context;
++
++	bh->b_rdev = lc->dev->dev;
++	bh->b_rsector = bh->b_rsector + lc->delta;
++
++	return 1;
++}
++
++static int linear_status(status_type_t type, char *result, int maxlen,
++			 void *context)
++{
++	struct linear_c *lc = (struct linear_c *) context;
++
++	switch (type) {
++	case STATUSTYPE_INFO:
++		result[0] = '\0';
++		break;
++
++	case STATUSTYPE_TABLE:
++		snprintf(result, maxlen, "%s %ld", kdevname(lc->dev->dev),
++			 lc->start);
++		break;
++	}
++	return 0;
++}
++
++static struct target_type linear_target = {
++	name:	"linear",
++	module:	THIS_MODULE,
++	ctr:	linear_ctr,
++	dtr:	linear_dtr,
++	map:	linear_map,
++	status:	linear_status,
++};
++
++int __init dm_linear_init(void)
++{
++	int r = dm_register_target(&linear_target);
++
++	if (r < 0)
++		DMERR("linear: register failed %d", r);
++
++	return r;
++}
++
++void dm_linear_exit(void)
++{
++	int r = dm_unregister_target(&linear_target);
++
++	if (r < 0)
++		DMERR("linear: unregister failed %d", r);
++}
+diff -ruN linux-2.4.19-rc1/drivers/md/dm-stripe.c linux/drivers/md/dm-stripe.c
+--- linux-2.4.19-rc1/drivers/md/dm-stripe.c	Thu Jan  1 01:00:00 1970
++++ linux/drivers/md/dm-stripe.c	Tue Jun 25 22:28:43 2002
+@@ -0,0 +1,234 @@
++/*
++ * Copyright (C) 2001 Sistina Software (UK) Limited.
++ *
++ * This file is released under the GPL.
++ */
++
++#include "dm.h"
++
++#include <linux/module.h>
++#include <linux/init.h>
++#include <linux/blkdev.h>
++
++struct stripe {
++	struct dm_dev *dev;
++	offset_t physical_start;
++};
++
++struct stripe_c {
++	offset_t logical_start;
++	uint32_t stripes;
++
++	/* The size of this target / num. stripes */
++	uint32_t stripe_width;
++
++	/* stripe chunk size */
++	uint32_t chunk_shift;
++	offset_t chunk_mask;
++
++	struct stripe stripe[0];
++};
++
++static inline struct stripe_c *alloc_context(int stripes)
++{
++	size_t len;
++
++	if (array_too_big(sizeof(struct stripe_c), sizeof(struct stripe),
++			  stripes))
++		return NULL;
++
++	len = sizeof(struct stripe_c) + (sizeof(struct stripe) * stripes);
++
++	return kmalloc(len, GFP_KERNEL);
++}
++
++/*
++ * Parse a single <dev> <sector> pair
++ */
++static int get_stripe(struct dm_table *t, struct stripe_c *sc,
++		      int stripe, char **argv)
++{
++	char *end;
++	unsigned long start;
++
++	start = simple_strtoul(argv[1], &end, 10);
++	if (*end)
++		return -EINVAL;
++
++	if (dm_table_get_device(t, argv[0], start, sc->stripe_width,
++				&sc->stripe[stripe].dev))
++		return -ENXIO;
++
++	sc->stripe[stripe].physical_start = start;
++	return 0;
++}
++
++/*
++ * Construct a striped mapping.
++ * <number of stripes> <chunk size (2^^n)> [<dev_path> <offset>]+
++ */
++static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
++		      int argc, char **argv, void **context)
++{
++	struct stripe_c *sc;
++	uint32_t stripes;
++	uint32_t chunk_size;
++	char *end;
++	int r, i;
++
++	if (argc < 2) {
++		*context = "dm-stripe: Not enough arguments";
++		return -EINVAL;
++	}
++
++	stripes = simple_strtoul(argv[0], &end, 10);
++	if (*end) {
++		*context = "dm-stripe: Invalid stripe count";
++		return -EINVAL;
++	}
++
++	chunk_size = simple_strtoul(argv[1], &end, 10);
++	if (*end) {
++		*context = "dm-stripe: Invalid chunk_size";
++		return -EINVAL;
++	}
++
++	if (l % stripes) {
++		*context = "dm-stripe: Target length not divisable by "
++		    "number of stripes";
++		return -EINVAL;
++	}
++
++	sc = alloc_context(stripes);
++	if (!sc) {
++		*context = "dm-stripe: Memory allocation for striped context "
++		    "failed";
++		return -ENOMEM;
++	}
++
++	sc->logical_start = b;
++	sc->stripes = stripes;
++	sc->stripe_width = l / stripes;
++
++	/*
++	 * chunk_size is a power of two
++	 */
++	if (!chunk_size || (chunk_size & (chunk_size - 1))) {
++		*context = "dm-stripe: Invalid chunk size";
++		kfree(sc);
++		return -EINVAL;
++	}
++
++	sc->chunk_mask = chunk_size - 1;
++	for (sc->chunk_shift = 0; chunk_size; sc->chunk_shift++)
++		chunk_size >>= 1;
++	sc->chunk_shift--;
++
++	/*
++	 * Get the stripe destinations.
++	 */
++	for (i = 0; i < stripes; i++) {
++		if (argc < 2) {
++			*context = "dm-stripe: Not enough destinations "
++			    "specified";
++			kfree(sc);
++			return -EINVAL;
++		}
++
++		argv += 2;
++
++		r = get_stripe(t, sc, i, argv);
++		if (r < 0) {
++			*context = "dm-stripe: Couldn't parse stripe "
++			    "destination";
++			while (i--)
++				dm_table_put_device(t, sc->stripe[i].dev);
++			kfree(sc);
++			return r;
++		}
++	}
++
++	*context = sc;
++	return 0;
++}
++
++static void stripe_dtr(struct dm_table *t, void *c)
++{
++	unsigned int i;
++	struct stripe_c *sc = (struct stripe_c *) c;
++
++	for (i = 0; i < sc->stripes; i++)
++		dm_table_put_device(t, sc->stripe[i].dev);
++
++	kfree(sc);
++}
++
++static int stripe_map(struct buffer_head *bh, int rw, void *context)
++{
++	struct stripe_c *sc = (struct stripe_c *) context;
++
++	offset_t offset = bh->b_rsector - sc->logical_start;
++	uint32_t chunk = (uint32_t) (offset >> sc->chunk_shift);
++	uint32_t stripe = chunk % sc->stripes;	/* 32bit modulus */
++	chunk = chunk / sc->stripes;
++
++	bh->b_rdev = sc->stripe[stripe].dev->dev;
++	bh->b_rsector = sc->stripe[stripe].physical_start +
++	    (chunk << sc->chunk_shift) + (offset & sc->chunk_mask);
++	return 1;
++}
++
++static int stripe_status(status_type_t type, char *result, int maxlen,
++			 void *context)
++{
++	struct stripe_c *sc = (struct stripe_c *) context;
++	int offset;
++	int i;
++
++	switch (type) {
++	case STATUSTYPE_INFO:
++		result[0] = '\0';
++		break;
++
++	case STATUSTYPE_TABLE:
++		offset = snprintf(result, maxlen, "%d %ld",
++				  sc->stripes, sc->chunk_mask + 1);
++		for (i = 0; i < sc->stripes; i++) {
++			offset +=
++			    snprintf(result + offset, maxlen - offset,
++				     " %s %ld",
++				     kdevname(sc->stripe[i].dev->dev),
++				     sc->stripe[i].physical_start);
++		}
++		break;
++	}
++	return 0;
++}
++
++static struct target_type stripe_target = {
++	name:	"striped",
++	module:	THIS_MODULE,
++	ctr:	stripe_ctr,
++	dtr:	stripe_dtr,
++	map:	stripe_map,
++	status:	stripe_status,
++};
++
++int __init dm_stripe_init(void)
++{
++	int r;
++
++	r = dm_register_target(&stripe_target);
++	if (r < 0)
++		DMWARN("striped target registration failed");
++
++	return r;
++}
++
++void dm_stripe_exit(void)
++{
++	if (dm_unregister_target(&stripe_target))
++		DMWARN("striped target unregistration failed");
++
++	return;
++}
+diff -ruN linux-2.4.19-rc1/drivers/md/dm.c linux/drivers/md/dm.c
+--- linux-2.4.19-rc1/drivers/md/dm.c	Tue Jun 25 22:22:17 2002
++++ linux/drivers/md/dm.c	Tue Jun 25 22:30:30 2002
+@@ -266,6 +266,8 @@
+ #define xx(n) {n ## _init, n ## _exit},
+ 	xx(local)
+ 	xx(dm_target)
++	xx(dm_linear)
++	xx(dm_stripe)
+ 	xx(dm_interface)
+ #undef xx
+ };
+diff -ruN linux-2.4.19-rc1/drivers/md/dm.h linux/drivers/md/dm.h
+--- linux-2.4.19-rc1/drivers/md/dm.h	Tue Jun 25 22:26:00 2002
++++ linux/drivers/md/dm.h	Tue Jun 25 22:30:03 2002
+@@ -212,4 +212,14 @@
+ int __init dm_interface_init(void);
+ void dm_interface_exit(void);
+ 
++/*
++ * Targets for linear and striped mappings
++ */
++
++int dm_linear_init(void);
++void dm_linear_exit(void);
++
++int dm_stripe_init(void);
++void dm_stripe_exit(void);
++
+ #endif
