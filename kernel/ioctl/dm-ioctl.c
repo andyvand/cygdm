@@ -8,6 +8,7 @@
 
 #include <linux/miscdevice.h>
 #include <linux/dm-ioctl.h>
+#include <linux/init.h>
 
 static void free_params(struct dm_ioctl *p)
 {
@@ -397,7 +398,7 @@ static struct miscdevice _dm_misc = {
 };
 
 /* Create misc character device and link to DM_DIR/control */
-int dm_interface_init(void)
+int __init dm_interface_init(void)
 {
 	int r;
 	char rname[64];
@@ -435,7 +436,7 @@ int dm_interface_init(void)
 	return r;
 }
 
-void dm_interface_exit(void)
+void __exit dm_interface_exit(void)
 {
 	if (misc_deregister(&_dm_misc) < 0)
 		DMERR("misc_deregister failed for control device");
