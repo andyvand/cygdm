@@ -1,3 +1,26 @@
+--- linux-2.4.22/Documentation/Configure.help	Mon Nov 17 19:15:53 2003
++++ linux/Documentation/Configure.help	Tue Nov 18 13:22:41 2003
+@@ -1856,6 +1856,20 @@
+   want), say M here and read <file:Documentation/modules.txt>.  The
+   module will be called lvm-mod.o.
+ 
++Device-mapper support
++CONFIG_BLK_DEV_DM
++  Device-mapper is a low level volume manager.  It works by allowing
++  people to specify mappings for ranges of logical sectors.  Various
++  mapping types are available, in addition people may write their own
++  modules containing custom mappings if they wish.
++
++  Higher level volume managers such as LVM2 use this driver.
++
++  If you want to compile this as a module, say M here and read 
++  <file:Documentation/modules.txt>.  The module will be called dm-mod.o.
++
++  If unsure, say N.
++
+ Multiple devices driver support (RAID and LVM)
+ CONFIG_MD
+   Support multiple physical spindles through a single logical device.
 --- linux-2.4.22/MAINTAINERS	Mon Nov 17 19:15:45 2003
 +++ linux/MAINTAINERS	Tue Nov 18 13:22:41 2003
 @@ -554,6 +554,13 @@
@@ -24,26 +47,3 @@
 +dep_tristate '  Mirror (RAID-1) support' CONFIG_BLK_DEV_DM_MIRROR $CONFIG_BLK_DEV_DM
  
  endmenu
---- linux-2.4.22/Documentation/Configure.help	Mon Nov 17 19:15:53 2003
-+++ linux/Documentation/Configure.help	Tue Nov 18 13:22:41 2003
-@@ -1856,6 +1856,20 @@
-   want), say M here and read <file:Documentation/modules.txt>.  The
-   module will be called lvm-mod.o.
- 
-+Device-mapper support
-+CONFIG_BLK_DEV_DM
-+  Device-mapper is a low level volume manager.  It works by allowing
-+  people to specify mappings for ranges of logical sectors.  Various
-+  mapping types are available, in addition people may write their own
-+  modules containing custom mappings if they wish.
-+
-+  Higher level volume managers such as LVM2 use this driver.
-+
-+  If you want to compile this as a module, say M here and read 
-+  <file:Documentation/modules.txt>.  The module will be called dm-mod.o.
-+
-+  If unsure, say N.
-+
- Multiple devices driver support (RAID and LVM)
- CONFIG_MD
-   Support multiple physical spindles through a single logical device.
