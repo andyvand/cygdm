@@ -112,15 +112,17 @@ static int do_suspend(char *mnt, char *name, int on)
 	char *path;
 	FILE *fp;
 	int ret = 0;
+	char c;
 
 	if (!(path = mkpath(3, mnt, name, "suspend")))
 		return 0;
 
-	if ((fp = fopen(path, "rw"))) {
-		if (fprintf(fp, "%d\n", on) > 0)
+	if ((fp = fopen(path, "w"))) {
+		c = on ? '1' : '0';
+		if (fputc(c, fp) == (int)c)
 			ret = 1;
 		else
-			log("%s: fprintf failed: %s", path, strerror(errno));
+			log("%s: fputc failed: %s", path, strerror(errno));
 		fclose(fp);
 	} else
 		log("%s: fopen failed: %s", path, strerror(errno));
@@ -205,6 +207,10 @@ static int do_info(char *mnt, char *name, struct dm_info *info)
 
 	if (info->exists && !do_suspend_state(mnt, name, info))
 		return 0;
+
+	/* Unsupported */
+	info->target_count = -1;
+	info->open_count = -1;
 
 	return 1;
 }

@@ -45,13 +45,13 @@ static inline struct stripe_c *alloc_context(int stripes)
  * Parse a single <dev> <sector> pair
  */
 static int get_stripe(struct dm_table *t, struct stripe_c *sc,
-		      int stripe, char *args)
+		      int stripe, const char *args)
 {
 	int n, r;
 	char path[4096];
 	unsigned long start;
 
-	if (sscanf(args, "%4095s %lu %n", path, &start, &n) != 2)
+	if (sscanf(args, "%4096s %lu %n", path, &start, &n) != 2)
 		return -EINVAL;
 
 	r = dm_table_get_device(t, path, start, sc->stripe_width,
@@ -68,25 +68,30 @@ static int get_stripe(struct dm_table *t, struct stripe_c *sc,
  * <number of stripes> <chunk size (2^^n)> [<dev_path> <offset>]+
  */
 static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
-		      char *args, void **context)
+		      const char *args, void **context)
 {
 	struct stripe_c *sc;
 	uint32_t stripes;
 	uint32_t chunk_size;
 	int n, i;
 
-	*context = "couldn't parse <stripes> <chunk size>";
-	if (sscanf(args, "%u %u %n", &stripes, &chunk_size, &n) != 2)
+	if (sscanf(args, "%u %u %n", &stripes, &chunk_size, &n) != 2) {
+		*context = "dm-stripe: Couldn't parse <stripes> <chunk size>";
 		return -EINVAL;
+	}
 
-	*context = "target length is not divisable by the number of stripes";
-	if (l % stripes)
+	if (l % stripes) {
+		*context = "dm-stripe: Target length not divisable by "
+			   "number of stripes";
 		return -EINVAL;
+	}
 
-	*context = "couldn't allocate memory for striped context";
 	sc = alloc_context(stripes);
-	if (!sc)
+	if (!sc) {
+		*context = "dm-stripe: Memory allocation for striped context"
+			   "failed";
 		return -ENOMEM;
+	}
 
 	sc->logical_start = b;
 	sc->stripes = stripes;
@@ -96,7 +101,7 @@ static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
 	 * chunk_size is a power of two
 	 */
 	if (!chunk_size || chunk_size & (chunk_size - 1)) {
-		*context = "invalid chunk size";
+		*context = "dm-stripe: Invalid chunk size";
 		kfree(sc);
 		return -EINVAL;
 	}
@@ -114,7 +119,8 @@ static int stripe_ctr(struct dm_table *t, offset_t b, offset_t l,
 		n = get_stripe(t, sc, i, args);
 
 		if (n < 0) {
-			*context = "couldn't parse stripe destination";
+			*context = "dm-stripe: Couldn't parse stripe "
+				   "destination";
 			kfree(sc);
 			return n;
 		}
@@ -133,7 +139,6 @@ static void stripe_dtr(struct dm_table *t, void *c)
 		dm_table_put_device(t, sc->stripe[i].dev);
 
 	kfree(sc);
-	return;
 }
 
 static int stripe_map(struct buffer_head *bh, int rw, void *context)

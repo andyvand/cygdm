@@ -149,7 +149,7 @@ int dm_unregister_target(struct target_type *t)
  * up LV's that have holes in them.
  */
 static int io_err_ctr(struct dm_table *t, offset_t b, offset_t l,
-		      char *args, void **context)
+		      const char *args, void **context)
 {
 	*context = NULL;
 	return 0;
@@ -168,16 +168,22 @@ static int io_err_map(struct buffer_head *bh, int rw, void *context)
 }
 
 static struct target_type error_target = {
-	name:"error",
-	ctr:io_err_ctr,
-	dtr:io_err_dtr,
-	map:io_err_map,
-	err:NULL
+	name:	"error",
+	ctr:	io_err_ctr,
+	dtr:	io_err_dtr,
+	map:	io_err_map,
+	err:	NULL
 };
 
 int dm_target_init(void)
 {
 	return dm_register_target(&error_target);
+}
+
+void dm_target_exit(void)
+{
+	if (dm_unregister_target(&error_target))
+		WARN("unregister of error target failed.");
 }
 
 EXPORT_SYMBOL(dm_register_target);

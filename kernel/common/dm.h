@@ -1,6 +1,4 @@
 /*
- * dm.h
- *
  * Internal header file for device mapper
  *
  * Copyright (C) 2001 Sistina Software
@@ -103,18 +101,27 @@ extern struct block_device_operations dm_blk_dops;
 int dm_target_init(void);
 struct target_type *dm_get_target_type(const char *name);
 void dm_put_target_type(struct target_type *t);
+void dm_target_exit(void);
 
 /* dm.c */
-struct mapped_device *dm_find_by_minor(int minor);
 struct mapped_device *dm_get(const char *name);
-struct mapped_device *dm_create(const char *name, int minor, struct dm_table *);
+int dm_create(const char *name, int minor, struct dm_table *table, 
+	      struct mapped_device **result);
 int dm_destroy(struct mapped_device *md);
+
+/*
+ * The device must be suspended before calling this method.
+ */
 int dm_swap_table(struct mapped_device *md, struct dm_table *t);
+
+/*
+ * A device can still be used while suspended, but I/O is deferred.
+ */
 int dm_suspend(struct mapped_device *md);
 int dm_resume(struct mapped_device *md);
 
 /* dm-table.c */
-struct dm_table *dm_table_create(void);
+int dm_table_create(struct dm_table **result);
 void dm_table_destroy(struct dm_table *t);
 
 int dm_table_add_target(struct dm_table *t, offset_t high,
@@ -139,7 +146,12 @@ static inline offset_t *get_node(struct dm_table *t, int l, int n)
 	return t->index[l] + (n * KEYS_PER_NODE);
 }
 
-int dm_interface_init(void) __init;
-void dm_interface_exit(void) __exit;
+/*
+ * The device-mapper can be driven through one of two interfaces; 
+ * ioctl or filesystem, depending which patch you have applied.
+ */
+
+int dm_interface_init(void);
+void dm_interface_exit(void);
 
 #endif

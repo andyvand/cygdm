@@ -10,8 +10,7 @@
 #include "device-mapper.h"
 
 /*
- * Implements a traditional ioctl interface to the
- * device mapper.  Yuck.
+ * Implements a traditional ioctl interface to the device mapper.
  */
 
 struct dm_target_spec {
@@ -43,7 +42,7 @@ struct dm_ioctl {
 	int target_count;	/* in/out */
 };
 
-/* FIXME: find own numbers, 109 is pinched from LVM */
+/* FIXME: find own numbers: LVM1 used 109 */
 #define DM_IOCTL 0xfd
 #define DM_CHAR_MAJOR 124
 

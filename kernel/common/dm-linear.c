@@ -24,59 +24,42 @@ struct linear_c {
 	struct dm_dev *dev;
 };
 
-static inline char *next_token(char **p)
-{
-	static const char *delim = " \t";
-	char *r;
-
-	do {
-		r = strsep(p, delim);
-	} while (r && *r == 0);
-
-	return r;
-}
-
 /*
  * Construct a linear mapping: <dev_path> <offset>
  */
 static int linear_ctr(struct dm_table *t, offset_t b, offset_t l,
-		      char *args, void **context)
+		      const char *args, void **context)
 {
 	struct linear_c *lc;
-	unsigned int start;
+	unsigned long start;	/* FIXME: unsigned long long with sscanf fix */
+
 	int r = -EINVAL;
-	char *tok;
-	char *path;
-	char *p = args;
+	char path[4096];
 
-	*context = "No device path given";
-	path = next_token(&p);
-	if (!path)
-		goto bad;
-
-	*context = "No initial offset given";
-	tok = next_token(&p);
-	if (!tok)
-		goto bad;
-	start = simple_strtoul(tok, NULL, 10);
-
-	*context = "Cannot allocate linear context private structure";
 	lc = kmalloc(sizeof(*lc), GFP_KERNEL);
-	if (lc == NULL)
-		goto bad;
+	if (lc == NULL) {
+		*context = "dm-linear: Cannot allocate linear context";
+		return -ENOMEM;
+	}
 
-	*context = "Cannot get target device";
+	if (sscanf(args, "%4096s %lu", path, &start) != 2) {
+		*context = "dm-linear: Missing target parms: dev_path sector";
+		return -ENOMEM;
+        }
+
 	r = dm_table_get_device(t, path, start, l, &lc->dev);
-	if (r)
-		goto bad_free;
+	if (r) {
+		*context = "dm-linear: Device lookup failed";
+		r = -ENXIO;
+		goto bad;
+	}
 
 	lc->delta = (int) start - (int) b;
 	*context = lc;
 	return 0;
 
-      bad_free:
-	kfree(lc);
       bad:
+	kfree(lc);
 	return r;
 }
 

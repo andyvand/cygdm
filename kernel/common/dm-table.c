@@ -100,24 +100,25 @@ static int alloc_targets(struct dm_table *t, int num)
 	return 0;
 }
 
-struct dm_table *dm_table_create(void)
+int dm_table_create(struct dm_table **result)
 {
 	struct dm_table *t = kmalloc(sizeof(struct dm_table), GFP_NOIO);
 
 	if (!t)
-		return ERR_PTR(-ENOMEM);
+		return -ENOMEM;
 
 	memset(t, 0, sizeof(*t));
 	INIT_LIST_HEAD(&t->devices);
 
-	/* allocate a single nodes worth of targets to
-	   begin with */
+	/* allocate a single node's worth of targets to begin with */
 	if (alloc_targets(t, KEYS_PER_NODE)) {
 		kfree(t);
-		t = ERR_PTR(-ENOMEM);
+		t = NULL;
+		return -ENOMEM;
 	}
 
-	return t;
+	*result = t;
+	return 0;
 }
 
 static void free_devices(struct list_head *devices)
@@ -143,10 +144,10 @@ void dm_table_destroy(struct dm_table *t)
 	for (i = 0; i < t->num_targets; i++) {
 		struct target *tgt = &t->targets[i];
 
+		dm_put_target_type(t->targets[i].type);
+
 		if (tgt->type->dtr)
 			tgt->type->dtr(t, tgt->private);
-
-		dm_put_target_type(t->targets[i].type);
 	}
 
 	vfree(t->highs);
@@ -163,8 +164,7 @@ void dm_table_destroy(struct dm_table *t)
 }
 
 /*
- * Checks to see if we need to extend
- * highs or targets.
+ * Checks to see if we need to extend highs or targets.
  */
 static inline int check_space(struct dm_table *t)
 {
@@ -175,9 +175,9 @@ static inline int check_space(struct dm_table *t)
 }
 
 /*
- * convert a device path to a kdev_t.
+ * Convert a device path to a kdev_t.
  */
-int lookup_device(const char *path, kdev_t * dev)
+int lookup_device(const char *path, kdev_t *dev)
 {
 	int r;
 	struct nameidata nd;
@@ -208,7 +208,7 @@ int lookup_device(const char *path, kdev_t * dev)
 }
 
 /*
- * see if we've already got a device in the list.
+ * See if we've already got a device in the list.
  */
 static struct dm_dev *find_device(struct list_head *l, kdev_t dev)
 {
@@ -224,8 +224,7 @@ static struct dm_dev *find_device(struct list_head *l, kdev_t dev)
 }
 
 /*
- * open a device so we can use it as a map
- * destination.
+ * Open a device so we can use it as a map destination.
  */
 static int open_dev(struct dm_dev *d)
 {
@@ -244,7 +243,7 @@ static int open_dev(struct dm_dev *d)
 }
 
 /*
- * close a device that we've been using.
+ * Close a device that we've been using.
  */
 static void close_dev(struct dm_dev *d)
 {
@@ -277,8 +276,8 @@ static int check_device_area(kdev_t dev, offset_t start, offset_t len)
 }
 
 /*
- * add a device to the list, or just increment the
- * usage count if it's already present.
+ * Add a device to the list, or just increment the usage count 
+ * if it's already present.
  */
 int dm_table_get_device(struct dm_table *t, const char *path,
 			offset_t start, offset_t len, struct dm_dev **result)
@@ -298,7 +297,7 @@ int dm_table_get_device(struct dm_table *t, const char *path,
 			return -ENOMEM;
 
 		dd->dev = dev;
-		dd->bd = 0;
+		dd->bd = NULL;
 
 		if ((r = open_dev(dd))) {
 			kfree(dd);
@@ -322,8 +321,7 @@ int dm_table_get_device(struct dm_table *t, const char *path,
 }
 
 /*
- * decrement a devices use count and remove it if
- * neccessary.
+ * Decrement a devices use count and remove it if neccessary.
  */
 void dm_table_put_device(struct dm_table *t, struct dm_dev *dd)
 {
@@ -335,7 +333,7 @@ void dm_table_put_device(struct dm_table *t, struct dm_dev *dd)
 }
 
 /*
- * adds a target to the map
+ * Adds a target to the map
  */
 int dm_table_add_target(struct dm_table *t, offset_t high,
 			struct target_type *type, void *private)
@@ -378,7 +376,7 @@ static int setup_indexes(struct dm_table *t)
 }
 
 /*
- * builds the btree to index the map
+ * Builds the btree to index the map
  */
 int dm_table_complete(struct dm_table *t)
 {

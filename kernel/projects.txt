@@ -9,6 +9,11 @@
 
  o Locking on mapped_devices in dm-ioctl.c
 
+ o Check dm_lock_r/w protection on all md use
+
+ o Make table file not lose text for existing table when the device 
+   is active and new text is passed in (and otherwise gets ignored)
+
  o Port to 2.5 kernels (new block I/O layer)
 
  o Investigate char device number allocation for dm-ioctl.c (maybe use misc

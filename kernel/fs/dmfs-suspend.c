@@ -87,12 +87,25 @@ ssize_t dmfs_suspend_write(struct file *file, const char *buf, size_t count,
 		return -EINVAL;
 
 	down(&dmi->sem);
-	if (buf[0] == '0')
+	if (buf[0] == '0') {
+		if (get_exclusive_write_access(dir)) {
+			written = -EPERM;
+			goto out_unlock;
+		}
+		if (!list_empty(&dmi->errors)) {
+			put_write_access(dir);
+			written = -EPERM;
+			goto out_unlock;
+		}
 		written = dm_resume(dmi->md);
+		put_write_access(dir);
+	}
 	if (buf[0] == '1')
 		written = dm_suspend(dmi->md);
 	if (written >= 0)
 		written = count;
+
+      out_unlock:
 	up(&dmi->sem);
 
       out:

@@ -62,9 +62,9 @@ static int next_target(struct dm_target_spec *last, void *end,
 	return valid_str(*params, end);
 }
 
-void err_fn(const char *message, void *private)
+void dm_error(const char *message)
 {
-	printk(KERN_WARNING "%s\n", message);
+	WARN("%s", message);
 }
 
 /*
@@ -98,7 +98,7 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 
 	end = ((void *) args) + args->data_size;
 
-#define PARSE_ERROR(msg) {err_fn(msg, NULL); return -EINVAL;}
+#define PARSE_ERROR(msg) {dm_error(msg); return -EINVAL;}
 
 	for (i = 0; i < args->target_count; i++) {
 
@@ -117,8 +117,10 @@ static int populate_table(struct dm_table *table, struct dm_ioctl *args)
 
 		/* build the target */
 		if (ttype->ctr(table, spec->sector_start, spec->length, params,
-			       &context)) 
-			PARSE_ERROR(context);
+			       &context))  {
+			dm_error(context);
+			PARSE_ERROR("target constructor failed");
+		}
 
 		/* add the target to the table */
 		high = spec->sector_start + (spec->length - 1);
@@ -167,17 +169,13 @@ static int create(struct dm_ioctl *param, struct dm_ioctl *user)
 	struct mapped_device *md;
 	struct dm_table *t;
 
-	t = dm_table_create();
-	r = PTR_ERR(t);
-	if (IS_ERR(t))
-		goto bad;
+	if ((r = dm_table_create(&t)))
+		return r;
 
 	if ((r = populate_table(t, param)))
 		goto bad;
 
-	md = dm_create(param->name, param->minor, t);
-	r = PTR_ERR(md);
-	if (IS_ERR(md))
+	if ((r = dm_create(param->name, param->minor, t, &md)))
 		goto bad;
 
 	if ((r = info(param->name, user))) {
@@ -221,9 +219,9 @@ static int reload(struct dm_ioctl *param)
 	if (!md)
 		return -ENXIO;
 
-	t = dm_table_create();
-	if (IS_ERR(t))
-		return PTR_ERR(t);
+	r = dm_table_create(&t);
+	if ((r = dm_table_create(&t)))
+		return r;
 
 	if ((r = populate_table(t, param))) {
 		dm_table_destroy(t);
@@ -244,11 +242,14 @@ static int ctl_open(struct inode *inode, struct file *file)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EACCES;
 
+	MOD_INC_USE_COUNT;
+
 	return 0;
 }
 
 static int ctl_close(struct inode *inode, struct file *file)
 {
+	MOD_DEC_USE_COUNT;
 	return 0;
 }
 

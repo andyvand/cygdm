@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2001 Sistina Software
+ * Copyright (C) 2001 Sistina Software (UK) Limited.
  *
  * This file is released under the GPL.
  */
@@ -7,22 +7,20 @@
 #include "dm.h"
 
 #include <linux/blk.h>
-#include <linux/blkdev.h>
 #include <linux/blkpg.h>
-#include <linux/kmod.h>
 
 /* we only need this for the lv_bmap struct definition, not happy */
 #include <linux/lvm.h>
 
 #define MAX_DEVICES 64
 #define DEFAULT_READ_AHEAD 64
-#define DEVICE_NAME "device-mapper"
+#define DEVICE_NAME "device-mapper"	/* Name for messaging */
 
 static const char *_name = DEVICE_NAME;
 static const char *_version = @DM_VERSION@;
 static const char *_email = "lvm-devel@lists.sistina.com";
 
-static int major = 0;
+static int _major = 0;
 
 struct io_hook {
 	struct mapped_device *md;
@@ -49,80 +47,115 @@ static int request(request_queue_t *q, int rw, struct buffer_head *bh);
 static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb);
 
 /*
- * setup and teardown the driver
+ * Shortcuts to lock/unlock the global _dev_lock
  */
-static int __init dm_init(void)
+static inline void dm_lock_r(void) {
+	down_read(&_dev_lock);
+}
+
+static inline void dm_unlock_r(void) {
+	up_read(&_dev_lock);
+}
+
+static inline void dm_lock_w(void) {
+	down_write(&_dev_lock);
+}
+
+static inline void dm_unlock_w(void) {
+	up_write(&_dev_lock);
+}
+
+
+/*
+ * Setup and tear down the driver
+ */
+static int __init local_init(void)
 {
-	int ret = -ENOMEM;
+	int r;
 
 	init_rwsem(&_dev_lock);
 
-	_io_hook_cache = kmem_cache_create("dm io hooks",
-					   sizeof(struct io_hook),
-					   0, 0, NULL, NULL);
+	/* allocate a slab for the io-hooks */
+	if (!_io_hook_cache &&
+	    !(_io_hook_cache = kmem_cache_create("dm io hooks",
+						 sizeof(struct io_hook),
+						 0, 0, NULL, NULL)))
+		return -ENOMEM;
 
-	if (!_io_hook_cache)
-		goto err;
+	r = devfs_register_blkdev(_major, _name, &dm_blk_dops);
+	if (r < 0) {
+		printk(KERN_ERR "%s -- register_blkdev failed\n", _name);
+		kmem_cache_destroy(_io_hook_cache);
+		return r;
+	}
 
-	ret = dm_target_init();
-	if (ret < 0)
-		goto err_cache_free;
-
-	ret = dm_interface_init();
-	if (ret < 0)
-		goto err_cache_free;
-
-	ret = devfs_register_blkdev(major, _name, &dm_blk_dops);
-	if (ret < 0)
-		goto err_blkdev;
-
-	if (major == 0)
-		major = ret;
+	if (!_major)
+		_major = r;
 
 	/* set up the arrays */
-	read_ahead[major] = DEFAULT_READ_AHEAD;
-	blk_size[major] = _block_size;
-	blksize_size[major] = _blksize_size;
-	hardsect_size[major] = _hardsect_size;
+	read_ahead[_major] = DEFAULT_READ_AHEAD;
+	blk_size[_major] = _block_size;
+	blksize_size[_major] = _blksize_size;
+	hardsect_size[_major] = _hardsect_size;
 
-	blk_queue_make_request(BLK_DEFAULT_QUEUE(major), request);
+	blk_queue_make_request(BLK_DEFAULT_QUEUE(_major), request);
 
 	_dev_dir = devfs_mk_dir(0, DM_DIR, NULL);
 
 	printk(KERN_INFO "%s %s initialised, %s\n", _name, _version, _email);
 	return 0;
+}
 
-      err_blkdev:
-	printk(KERN_ERR "%s -- register_blkdev failed\n", _name);
-	dm_interface_exit();
-      err_cache_free:
-	kmem_cache_destroy(_io_hook_cache);
-      err:
-	return ret;
+static void __exit local_exit(void)
+{
+	if (kmem_cache_destroy(_io_hook_cache))
+		WARN("it looks like there are still some io_hooks allocated");
+	_io_hook_cache = NULL;
+
+	if (devfs_unregister_blkdev(_major, _name) < 0)
+		printk(KERN_ERR "%s -- unregister_blkdev failed\n", _name);
+
+	read_ahead[_major] = 0;
+	blk_size[_major] = NULL;
+	blksize_size[_major] = NULL;
+	hardsect_size[_major] = NULL;
+
+	printk(KERN_INFO "%s %s cleaned up\n", _name, _version);
+}
+
+static int __init dm_init(void)
+{
+	int r;
+
+	r = local_init();
+	if (r)
+		return r;
+
+	r = dm_target_init();
+	if (r) {
+		local_exit();
+		return r;
+	}
+
+	r = dm_interface_init();
+	if (r) {
+		dm_target_exit();
+		local_exit();
+		return r;
+	}
+
+	return 0;
 }
 
 static void __exit dm_exit(void)
 {
 	dm_interface_exit();
-
-	if (kmem_cache_destroy(_io_hook_cache))
-		WARN("it looks like there are still some io_hooks allocated");
-
-	_io_hook_cache = NULL;
-
-	if (devfs_unregister_blkdev(major, _name) < 0)
-		printk(KERN_ERR "%s -- unregister_blkdev failed\n", _name);
-
-	read_ahead[major] = 0;
-	blk_size[major] = NULL;
-	blksize_size[major] = NULL;
-	hardsect_size[major] = NULL;
-
-	printk(KERN_INFO "%s %s cleaned up\n", _name, _version);
+	dm_target_exit();
+	local_exit();
 }
 
 /*
- * block device functions
+ * Block device functions
  */
 static int dm_blk_open(struct inode *inode, struct file *file)
 {
@@ -132,16 +165,16 @@ static int dm_blk_open(struct inode *inode, struct file *file)
 	if (minor >= MAX_DEVICES)
 		return -ENXIO;
 
-	down_write(&_dev_lock);
+	dm_lock_w();
 	md = _devs[minor];
 
 	if (!md) {
-		up_write(&_dev_lock);
+		dm_unlock_w();
 		return -ENXIO;
 	}
 
 	md->use_count++;
-	up_write(&_dev_lock);
+	dm_unlock_w();
 
 	return 0;
 }
@@ -154,16 +187,16 @@ static int dm_blk_close(struct inode *inode, struct file *file)
 	if (minor >= MAX_DEVICES)
 		return -ENXIO;
 
-	down_write(&_dev_lock);
+	dm_lock_w();
 	md = _devs[minor];
 	if (!md || md->use_count < 1) {
 		WARN("reference count in mapped_device incorrect");
-		up_write(&_dev_lock);
+		dm_unlock_w();
 		return -ENXIO;
 	}
 
 	md->use_count--;
-	up_write(&_dev_lock);
+	dm_unlock_w();
 
 	return 0;
 }
@@ -232,7 +265,7 @@ static inline void free_io_hook(struct io_hook *ih)
 }
 
 /*
- * FIXME: need to decide if deferred_io's need
+ * FIXME: We need to decide if deferred_io's need
  * their own slab, I say no for now since they are
  * only used when the device is suspended.
  */
@@ -247,12 +280,12 @@ static inline void free_deferred(struct deferred_io *di)
 }
 
 /*
- * call a targets optional error function if
- * an io failed.
+ * Call a target's optional error function if an I/O failed.
  */
 static inline int call_err_fn(struct io_hook *ih, struct buffer_head *bh)
 {
 	dm_err_fn err = ih->target->type->err;
+
 	if (err)
 		return err(bh, ih->rw, ih->target->private);
 
@@ -260,9 +293,8 @@ static inline int call_err_fn(struct io_hook *ih, struct buffer_head *bh)
 }
 
 /*
- * bh->b_end_io routine that decrements the
- * pending count and then calls the original
- * bh->b_end_io fn.
+ * bh->b_end_io routine that decrements the pending count 
+ * and then calls the original bh->b_end_io fn.
  */
 static void dec_pending(struct buffer_head *bh, int uptodate)
 {
@@ -283,7 +315,7 @@ static void dec_pending(struct buffer_head *bh, int uptodate)
 }
 
 /*
- * add the bh to the list of deferred io.
+ * Add the bh to the list of deferred io.
  */
 static int queue_io(struct mapped_device *md, struct buffer_head *bh, int rw)
 {
@@ -292,23 +324,23 @@ static int queue_io(struct mapped_device *md, struct buffer_head *bh, int rw)
 	if (!di)
 		return -ENOMEM;
 
-	down_write(&_dev_lock);
+	dm_lock_w();
 	if (!md->suspended) {
-		up_write(&_dev_lock);
-		return 0;
+		dm_unlock_w();
+		return 1;
 	}
 
 	di->bh = bh;
 	di->rw = rw;
 	di->next = md->deferred;
 	md->deferred = di;
-	up_write(&_dev_lock);
+	dm_unlock_w();
 
-	return 1;
+	return 0;	/* deferred successfully */
 }
 
 /*
- * do the bh mapping for a given leaf
+ * Do the bh mapping for a given leaf
  */
 static inline int __map_buffer(struct mapped_device *md,
 			       struct buffer_head *bh, int rw, int leaf)
@@ -325,7 +357,7 @@ static inline int __map_buffer(struct mapped_device *md,
 	ih = alloc_io_hook();
 
 	if (!ih)
-		return 0;
+		return -1;
 
 	ih->md = md;
 	ih->rw = rw;
@@ -340,21 +372,19 @@ static inline int __map_buffer(struct mapped_device *md,
 		atomic_inc(&md->pending);
 		bh->b_end_io = dec_pending;
 		bh->b_private = ih;
-
 	} else if (r == 0)
 		/* we don't need to hook */
 		free_io_hook(ih);
-
 	else if (r < 0) {
 		free_io_hook(ih);
-		return 0;
+		return -1;
 	}
 
-	return 1;
+	return 0;
 }
 
 /*
- * search the btree for the correct target.
+ * Search the btree for the correct target.
  */
 static inline int __find_node(struct dm_table *t, struct buffer_head *bh)
 {
@@ -381,7 +411,7 @@ static int request(request_queue_t *q, int rw, struct buffer_head *bh)
 	if (minor >= MAX_DEVICES)
 		goto bad_no_lock;
 
-	down_read(&_dev_lock);
+	dm_lock_r();
 	md = _devs[minor];
 
 	if (!md)
@@ -392,7 +422,7 @@ static int request(request_queue_t *q, int rw, struct buffer_head *bh)
 	 * this io for later.
 	 */
 	while (md->suspended) {
-		up_read(&_dev_lock);
+		dm_unlock_r();
 
 		if (rw == READA)
 			goto bad_no_lock;
@@ -402,26 +432,24 @@ static int request(request_queue_t *q, int rw, struct buffer_head *bh)
 		if (r < 0)
 			goto bad_no_lock;
 
-		else if (r > 0)
+		else if (r == 0)
 			return 0;	/* deferred successfully */
 
 		/*
-		 * We're in a while loop, because
-		 * someone could suspend before we
-		 * get to the following read
-		 * lock
+		 * We're in a while loop, because someone could suspend 
+		 * before we get to the following read lock
 		 */
-		down_read(&_dev_lock);
+		dm_lock_r();
 	}
 
-	if (!__map_buffer(md, bh, rw, __find_node(md->map, bh)))
+	if (__map_buffer(md, bh, rw, __find_node(md->map, bh)) < 0)
 		goto bad;
 
-	up_read(&_dev_lock);
+	dm_unlock_r();
 	return 1;
 
       bad:
-	up_read(&_dev_lock);
+	dm_unlock_r();
 
       bad_no_lock:
 	buffer_IO_error(bh);
@@ -438,7 +466,7 @@ static int check_dev_size(int minor, unsigned long block)
 }
 
 /*
- * creates a dummy buffer head and maps it (for lilo).
+ * Creates a dummy buffer head and maps it (for lilo).
  */
 static int do_bmap(kdev_t dev, unsigned long block,
 		   kdev_t * r_dev, unsigned long *r_block)
@@ -448,7 +476,7 @@ static int do_bmap(kdev_t dev, unsigned long block,
 	int minor = MINOR(dev), r;
 	struct target *t;
 
-	down_read(&_dev_lock);
+	dm_lock_r();
 	if ((minor >= MAX_DEVICES) || !(md = _devs[minor]) || md->suspended) {
 		r = -ENXIO;
 		goto out;
@@ -476,13 +504,12 @@ static int do_bmap(kdev_t dev, unsigned long block,
 	*r_block = bh.b_rsector / (bh.b_size >> 9);
 
       out:
-	up_read(&_dev_lock);
+	dm_unlock_r();
 	return r;
 }
 
 /*
- * marshals arguments and results between user and
- * kernel space.
+ * Marshals arguments and results between user and kernel space.
  */
 static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb)
 {
@@ -504,8 +531,7 @@ static int dm_user_bmap(struct inode *inode, struct lv_bmap *lvb)
 }
 
 /*
- * see if the device with a specific minor # is
- * free.
+ * See if the device with a specific minor # is free.
  */
 static inline int __specific_dev(int minor)
 {
@@ -546,24 +572,24 @@ static struct mapped_device *alloc_dev(int minor)
 
 	memset(md, 0, sizeof(*md));
 
-	down_write(&_dev_lock);
+	dm_lock_w();
 	minor = (minor < 0) ? __any_old_dev() : __specific_dev(minor);
 
 	if (minor < 0) {
 		WARN("no free devices available");
-		up_write(&_dev_lock);
+		dm_unlock_w();
 		kfree(md);
 		return 0;
 	}
 
-	md->dev = MKDEV(major, minor);
+	md->dev = MKDEV(_major, minor);
 	md->name[0] = '\0';
 	md->suspended = 0;
 
 	init_waitqueue_head(&md->wait);
 
 	_devs[minor] = md;
-	up_write(&_dev_lock);
+	dm_unlock_w();
 
 	return md;
 }
@@ -591,9 +617,8 @@ static int unregister_device(struct mapped_device *md)
 }
 
 /*
- * the hardsect size for a mapped device is the
- * smallest hard sect size from the devices it
- * maps onto.
+ * The hardsect size for a mapped device is the smallest hardsect size 
+ * from the devices it maps onto.
  */
 static int __find_hardsect_size(struct list_head *devices)
 {
@@ -662,36 +687,38 @@ static int check_name(const char *name)
 {
 	if (strchr(name, '/')) {
 		WARN("invalid device name");
-		return 0;
+		return -1;
 	}
 
 	if (__get_by_name(name)) {
 		WARN("device name already in use");
-		return 0;
+		return -1;
 	}
 
-	return 1;
+	return 0;
 }
 
 /*
- * constructor for a new device
+ * Constructor for a new device
  */
-struct mapped_device *dm_create(const char *name, int minor,
-				struct dm_table *table)
+int dm_create(const char *name, int minor, struct dm_table *table,
+	      struct mapped_device **result)
 {
-	int r = -EINVAL;
+	int r;
 	struct mapped_device *md;
 
 	if (minor >= MAX_DEVICES)
-		return ERR_PTR(-ENXIO);
+		return -ENXIO;
 
 	if (!(md = alloc_dev(minor)))
-		return ERR_PTR(-ENXIO);
+		return -ENXIO;
 
-	down_write(&_dev_lock);
+	dm_lock_w();
 
-	if (!check_name(name))
+	if (check_name(name) < 0) {
+		r = -EINVAL;
 		goto err;
+	}
 
 	strcpy(md->name, name);
 	_devs[minor] = md;
@@ -704,14 +731,15 @@ struct mapped_device *dm_create(const char *name, int minor,
 	if (r)
 		goto err;
 
-	up_write(&_dev_lock);
+	dm_unlock_w();
 
-	return md;
+	*result = md;
+	return 0;
 
       err:
-	up_write(&_dev_lock);
+	dm_unlock_w();
 	free_dev(md);
-	return ERR_PTR(r);
+	return r;
 }
 
 /*
@@ -722,23 +750,23 @@ int dm_destroy(struct mapped_device *md)
 {
 	int minor, r;
 
-	down_read(&_dev_lock);
+	dm_lock_r();
 	if (md->suspended || md->use_count) {
-		up_read(&_dev_lock);
+		dm_unlock_r();
 		return -EPERM;
 	}
 
 	fsync_dev(md->dev);
-	up_read(&_dev_lock);
+	dm_unlock_r();
 
-	down_write(&_dev_lock);
+	dm_lock_w();
 	if (md->use_count) {
-		up_write(&_dev_lock);
+		dm_unlock_w();
 		return -EPERM;
 	}
 
 	if ((r = unregister_device(md))) {
-		up_write(&_dev_lock);
+		dm_unlock_w();
 		return r;
 	}
 
@@ -746,7 +774,7 @@ int dm_destroy(struct mapped_device *md)
 	_devs[minor] = 0;
 	__unbind(md);
 
-	up_write(&_dev_lock);
+	dm_unlock_w();
 
 	free_dev(md);
 
@@ -754,8 +782,7 @@ int dm_destroy(struct mapped_device *md)
 }
 
 /*
- * requeue the deferred buffer_heads by calling
- * generic_make_request.
+ * Requeue the deferred buffer_heads by calling generic_make_request.
  */
 static void flush_deferred_io(struct deferred_io *c)
 {
@@ -776,22 +803,22 @@ int dm_swap_table(struct mapped_device *md, struct dm_table *table)
 {
 	int r;
 
-	down_write(&_dev_lock);
+	dm_lock_w();
 
 	/* device must be suspended */
 	if (!md->suspended) {
-		up_write(&_dev_lock);
+		dm_unlock_w();
 		return -EPERM;
 	}
 
 	__unbind(md);
 
 	if ((r = __bind(md, table))) {
-		up_write(&_dev_lock);
+		dm_unlock_w();
 		return r;
 	}
 
-	up_write(&_dev_lock);
+	dm_unlock_w();
 
 	return 0;
 }
@@ -809,31 +836,31 @@ int dm_suspend(struct mapped_device *md)
 {
 	DECLARE_WAITQUEUE(wait, current);
 
-	down_write(&_dev_lock);
+	dm_lock_w();
 	if (md->suspended) {
-		up_write(&_dev_lock);
+		dm_unlock_w();
 		return -EINVAL;
 	}
 
 	md->suspended = 1;
-	up_write(&_dev_lock);
+	dm_unlock_w();
 
 	/* wait for all the pending io to flush */
 	add_wait_queue(&md->wait, &wait);
 	current->state = TASK_UNINTERRUPTIBLE;
 	do {
-		down_write(&_dev_lock);
+		dm_lock_w();
 		if (!atomic_read(&md->pending))
 			break;
 
-		up_write(&_dev_lock);
+		dm_unlock_w();
 		schedule();
 
 	} while (1);
 
 	current->state = TASK_RUNNING;
 	remove_wait_queue(&md->wait, &wait);
-	up_write(&_dev_lock);
+	dm_unlock_w();
 
 	return 0;
 }
@@ -842,18 +869,20 @@ int dm_resume(struct mapped_device *md)
 {
 	struct deferred_io *def;
 
-	down_write(&_dev_lock);
-	if (!md->suspended) {
-		up_write(&_dev_lock);
+	dm_lock_w();
+	if (!md->suspended || !md->map->num_targets) {
+		dm_unlock_w();
 		return -EINVAL;
 	}
 
 	md->suspended = 0;
 	def = md->deferred;
 	md->deferred = NULL;
-	up_write(&_dev_lock);
+	dm_unlock_w();
 
 	flush_deferred_io(def);
+
+	fsync_dev(md->dev);
 
 	return 0;
 }
@@ -865,9 +894,9 @@ struct mapped_device *dm_get(const char *name)
 {
 	struct mapped_device *md;
 
-	down_read(&_dev_lock);
+	dm_lock_r();
 	md = __get_by_name(name);
-	up_read(&_dev_lock);
+	dm_unlock_r();
 
 	return md;
 }
@@ -885,8 +914,8 @@ struct block_device_operations dm_blk_dops = {
 module_init(dm_init);
 module_exit(dm_exit);
 
-MODULE_PARM(major, "i");
-MODULE_PARM_DESC(major, "The major number of the device mapper");
+MODULE_PARM(_major, "i");
+MODULE_PARM_DESC(_major, "The major number of the device mapper");
 MODULE_DESCRIPTION("device-mapper driver");
 MODULE_AUTHOR("Joe Thornber <thornber@sistina.com>");
 MODULE_LICENSE("GPL");

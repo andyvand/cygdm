@@ -1,6 +1,4 @@
 /*
- * device-mapper.h
- *
  * Copyright (C) 2001 Sistina Software (UK) Limited.
  *
  * This file is released under the LGPL.
@@ -19,15 +17,18 @@ struct dm_table;
 struct dm_dev;
 typedef unsigned int offset_t;
 
-/*
- * Prototypes for functions of a target
- */
-typedef int (*dm_ctr_fn) (struct dm_table * t, offset_t b, offset_t l,
-			  char *args, void **context);
-typedef void (*dm_dtr_fn) (struct dm_table * t, void *c);
-typedef int (*dm_map_fn) (struct buffer_head * bh, int rw, void *context);
-typedef int (*dm_err_fn) (struct buffer_head *bh, int rw, void *context);
 
+/*
+ * Prototypes for functions for a target
+ */
+typedef int (*dm_ctr_fn)(struct dm_table *t, offset_t b, offset_t l,
+			 const char *args, void **context);
+typedef void (*dm_dtr_fn)(struct dm_table *t, void *c);
+typedef int (*dm_map_fn)(struct buffer_head *bh, int rw, void *context);
+typedef int (*dm_err_fn)(struct buffer_head *bh, int rw, void *context);
+
+
+void dm_error(const char *message);
 
 /*
  * Contructors should call these functions to ensure destination devices 

@@ -45,6 +45,7 @@ extern struct seq_operations dmfs_status_seq_ops;
 extern struct seq_operations dmfs_suspend_seq_ops;
 extern ssize_t dmfs_suspend_write(struct file *file, const char *buf,
 				  size_t size, loff_t * ppos);
+extern int dmfs_error_revalidate(struct dentry *dentry);
 
 static int dmfs_seq_open(struct inode *inode, struct file *file)
 {
@@ -74,6 +75,10 @@ static struct file_operations dmfs_suspend_file_operations = {
 static struct inode_operations dmfs_null_inode_operations = {
 };
 
+static struct inode_operations dmfs_error_inode_operations = {
+	revalidate:	dmfs_error_revalidate
+};
+
 static struct file_operations dmfs_seq_ro_file_operations = {
 	open:		dmfs_seq_open,
 	read:		seq_read,
@@ -89,6 +94,18 @@ static struct inode *dmfs_create_seq_ro(struct inode *dir, int mode,
 	if (inode) {
 		inode->i_fop = &dmfs_seq_ro_file_operations;
 		inode->i_op = &dmfs_null_inode_operations;
+		DMFS_SEQ(inode) = seq_ops;
+	}
+	return inode;
+}
+
+static struct inode *dmfs_create_error(struct inode *dir, int mode,
+					struct seq_operations *seq_ops, int dev)
+{
+	struct inode *inode = dmfs_new_inode(dir->i_sb, mode | S_IFREG);
+	if (inode) {
+		inode->i_fop = &dmfs_seq_ro_file_operations;
+		inode->i_op = &dmfs_error_inode_operations;
 		DMFS_SEQ(inode) = seq_ops;
 	}
 	return inode;
@@ -128,7 +145,7 @@ static struct dmfs_inode_info dmfs_ii[] = {
 	{".", NULL, NULL, DT_DIR},
 	{"..", NULL, NULL, DT_DIR},
 	{"table", dmfs_create_table, NULL, DT_REG},
-	{"error", dmfs_create_seq_ro, &dmfs_error_seq_ops, DT_REG},
+	{"error", dmfs_create_error, &dmfs_error_seq_ops, DT_REG},
 	{"status", dmfs_create_seq_ro, &dmfs_status_seq_ops, DT_REG},
 	{"device", dmfs_create_device, NULL, DT_BLK},
 	{"suspend", dmfs_create_suspend, &dmfs_suspend_seq_ops, DT_REG},
@@ -217,21 +234,20 @@ struct inode *dmfs_create_lv(struct super_block *sb, int mode,
 	int ret = -ENOMEM;
 
 	if (inode) {
-		table = dm_table_create();
-		ret = PTR_ERR(table);
-		if (!IS_ERR(table)) {
+		ret = dm_table_create(&table);
+		if (!ret) {
 			ret = dm_table_complete(table);
 			if (!ret) {
 				inode->i_fop = &dmfs_lv_file_operations;
 				inode->i_op = &dmfs_lv_inode_operations;
 				memcpy(tmp_name, name, dentry->d_name.len);
 				tmp_name[dentry->d_name.len] = 0;
-				md = dm_create(tmp_name, -1, table);
-				if (!IS_ERR(md)) {
+				ret = dm_create(tmp_name, -1, table, &md);
+				if (!ret) {
 					DMFS_I(inode)->md = md;
+					md->suspended = 1;
 					return inode;
 				}
-				ret = PTR_ERR(md);
 			}
 			dm_table_destroy(table);
 		}

@@ -178,14 +178,15 @@ static struct dm_table *dmfs_parse(struct inode *inode, struct file *filp)
 	unsigned long page;
 	struct dmfs_desc d;
 	loff_t pos = 0;
+	int r;
 
 	if (inode->i_size == 0)
 		return NULL;
 
 	page = __get_free_page(GFP_NOFS);
 	if (page) {
-		t = dm_table_create();
-		if (t) {
+		r = dm_table_create(&t);
+		if (!r) {
 			read_descriptor_t desc;
 
 			desc.written = 0;
@@ -202,7 +203,10 @@ static struct dm_table *dmfs_parse(struct inode *inode, struct file *filp)
 			if (desc.written != inode->i_size) {
 				dm_table_destroy(t);
 				t = NULL;
-			}
+			} 
+			if (!t || (t && !t->num_targets))
+				dmfs_add_error(d.inode, 0, 
+					       "No valid targets found");
 		}
 		free_page(page);
 	}
@@ -296,7 +300,7 @@ static int dmfs_commit_write(struct file *file, struct page *page,
  * at some stage if we continue to use this set of functions for ensuring
  * exclusive write access to the file
  */
-static int get_exclusive_write_access(struct inode *inode)
+int get_exclusive_write_access(struct inode *inode)
 {
 	if (get_write_access(inode))
 		return -1;
@@ -311,10 +315,16 @@ static int dmfs_table_open(struct inode *inode, struct file *file)
 {
 	struct dentry *dentry = file->f_dentry;
 	struct inode *parent = dentry->d_parent->d_inode;
+	struct dmfs_i *dmi = DMFS_I(parent);
 
 	if (file->f_mode & FMODE_WRITE) {
 		if (get_exclusive_write_access(parent))
 			return -EPERM;
+
+		if (!dmi->md->suspended) {
+			put_write_access(parent);
+			return -EPERM;
+		}
 	}
 
 	return 0;

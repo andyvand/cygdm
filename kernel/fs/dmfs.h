@@ -10,6 +10,8 @@ struct dmfs_i {
 
 #define DMFS_I(inode) ((struct dmfs_i *)(inode)->u.generic_ip)
 
+int get_exclusive_write_access(struct inode *inode);
+
 extern struct inode *dmfs_new_inode(struct super_block *sb, int mode);
 extern struct inode *dmfs_new_private_inode(struct super_block *sb, int mode);
 

@@ -46,6 +46,19 @@ static struct dmfs_error oom_error = {
 	msg:	"Out of memory during creation of table\n",
 };
 
+int dmfs_error_revalidate(struct dentry *dentry)
+{
+	struct inode *inode = dentry->d_inode;
+	struct inode *parent = dentry->d_parent->d_inode;
+
+	if (!list_empty(&DMFS_I(parent)->errors))
+		inode->i_size = 1;
+	else
+		inode->i_size = 0;
+
+	return 0;
+}
+
 void dmfs_add_error(struct inode *inode, unsigned num, char *str)
 {
 	struct dmfs_i *dmi = DMFS_I(inode);
