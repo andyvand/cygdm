@@ -843,10 +843,8 @@ void dm_set_ro(struct mapped_device *md, int ro)
 {
 	dm_lock_w();
 
-	if (md->read_only != ro) {
-		md->read_only = ro;
-		set_device_ro(md->dev, ro);
-	}
+	md->read_only = ro;
+	set_device_ro(md->dev, ro);
 
 	dm_unlock_w();
 }
