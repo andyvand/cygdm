@@ -1,0 +1,85 @@
+--- linux-last/drivers/md/dm.c	Fri Nov  2 13:07:57 2001
++++ linux/drivers/md/dm.c	Fri Nov  2 13:05:39 2001
+@@ -702,6 +702,21 @@
+ 	md->map = NULL;
+ }
+ 
++static int check_name(const char *name)
++{
++	if (strchr(name, '/')) {
++		WARN("invalid device name");
++		return 0;
++	}
++
++	if (dm_get(name)) {
++		WARN("device name already in use");
++		return 0;
++	}
++
++	return 1;
++}
++
+ /*
+  * constructor for a new device
+  */
+@@ -719,6 +734,12 @@
+ 		return -ENXIO;
+ 
+ 	wl;
++	if (!check_name(name)) {
++		wu;
++		free_dev(md);
++		return -EINVAL;
++	}
++
+ 	strcpy(md->name, name);
+ 	_devs[minor] = md;
+ 	if ((r = register_device(md))) {
+--- linux-last/drivers/md/dm.c	Fri Nov  2 14:14:27 2001
++++ linux/drivers/md/dm.c	Fri Nov  2 15:36:37 2001
+@@ -702,6 +702,18 @@
+ 	md->map = NULL;
+ }
+ 
++
++static struct mapped_device *__get_by_name(const char *name)
++{
++	int i;
++
++	for (i = 0; i < MAX_DEVICES; i++)
++		if (_devs[i] && !strcmp(_devs[i]->name, name))
++			return _devs[i];
++
++	return NULL;
++}
++
+ static int check_name(const char *name)
+ {
+ 	if (strchr(name, '/')) {
+@@ -709,7 +721,7 @@
+ 		return 0;
+ 	}
+ 
+-	if (dm_get(name)) {
++	if (__get_by_name(name)) {
+ 		WARN("device name already in use");
+ 		return 0;
+ 	}
+@@ -906,15 +918,10 @@
+  */
+ struct mapped_device *dm_get(const char *name)
+ {
+-	int i;
+-	struct mapped_device *md = NULL;
++	struct mapped_device *md;
+ 
+ 	rl;
+-	for (i = 0; i < MAX_DEVICES; i++)
+-		if (_devs[i] && !strcmp(_devs[i]->name, name)) {
+-			md = _devs[i];
+-			break;
+-		}
++	md = __get_by_name(name);
+ 	ru;
+ 
+ 	return md;

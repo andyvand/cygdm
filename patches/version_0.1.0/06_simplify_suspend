@@ -1,0 +1,497 @@
+--- linux-last/drivers/md/dm.c	Thu Nov  1 13:20:46 2001
++++ linux/drivers/md/dm.c	Thu Nov  1 18:09:18 2001
+@@ -127,7 +127,7 @@
+ 	wl;
+ 	md = _devs[minor];
+ 
+-	if (!md || !is_active(md)) {
++	if (!md) {
+ 		wu;
+ 		return -ENXIO;
+ 	}
+@@ -297,7 +297,7 @@
+ 		return -ENOMEM;
+ 
+ 	wl;
+-	if (test_bit(DM_ACTIVE, &md->state)) {
++	if (!md->suspended) {
+ 		wu;
+ 		return 0;
+ 	}
+@@ -388,11 +388,14 @@
+ 	rl;
+ 	md = _devs[minor];
+ 
+-	if (!md || !md->map)
++	if (!md)
+ 		goto bad;
+ 
+-	/* if we're suspended we have to queue this io for later */
+-	if (!test_bit(DM_ACTIVE, &md->state)) {
++	/*
++	 * If we're suspended we have to queue
++	 * this io for later.
++	 */
++	if (md->suspended) {
+ 		ru;
+ 		r = queue_io(md, bh, rw);
+ 
+@@ -440,8 +443,7 @@
+ 	struct target *t;
+ 
+ 	rl;
+-	if ((minor >= MAX_DEVICES) || !(md = _devs[minor]) ||
+-	    !test_bit(DM_ACTIVE, &md->state)) {
++	if ((minor >= MAX_DEVICES) || !(md = _devs[minor]) || md->suspended) {
+ 		r = -ENXIO;
+ 		goto out;
+ 	}
+@@ -550,7 +552,7 @@
+ 
+ 	md->dev = MKDEV(DM_BLK_MAJOR, minor);
+ 	md->name[0] = '\0';
+-	md->state = 0;
++	md->suspended = 0;
+ 
+ 	init_waitqueue_head(&md->wait);
+ 
+@@ -633,18 +635,6 @@
+ 	return r;
+ }
+ 
+-
+-struct mapped_device *dm_find_by_minor(int minor)
+-{
+-	struct mapped_device *md;
+-
+-	rl;
+-	md = _devs[minor];
+-	ru;
+-
+-	return md;
+-}
+-
+ static int register_device(struct mapped_device *md)
+ {
+ 	md->devfs_entry =
+@@ -666,9 +656,58 @@
+ }
+ 
+ /*
++ * the hardsect size for a mapped device is the
++ * smallest hard sect size from the devices it
++ * maps onto.
++ */
++static int __find_hardsect_size(struct list_head *devices)
++{
++	int result = INT_MAX, size;
++	struct list_head *tmp;
++
++	for (tmp = devices->next; tmp != devices; tmp = tmp->next) {
++		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
++		size = get_hardsect_size(dd->dev);
++		if (size < result)
++			result = size;
++	}
++	return result;
++}
++
++/*
++ * Bind a table to the device.
++ */
++int __bind(struct mapped_device *md, struct dm_table *t)
++{
++	int minor = MINOR(md->dev);
++
++	if (!t->num_targets)
++		return -EINVAL;
++
++	md->map = t;
++
++	/* in k */
++	_block_size[minor] = (t->highs[t->num_targets - 1] + 1) >> 1;
++
++	_blksize_size[minor] = BLOCK_SIZE;
++	_hardsect_size[minor] = __find_hardsect_size(&t->devices);
++	register_disk(NULL, md->dev, 1, &dm_blk_dops, _block_size[minor]);
++
++	return open_devices(&md->map->devices);
++}
++
++void __unbind(struct mapped_device *md)
++{
++	close_devices(&md->map->devices);
++	md->map = NULL;
++}
++
++/*
+  * constructor for a new device
+  */
+-int dm_create(const char *name, int minor, struct mapped_device **result)
++int dm_create(const char *name, int minor,
++	      struct dm_table *table,
++	      struct mapped_device **result)
+ {
+ 	int r;
+ 	struct mapped_device *md;
+@@ -687,6 +726,12 @@
+ 		free_dev(md);
+ 		return r;
+ 	}
++
++	if ((r = __bind(md, table))) {
++		wu;
++		free_dev(md);
++		return r;
++	}
+ 	wu;
+ 
+ 	*result = md;
+@@ -696,12 +741,22 @@
+ /*
+  * destructor for the device.  md->map is
+  * deliberately not destroyed, dm-fs/dm-ioctl
+- * should manage table objects.
++ * should manage table objects.  You cannot
++ * destroy a suspended device.
+  */
+ int dm_destroy(struct mapped_device *md)
+ {
+ 	int minor, r;
+ 
++	rl;
++	if (md->suspended || md->use_count) {
++		ru;
++		return -EPERM;
++	}
++
++	fsync_dev(md->dev);
++	ru;
++
+ 	wl;
+ 	if (md->use_count) {
+ 		wu;
+@@ -715,48 +770,15 @@
+ 
+ 	minor = MINOR(md->dev);
+ 	_devs[minor] = 0;
++	__unbind(md);
++
+ 	wu;
+ 
+-	kfree(md);
++	free_dev(md);
+ 
+ 	return 0;
+ }
+ 
+-/*
+- * the hardsect size for a mapped device is the
+- * smallest hard sect size from the devices it
+- * maps onto.
+- */
+-static int __find_hardsect_size(struct list_head *devices)
+-{
+-	int result = INT_MAX, size;
+-	struct list_head *tmp;
+-
+-	for (tmp = devices->next; tmp != devices; tmp = tmp->next) {
+-		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
+-		size = get_hardsect_size(dd->dev);
+-		if (size < result)
+-			result = size;
+-	}
+-	return result;
+-}
+-
+-/*
+- * Bind a table to the device.
+- */
+-void __bind(struct mapped_device *md, struct dm_table *t)
+-{
+-	int minor = MINOR(md->dev);
+-
+-	md->map = t;
+-
+-	/* in k */
+-	_block_size[minor] = (t->highs[t->num_targets - 1] + 1) >> 1;
+-
+-	_blksize_size[minor] = BLOCK_SIZE;
+-	_hardsect_size[minor] = __find_hardsect_size(&t->devices);
+-	register_disk(NULL, md->dev, 1, &dm_blk_dops, _block_size[minor]);
+-}
+ 
+ /*
+  * requeue the deferred buffer_heads by calling
+@@ -774,70 +796,32 @@
+ }
+ 
+ /*
+- * make the device available for use, if was
+- * previously suspended rather than newly created
+- * then all queued io is flushed
++ * Swap in a new table.
+  */
+-int dm_activate(struct mapped_device *md, struct dm_table *table)
++int dm_swap_table(struct mapped_device *md, struct dm_table *table)
+ {
+ 	int r;
+ 
+-	/* check that the mapping has at least been loaded. */
+-	if (!table->num_targets)
+-		return -EINVAL;
+-
+ 	wl;
+ 
+-	/* you must be deactivated first */
+-	if (is_active(md)) {
++	/* device must be suspended */
++	if (!md->suspended) {
+ 		wu;
+ 		return -EPERM;
+ 	}
+ 
+-	__bind(md, table);
++	__unbind(md);
+ 
+-	if ((r = open_devices(&md->map->devices))) {
++	if ((r = __bind(md, table))) {
+ 		wu;
+ 		return r;
+ 	}
+ 
+-	set_bit(DM_ACTIVE, &md->state);
+-	__flush_deferred_io(md);
+ 	wu;
+ 
+ 	return 0;
+ }
+ 
+-/*
+- * Deactivate the device, the device must not be
+- * opened by anyone.
+- */
+-int dm_deactivate(struct mapped_device *md)
+-{
+-	rl;
+-	if (md->use_count) {
+-		ru;
+-		return -EPERM;
+-	}
+-
+-	fsync_dev(md->dev);
+-
+-	ru;
+-
+-	wl;
+-	if (md->use_count) {
+-		/* drat, somebody got in quick ... */
+-		wu;
+-		return -EPERM;
+-	}
+-
+-	close_devices(&md->map->devices);
+-	md->map = 0;
+-	clear_bit(DM_ACTIVE, &md->state);
+-	wu;
+-
+-	return 0;
+-}
+ 
+ /*
+  * We need to be able to change a mapping table
+@@ -848,17 +832,17 @@
+  * flush any in flight buffer_heads and ensure
+  * that any further io gets deferred.
+  */
+-void dm_suspend(struct mapped_device *md)
++int dm_suspend(struct mapped_device *md)
+ {
+ 	DECLARE_WAITQUEUE(wait, current);
+ 
+ 	wl;
+-	if (!is_active(md)) {
++	if (md->suspended) {
+ 		wu;
+-		return;
++		return -EINVAL;
+ 	}
+ 
+-	clear_bit(DM_ACTIVE, &md->state);
++	md->suspended = 1;
+ 	wu;
+ 
+ 	/* wait for all the pending io to flush */
+@@ -876,10 +860,24 @@
+ 
+ 	current->state = TASK_RUNNING;
+ 	remove_wait_queue(&md->wait, &wait);
+-	close_devices(&md->map->devices);
++	wu;
++
++	return 0;
++}
+ 
+-	md->map = 0;
++int dm_resume(struct mapped_device *md)
++{
++	wl;
++	if (!md->suspended) {
++		wu;
++		return -EINVAL;
++	}
++
++	md->suspended = 0;
++	__flush_deferred_io(md);
+ 	wu;
++
++	return 0;
+ }
+ 
+ /*
+--- linux-last/drivers/md/dm.h	Thu Nov  1 13:20:46 2001
++++ linux/drivers/md/dm.h	Thu Nov  1 17:45:14 2001
+@@ -26,11 +26,6 @@
+ #define KEYS_PER_NODE (NODE_SIZE / sizeof(offset_t))
+ #define CHILDREN_PER_NODE (KEYS_PER_NODE + 1)
+ 
+-enum {
+-	DM_BOUND = 0,		/* device has been bound to a table */
+-	DM_ACTIVE,		/* device is running */
+-};
+-
+ 
+ /*
+  * list of devices that a metadevice uses
+@@ -88,7 +83,7 @@
+ 	char name[DM_NAME_LEN];
+ 
+ 	int use_count;
+-	int state;
++	int suspended;
+ 
+ 	/* a list of io's that arrived while we were suspended */
+ 	atomic_t pending;
+@@ -110,17 +105,27 @@
+ void dm_put_target_type(struct target_type *t);
+ 
+ /* dm.c */
+-struct mapped_device *dm_find_by_minor(int minor);
++struct mapped_device *dm_get(const char *name);
++
++int dm_create(const char *name, int minor,
++	      struct dm_table *table,
++	      struct mapped_device **result);
+ 
+-int dm_create(const char *name, int minor, struct mapped_device **result);
+ int dm_destroy(struct mapped_device *md);
+ 
+-int dm_activate(struct mapped_device *md, struct dm_table *t);
+-int dm_deactivate(struct mapped_device *md);
+ 
+-void dm_suspend(struct mapped_device *md);
++/*
++ * The device must be suspended before calling
++ * this method.
++ */
++int dm_swap_table(struct mapped_device *md, struct dm_table *t);
++
++/*
++ * People can still use a suspended device.
++ */
++int dm_suspend(struct mapped_device *md);
++int dm_resume(struct mapped_device *md);
+ 
+-struct mapped_device *dm_get(const char *name);
+ 
+ 
+ /* dm-table.c */
+@@ -155,11 +160,6 @@
+ static inline offset_t *get_node(struct dm_table *t, int l, int n)
+ {
+ 	return t->index[l] + (n * KEYS_PER_NODE);
+-}
+-
+-static inline int is_active(struct mapped_device *md)
+-{
+-	return test_bit(DM_ACTIVE, &md->state);
+ }
+ 
+ #endif
+--- linux-last/drivers/md/dm-ioctl.c	Thu Nov  1 14:47:50 2001
++++ linux/drivers/md/dm-ioctl.c	Thu Nov  1 17:53:16 2001
+@@ -37,7 +37,7 @@
+  */
+ static int valid_str(char *str, void *end)
+ {
+-	while ((str < end) && *str)
++	while (((void *) str < end) && *str)
+ 		str++;
+ 
+ 	return *str ? 0 : 1;
+@@ -140,52 +140,41 @@
+ 	struct mapped_device *md;
+ 	struct dm_table *t;
+ 
+-	if ((r = dm_create(param->name, param->minor, &md)))
++	if ((r = dm_table_create(&t)))
+ 		return r;
+ 
+-	if ((r = dm_table_create(&t))) {
+-		dm_destroy(md);
+-		return r;
+-	}
+-
+ 	if ((r = populate_table(t, param))) {
+-		dm_destroy(md);
+ 		dm_table_destroy(t);
+ 		return r;
+ 	}
+ 
+-	if ((r = dm_activate(md, t))) {
+-		dm_destroy(md);
+-		dm_table_destroy(t);
++	if ((r = dm_create(param->name, param->minor, t, &md)))
+ 		return r;
+-	}
+ 
+ 	return 0;
+ }
+ 
+ static int remove(struct dm_ioctl *param)
+ {
+-	int r;
+ 	struct mapped_device *md = dm_get(param->name);
+ 
+ 	if (!md)
+-		return -ENODEV;
+-
+-	if ((r = dm_deactivate(md)))
+-		return r;
++		return -ENXIO;
+ 
+-	if (md->map)
+-		dm_table_destroy(md->map);
+-
+-	if (!dm_destroy(md))
+-		WARN("dm_ctl_ioctl: unable to remove device");
+-
+-	return 0;
++	return dm_destroy(md);
+ }
+ 
+ static int suspend(struct dm_ioctl *param)
+ {
+-	return -EINVAL;
++	struct mapped_device *md = dm_get(param->name);
++
++	if (!md)
++		return -ENXIO;
++
++	if (param->suspend)
++		return dm_suspend(md);
++
++	return dm_resume(md);
+ }
+ 
+ static int reload(struct dm_ioctl *param)

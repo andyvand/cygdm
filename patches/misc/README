@@ -1,0 +1,12 @@
+This directory contains miscellaneous patches that developers may find
+useful.
+
+uml_config - People using uml will need to apply this to be able to 
+             configure dm.
+
+disable_io_hook - This removes the hooking of the b_end_io field in buffer
+                  heads.  suspend/resume of a device will be broken as a
+                  result.
+
+instrument_defer - Useful printk's that I use for checking suspend/resume.
+

@@ -1,0 +1,30 @@
+--- linux-last//drivers/md/dm.c	Tue Nov  6 16:29:32 2001
++++ linux/drivers/md/dm.c	Tue Nov  6 18:45:55 2001
+@@ -283,6 +283,7 @@
+ 	bh->b_private = ih->context;
+ 	free_io_hook(ih);
+ 
++	WARN("calling end_io on bh %d, %lu", bh->b_rdev, bh->b_rsector);
+ 	bh->b_end_io(bh, uptodate);
+ }
+ 
+@@ -306,6 +307,9 @@
+ 	di->rw = rw;
+ 	di->next = md->deferred;
+ 	md->deferred = di;
++
++	WARN("defering bh %d, %lu", bh->b_rdev, bh->b_rsector);
++
+ 	wu;
+ 
+ 	return 1;
+@@ -829,6 +837,9 @@
+ 
+ 	while (c) {
+ 		n = c->next;
++
++		WARN("flushing bh %d, %lu", c->bh->b_rdev, c->bh->b_rsector);
++
+ 		generic_make_request(c->rw, c->bh);
+ 		free_deferred(c);
+ 		c = n;

@@ -1,0 +1,60 @@
+--- linux-last/include/linux/device-mapper.h	Fri Nov  2 13:07:57 2001
++++ linux/include/linux/device-mapper.h	Fri Nov  2 14:20:50 2001
+@@ -57,7 +57,7 @@
+ };
+ 
+ int dm_register_target(struct target_type *t);
+-int dm_unregister_target(struct target_type *t);
++int dm_unregister_target(const char *name);
+ 
+ #endif /* __KERNEL__ */
+ 
+--- linux-last/drivers/md/dm-target.c	Fri Nov  2 14:14:27 2001
++++ linux/drivers/md/dm-target.c	Fri Nov  2 14:20:11 2001
+@@ -118,20 +118,26 @@
+ 	return rv;
+ }
+ 
+-int dm_unregister_target(struct target_type *t)
++int dm_unregister_target(const char *name)
+ {
+-	struct tt_internal *ti = (struct tt_internal *) t;
+-	int rv = -ETXTBSY;
++	struct tt_internal *ti;
+ 
+ 	write_lock(&_lock);
+-	if (ti->use == 0) {
+-		list_del(&ti->list);
+-		kfree(ti);
+-		rv = 0;
++	if (!(ti = __find_target_type(name))) {
++		write_unlock(&_lock);
++		return -EINVAL;
++	}
++
++	if (ti->use) {
++		write_unlock(&_lock);
++		return -ETXTBSY;
+ 	}
+-	write_unlock(&_lock);
+ 
+-	return rv;
++	list_del(&ti->list);
++	kfree(ti);
++
++	write_unlock(&_lock);
++	return 0;
+ }
+ 
+ /*
+--- linux-last/drivers/md/dm-linear.c	Fri Nov  2 14:14:27 2001
++++ linux/drivers/md/dm-linear.c	Fri Nov  2 14:17:12 2001
+@@ -99,7 +99,7 @@
+ 
+ static void __exit linear_exit(void)
+ {
+-	if (dm_unregister_target(&linear_target))
++	if (dm_unregister_target(linear_target.name))
+ 		WARN("linear target unregister failed");
+ }
+ 

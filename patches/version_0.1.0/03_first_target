@@ -1,0 +1,20 @@
+--- linux-last/drivers/md/dm-ioctl.c	Thu Nov  1 13:34:07 2001
++++ linux/drivers/md/dm-ioctl.c	Thu Nov  1 13:47:08 2001
+@@ -37,7 +37,7 @@
+  */
+ static int valid_str(char *str, void *end)
+ {
+-	while ((str != end) && *str)
++	while ((str < end) && *str)
+ 		str++;
+ 
+ 	return *str ? 0 : 1;
+@@ -46,7 +46,7 @@
+ static int first_target(struct dm_ioctl *a, void *end,
+ 			struct dm_target_spec **spec, char **params)
+ {
+-	*spec = (struct dm_target_spec *) ((unsigned char *) a) + a->data_size;
++	*spec = (struct dm_target_spec *) (a + 1);
+ 	*params = (char *) (*spec + 1);
+ 
+ 	return valid_str(*params, end);

@@ -1,0 +1,14 @@
+--- linux-last/drivers/md/dm.h	Thu Nov  1 18:13:33 2001
++++ linux/drivers/md/dm.h	Thu Nov  1 18:19:22 2001
+@@ -137,11 +137,6 @@
+ int dm_table_complete(struct dm_table *t);
+ 
+ 
+-/* dm-fs.c */
+-int dm_fs_init(void);
+-void dm_fs_exit(void);
+-
+-
+ 
+ #define WARN(f, x...) printk(KERN_WARNING "device-mapper: " f "\n" , ## x)
+ 

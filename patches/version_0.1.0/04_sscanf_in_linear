@@ -1,0 +1,22 @@
+--- linux-last/drivers/md/dm-linear.c	Thu Nov  1 13:20:44 2001
++++ linux/drivers/md/dm-linear.c	Thu Nov  1 15:01:28 2001
+@@ -31,7 +31,9 @@
+ 		      dm_error_fn err, void *e_private)
+ {
+ 	struct linear_c *lc;
+-	unsigned int start;
++	unsigned long start;	/* FIXME: should be unsigned long long,
++				   need to fix sscanf */
++
+ 	char path[256];		/* FIXME: magic */
+ 	int r = -EINVAL;
+ 
+@@ -40,7 +42,7 @@
+ 		return -ENOMEM;
+ 	}
+ 
+-	if (sscanf("%s %u", path, &start) != 2) {
++	if (sscanf(args, "%s %lu", path, &start) != 2) {
+ 		err("target params should be of the form <dev_path> <sector>",
+ 		    e_private);
+ 		goto bad;

@@ -1,0 +1,42 @@
+--- linux-last/drivers/md/dm.c	Wed Nov 14 14:42:24 2001
++++ linux/drivers/md/dm.c	Thu Nov 15 10:29:35 2001
+@@ -319,39 +319,12 @@
+ 	int r;
+ 	dm_map_fn fn;
+ 	void *context;
+-	struct io_hook *ih = NULL;
+ 	struct target *ti = md->map->targets + leaf;
+ 
+ 	fn = ti->type->map;
+ 	context = ti->private;
+ 
+-	ih = alloc_io_hook();
+-
+-	if (!ih)
+-		return 0;
+-
+-	ih->md = md;
+-	ih->rw = rw;
+-	ih->target = ti;
+-	ih->end_io = bh->b_end_io;
+-	ih->context = bh->b_private;
+-
+ 	r = fn(bh, rw, context);
+-
+-	if (r > 0) {
+-		/* hook the end io request fn */
+-		atomic_inc(&md->pending);
+-		bh->b_end_io = dec_pending;
+-		bh->b_private = ih;
+-
+-	} else if (r == 0)
+-		/* we don't need to hook */
+-		free_io_hook(ih);
+-
+-	else if (r < 0) {
+-		free_io_hook(ih);
+-		return 0;
+-	}
+ 
+ 	return 1;
+ }

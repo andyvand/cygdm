@@ -1,0 +1,13 @@
+--- linux-last/drivers/md/dm.c	Tue Nov  6 16:29:32 2001
++++ linux/drivers/md/dm.c	Wed Nov  7 09:01:43 2001
+@@ -397,6 +397,10 @@
+ 	 */
+ 	while (md->suspended) {
+ 		ru;
++
++		if (rw == READA)
++			goto bad_no_lock;
++
+ 		r = queue_io(md, bh, rw);
+ 
+ 		if (r < 0)

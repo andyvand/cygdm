@@ -1,0 +1,7 @@
+As yet there has not been an official release of the driver.
+
+The patches in version_0.1.0 are still being added to.
+
+To apply untar your kernel then apply the patches in order.
+
+If you are using user mode linux look in misc.

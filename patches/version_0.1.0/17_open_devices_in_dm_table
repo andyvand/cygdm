@@ -1,0 +1,174 @@
+--- linux-last/drivers/md/dm.c	Tue Nov 13 14:39:36 2001
++++ linux/drivers/md/dm.c	Tue Nov 13 15:46:58 2001
+@@ -576,74 +576,6 @@
+ 	kfree(md);
+ }
+ 
+-/*
+- * open a device so we can use it as a map
+- * destination.
+- */
+-static int open_dev(struct dm_dev *d)
+-{
+-       int err;
+-
+-       if (d->bd)
+-	       BUG();
+-
+-       if (!(d->bd = bdget(kdev_t_to_nr(d->dev))))
+-               return -ENOMEM;
+-
+-       if ((err = blkdev_get(d->bd, FMODE_READ|FMODE_WRITE, 0, BDEV_FILE))) {
+-               bdput(d->bd);
+-               return err;
+-       }
+-
+-       return 0;
+-}
+-
+-/*
+- * close a device that we've been using.
+- */
+-static void close_dev(struct dm_dev *d)
+-{
+-	if (!d->bd)
+-		return;
+-
+-	blkdev_put(d->bd, BDEV_FILE);
+-	bdput(d->bd);
+-	d->bd = 0;
+-}
+-
+-/*
+- * Close a list of devices.
+- */
+-static void close_devices(struct list_head *devices)
+-{
+-	struct list_head *tmp;
+-
+-	list_for_each(tmp, devices) {
+-		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
+-		close_dev(dd);
+-	}
+-}
+-
+-/*
+- * Open a list of devices.
+- */
+-static int open_devices(struct list_head *devices)
+-{
+-	int r = 0;
+-	struct list_head *tmp;
+-
+-	list_for_each(tmp, devices) {
+-		struct dm_dev *dd = list_entry(tmp, struct dm_dev, list);
+-		if ((r = open_dev(dd)))
+-			goto bad;
+-	}
+-	return 0;
+-
+- bad:
+-	close_devices(devices);
+-	return r;
+-}
+-
+ static int register_device(struct mapped_device *md)
+ {
+ 	md->devfs_entry =
+@@ -686,7 +618,7 @@
+ /*
+  * Bind a table to the device.
+  */
+-int __bind(struct mapped_device *md, struct dm_table *t)
++static int __bind(struct mapped_device *md, struct dm_table *t)
+ {
+ 	int minor = MINOR(md->dev);
+ 
+@@ -702,12 +634,11 @@
+ 	_hardsect_size[minor] = __find_hardsect_size(&t->devices);
+ 	register_disk(NULL, md->dev, 1, &dm_blk_dops, _block_size[minor]);
+ 
+-	return open_devices(&md->map->devices);
++	return 0;
+ }
+ 
+-void __unbind(struct mapped_device *md)
++static void __unbind(struct mapped_device *md)
+ {
+-	close_devices(&md->map->devices);
+ 	md->map = NULL;
+ }
+ 
+--- linux-last/drivers/md/dm-table.c	Tue Nov 13 14:24:30 2001
++++ linux/drivers/md/dm-table.c	Tue Nov 13 15:50:20 2001
+@@ -223,6 +223,41 @@
+ }
+ 
+ /*
++ * open a device so we can use it as a map
++ * destination.
++ */
++static int open_dev(struct dm_dev *d)
++{
++       int err;
++
++       if (d->bd)
++	       BUG();
++
++       if (!(d->bd = bdget(kdev_t_to_nr(d->dev))))
++               return -ENOMEM;
++
++       if ((err = blkdev_get(d->bd, FMODE_READ|FMODE_WRITE, 0, BDEV_FILE))) {
++               bdput(d->bd);
++               return err;
++       }
++
++       return 0;
++}
++
++/*
++ * close a device that we've been using.
++ */
++static void close_dev(struct dm_dev *d)
++{
++	if (!d->bd)
++		return;
++
++	blkdev_put(d->bd, BDEV_FILE);
++	bdput(d->bd);
++	d->bd = 0;
++}
++
++/*
+  * add a device to the list, or just increment the
+  * usage count if it's already present.
+  */
+@@ -245,6 +280,12 @@
+ 
+ 		dd->dev = dev;
+ 		dd->bd = 0;
++
++		if ((r = open_dev(dd))) {
++			kfree(dd);
++			return r;
++		}
++
+ 		atomic_set(&dd->count, 0);
+ 		list_add(&dd->list, &t->devices);
+ 	}
+@@ -253,6 +294,7 @@
+ 
+ 	return 0;
+ }
++
+ /*
+  * decrement a devices use count and remove it if
+  * neccessary.
+@@ -260,6 +302,7 @@
+ void dm_table_put_device(struct dm_table *t, struct dm_dev *dd)
+ {
+        if (atomic_dec_and_test(&dd->count)) {
++	       close_dev(dd);
+ 	       list_del(&dd->list);
+                kfree(dd);
+        }
