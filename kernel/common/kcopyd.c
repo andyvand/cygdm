@@ -136,51 +136,48 @@ static int copy_kthread(void *unused)
 
 		down_write(&list_lock);
 
-		/* if/while, ugh! but we need to up the semaphore somehow */
-		if (!list_empty(&work_list) && !thread_exit) {
-			while (!list_empty(&work_list)) {
+		while (!list_empty(&work_list)) {
 
-				struct copy_work *work_item = list_entry(work_list.next, struct copy_work, list);
-				long done_sectors = 0;
-				int callback_reason = 0;
+			struct copy_work *work_item = list_entry(work_list.next, struct copy_work, list);
+			long done_sectors = 0;
+			int callback_reason = 0;
 
-				list_del(&work_item->list);
-				up_write(&list_lock);
+			list_del(&work_item->list);
+			up_write(&list_lock);
 
-				while (done_sectors < work_item->nr_sectors) {
-					long nr_sectors = min((long)KIO_MAX_SECTORS, (long)work_item->nr_sectors - done_sectors);
+			while (done_sectors < work_item->nr_sectors) {
+				long nr_sectors = min((long)KIO_MAX_SECTORS, (long)work_item->nr_sectors - done_sectors);
 
-					/* Read original blocks */
-					if (read_blocks(iobuf, work_item->fromdev, work_item->fromsec, nr_sectors)) {
-						DMERR("Read blocks from device %s failed\n", kdevname(work_item->fromdev));
+				/* Read original blocks */
+				if (read_blocks(iobuf, work_item->fromdev, work_item->fromsec, nr_sectors)) {
+					DMERR("Read blocks from device %s failed\n", kdevname(work_item->fromdev));
 
-						/* Callback error */
-						callback_reason = 1;
-						goto done_copy;
-					}
-
-					/* Write them out again */
-					if (write_blocks(iobuf, work_item->todev, work_item->tosec, nr_sectors)) {
-						DMERR("Write blocks to %s failed\n", kdevname(work_item->todev));
-
-						/* Callback error */
-						callback_reason = 2;
-						goto done_copy;
-					}
-					done_sectors += nr_sectors;
+					/* Callback error */
+					callback_reason = 1;
+					goto done_copy;
 				}
 
-			done_copy:
-				/* Call the callback */
-				if (work_item->callback)
-					work_item->callback(callback_reason, work_item->context);
+				/* Write them out again */
+				if (write_blocks(iobuf, work_item->todev, work_item->tosec, nr_sectors)) {
+					DMERR("Write blocks to %s failed\n", kdevname(work_item->todev));
 
-				kfree(work_item);
+					/* Callback error */
+					callback_reason = 2;
+					goto done_copy;
+				}
+				done_sectors += nr_sectors;
 			}
+
+		done_copy:
+
+			/* Call the callback */
+			if (work_item->callback)
+				work_item->callback(callback_reason, work_item->context);
+
+			kfree(work_item);
+			down_write(&list_lock);
 		}
-		else {
-			up_write(&list_lock);
-		}
+		up_write(&list_lock);
 
 		/* Wait for more work */
 		set_task_state(tsk, TASK_INTERRUPTIBLE);
