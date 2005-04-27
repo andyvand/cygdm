@@ -24,21 +24,31 @@ ifeq ("@INTL@", "yes")
   SUBDIRS += po
 endif
 
+ifeq ("@DMEVENTD@", "yes")
+  SUBDIRS += dmeventd
+endif
+
 SUBDIRS += lib dmsetup
 
 ifeq ($(MAKECMDGOALS),distclean)
   SUBDIRS += kernel po
 endif
 
+ifeq ($(MAKECMDGOALS),distclean)
+  SUBDIRS += dmeventd
+endif
+
 include make.tmpl
 
 lib: include
 dmsetup: lib
-po: dmsetup
+dmeventd: lib
+po: dmsetup dmeventd
 
 ifeq ("@INTL@", "yes")
 lib.pofile: include.pofile
 dmsetup.pofile: lib.pofile
+dmeventd.pofile: lib.pofile
 po.pofile: dmsetup.pofile
 pofile: po.pofile
 endif

@@ -173,6 +173,11 @@ AC_ARG_ENABLE(ioctl,   [  --disable-driver        Disable calls to device-mapper
 DMIOCTLS=$enableval)
 
 ################################################################################
+dnl -- Enable eventd
+AC_ARG_ENABLE(eventd,   [  --enable-eventd         Build the new event daemon],
+DMEVENTD=$enableval, DMEVENTD=no)
+
+################################################################################
 dnl -- Enables staticly-linked tools
 AC_ARG_ENABLE(static_link, [  --enable-static_link    Use this to link the tools to their libraries
                           statically.  Default is dynamic linking],  STATIC_LINK=$enableval, STATIC_LINK=no)
@@ -340,6 +345,7 @@ AC_SUBST(INTL)
 AC_SUBST(DEVICE_UID)
 AC_SUBST(DEVICE_GID)
 AC_SUBST(DEVICE_MODE)
+AC_SUBST(DMEVENTD)
 
 
 ################################################################################
@@ -349,8 +355,10 @@ AC_OUTPUT( 								\
 Makefile								\
 make.tmpl                                                               \
 include/Makefile                                                        \
+dmeventd/Makefile							\
 dmsetup/Makefile							\
 lib/Makefile							 	\
+lib/event/Makefile						 	\
 lib/libdm-common.h						 	\
 kernel/Makefile								\
 man/Makefile								\
