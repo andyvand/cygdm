@@ -25,7 +25,7 @@ ifeq ("@INTL@", "yes")
 endif
 
 ifeq ("@DMEVENTD@", "yes")
-  SUBDIRS += dmeventd
+  SUBDIRS += dmeventd multilog
 endif
 
 SUBDIRS += lib dmsetup

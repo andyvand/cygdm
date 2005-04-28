@@ -1,4 +1,5 @@
 ../lib/libdevmapper.h
 ../lib/libdm-file.h
 ../lib/libdm-event.h
+../multilog/libmultilog.h
 ../po/pogen.h

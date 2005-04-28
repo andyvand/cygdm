@@ -362,6 +362,8 @@ lib/event/Makefile						 	\
 lib/libdm-common.h						 	\
 kernel/Makefile								\
 man/Makefile								\
+multilog/Makefile							\
+multilog/tests/Makefile							\
 po/Makefile								\
 )
 
