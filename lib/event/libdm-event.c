@@ -35,116 +35,6 @@
 #define stack log_print("trace: %s:%s(%d)\n", __FILE__, __func__, __LINE__);
 
 
-/* Initialize the fifos structure. */
-static void init_fifos(struct fifos *fifos)
-{
-	memset(fifos, 0, sizeof(*fifos));
-	fifos->client_path = FIFO_CLIENT;
-	fifos->server_path = FIFO_SERVER;
-}
-
-static int create_fifo(char *path, char *what)
-{
-	if (mkfifo(path, 0600) == -1 && errno != EEXIST) {
-		log_err("%s: create %s fifo %s\n", __func__, what, path);
-		return 0;
-	}
-
-	chmod(path, 0600);
-
-	return 1;
-}
-
-static int create_fifos(struct fifos *fifos)
-{
-	if (!create_fifo(fifos->client_path, "client")) {
-		stack;
-		return 0;
-	}
-
-	if (!create_fifo(fifos->server_path, "server")) {
-		stack;
-		return 0;
-	}
-
-	return 1;
-}
-
-static int open_fifo(char *path, int rw, char *what)
-{
-	int ret;
-
-        if ((ret = open(path, rw)) == -1)
-		log_err("%s: open %s fifo %s\n", __func__, what, path);
-
-	return ret;
-}
-
-static int open_fifos(struct fifos *fifos)
-{
-	/* blocks until daemon is ready to write */
-        if ((fifos->server = open_fifo(fifos->server_path, O_RDONLY,
-				       "server")) == -1) {
-		stack;
-		return 0;
-	}
-
-	/* blocks until daemon is ready to read */
-	if ((fifos->client = open_fifo(fifos->client_path, O_WRONLY,
-				       "client")) == -1) {
-		stack;
-		close(fifos->server);
-		return 0;
-	}
-
-	return 1;
-}
-
-/*
- * flock file.
- *
- * Used to synchronize daemon startups and serialize daemon communication.
- */
-static int lf = -1; /* FIXME Unused! */
-
-static int _lock(char *file, int *lf2)
-{
-	/* Already locked. */
-	if (*lf2 > -1)
-		return 1;
-
-	if ((*lf2 = open(file, O_CREAT | O_RDWR, 0644)) == -1) {
-		log_err("Unable to open lockfile\n");
-		return 0;
-	}
-
-	if (flock(*lf2, LOCK_EX | LOCK_NB) == -1) {
-		log_err("%s: flock %s\n", __func__, file);
-		close(*lf2);
-		*lf2 = -1;
-		return 0;
-	}
-
-	return 1;
-}
-
-/* Unlock file. */
-static void _unlock(char *file, int *lf2)
-{
-	/* Not locked! */
-	if (*lf2 == -1)
-		return;
-
-	unlink(file);
-	if (flock(*lf2, LOCK_UN))
-		log_err("flock unlock %s\n", file);
-
-	if (close(*lf2))
-		log_err("close %s\n", file);
-
-	*lf2 = -1;
-}
-
 /* Fetch a string off src and duplicate it into *dest. */
 /* FIXME: move to seperate module to share with the daemon. */
 static const char delimiter = ' ';
@@ -226,11 +116,6 @@ static int daemon_talk(struct fifos *fifos, struct daemon_message *msg,
 		       int cmd, char *dso_name, char *device,
 		       enum event_type events)
 {
-	if (!_lock(LOCKFILE, &lf)) {
-		stack;
-		return -EPERM;
-	}
-
 	memset(msg, 0, sizeof(*msg));
 
 	/*
@@ -255,13 +140,11 @@ static int daemon_talk(struct fifos *fifos, struct daemon_message *msg,
 		return -EIO;
 	}
 
-	_unlock(LOCKFILE, &lf);
-
 	return msg->opcode.status;
 }
 
 /* Fork and exec the daemon. */
-static int fork_daemon(struct fifos *fifos)
+static int fork_daemon(void)
 {
 	int ret;
 	pid_t pid;
@@ -276,72 +159,87 @@ static int fork_daemon(struct fifos *fifos)
 	return ret;
 }
 
-/* Wait for daemon to startup. */
-static int pf = -1;
-                                               
-static int daemon_startup(void)
-{
-	int ret, retry = 10;
-
-	while (retry-- && (ret = _lock(PIDFILE, &pf))) {
-		_unlock(PIDFILE, &pf);
-		sleep(1);
-	}
-
-	return !ret;
-}
 
 /* Conditionaly start daemon in case it is not already running. */
-static int start_daemon(struct fifos *fifos)
+static int start_daemon(void)
 {
-	int ret;
+        int ret;
 
-	/*
-	 * Take a lock out on the lock file avoiding races, so
-	 * that only one caller to fork the daemon is possible.
-	 *
-	 * Take an flock out on the pidfile to check
-	 * that the daemon is running. If not -> start it.
-	 */
-	if ((ret = _lock(LOCKFILE, &lf))) {
-		/* Check if daemon is active. */
-		if ((ret = _lock(PIDFILE, &pf))) {
-			_unlock(PIDFILE, &pf);
-			if ((ret = fork_daemon(fifos)))
-				ret = daemon_startup();
-			else
-				stack;
-		} else
-			ret = 1; /* Daemon already running -> ok. */
-
-		_unlock(LOCKFILE, &lf);
+	if ((ret = fork_daemon())){
+		/* still need to add functions to start daemon properly */
+		sleep(5);
 	}
 
-	return ret;
+        return ret;
 }
 
 /* Initialize client. */
 static int init_client(struct fifos *fifos)
 {
-	init_fifos(fifos);
+	/* init fifos */
+	memset(fifos, 0, sizeof(*fifos));
+        fifos->client_path = FIFO_CLIENT;
+        fifos->server_path = FIFO_SERVER;
 
-	/* Check/create fifos, optionally start daemon and open fifos. */
-	if (!create_fifos(fifos)) {
+	/* Create fifos */
+	if(((mkfifo(fifos->client_path, 0600) == -1) && errno != EEXIST) ||
+	   ((mkfifo(fifos->server_path, 0600) == -1) && errno != EEXIST)){
+		log_err("%s: Failed to create a fifo.\n", __func__);
+                return 0;
+	}
+	/* do we really need to chmod if they were created with right perms? */
+	chmod(fifos->client_path, 0600);
+	chmod(fifos->server_path, 0600);
+
+	/* Open the fifo used to read from the daemon. **
+	** Allows daemon to create its write fifo..... */
+	if((fifos->server = open(fifos->server_path, O_RDONLY | O_NONBLOCK)) < 0){
+		log_err("%s: open server fifo %s\n", __func__, fifos->server_path);
 		stack;
 		return 0;
 	}
 
-	if (!start_daemon(fifos)) {
-		stack;
+	/* Lock out anyone else trying to do communication with the daemon */
+	if(flock(fifos->server, LOCK_EX) < 0){
+		log_err("%s: flock %s\n", __func__, fifos->server_path);
+		close(fifos->server);
 		return 0;
 	}
 
-	if (!open_fifos(fifos)) {
-		stack;
-		return 0;
-	}
+	/* Anyone listening?  If not, errno will be ENXIO */
+	if((fifos->client = open(fifos->client_path, O_WRONLY | O_NONBLOCK)) < 0){
+		if(errno != ENXIO){
+			log_err("%s: open client fifo %s\n",
+				__func__, fifos->client_path);
+			close(fifos->server);
+			stack;
+			return 0;
+		}
+		
+		if(!start_daemon()){
+			stack;
+			return 0;
+		}
 
+		/* Daemon is started, retry the open */
+		fifos->client = open(fifos->client_path, O_WRONLY | O_NONBLOCK);
+		if(fifos->client < 0){
+			log_err("%s: open client fifo %s\n",
+				__func__, fifos->client_path);
+			close(fifos->server);
+			stack;
+			return 0;
+		}
+	}
+	
 	return 1;
+}
+
+static void dtr_client(struct fifos *fifos){
+	if (flock(fifos->server, LOCK_UN))
+                log_err("flock unlock %s\n", fifos->server_path);
+	close(fifos->client);
+	close(fifos->server);
 }
 
 /* Check, if a device exists. */
@@ -372,6 +270,9 @@ static int do_event(int cmd, struct daemon_message *msg,
 	if ((ret = daemon_talk(&fifos, msg, cmd, dso_name, device, events)) < 0)
 		stack;
 
+	/* what is the opposite of init? */
+	dtr_client(&fifos);
+	
 	return ret;
 }
 
