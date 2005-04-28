@@ -145,6 +145,41 @@ static void _unlock(char *file, int *lf2)
 	*lf2 = -1;
 }
 
+/* Fetch a string off src and duplicate it into *dest. */
+/* FIXME: move to seperate module to share with the daemon. */
+static const char delimiter = ' ';
+static char *fetch_string(char **src)
+{
+	char *p, *ret;
+
+	if ((p = strchr(*src, delimiter)))
+		*p = 0;
+
+	if ((ret = strdup(*src)))
+		*src += strlen(ret) + 1;
+
+	if (p)
+		*p = delimiter;
+
+	return ret;
+}
+
+/* Parse a device message from the daemon. */
+static int parse_message(struct daemon_message *msg, char **dso_name,
+			 char **device, enum event_type *events)
+{
+	char *p = msg->msg;
+
+	if ((*dso_name = fetch_string(&p)) &&
+	    (*device   = fetch_string(&p))) {
+		*events = atoi(p);
+
+		return 0;
+	}
+
+	return -ENOMEM;
+}
+
 /* Read message from daemon. */
 static int daemon_read(struct fifos *fifos, struct daemon_message *msg)
 {
@@ -187,43 +222,42 @@ static int daemon_write(struct fifos *fifos, struct daemon_message *msg)
 	return bytes == sizeof(*msg);
 }
 
-static int daemon_talk(struct fifos *fifos, int cmd,
-		       char *dso_name, char *device, enum event_type events)
+static int daemon_talk(struct fifos *fifos, struct daemon_message *msg,
+		       int cmd, char *dso_name, char *device,
+		       enum event_type events)
 {
-	struct daemon_message msg;
-
 	if (!_lock(LOCKFILE, &lf)) {
 		stack;
 		return -EPERM;
 	}
 
-	memset(&msg, 0, sizeof(msg));
+	memset(msg, 0, sizeof(*msg));
 
 	/*
 	 * Set command and pack the arguments
 	 * into ASCII message string.
 	 */
-	msg.opcode.cmd = cmd;
-	snprintf(msg.msg, sizeof(msg.msg), "%s %s %u",
+	msg->opcode.cmd = cmd;
+	snprintf(msg->msg, sizeof(msg->msg), "%s %s %u",
 		 dso_name, device, events);
 
 	/*
 	 * Write command and message to and
 	 * read status return code from daemon.
 	 */
-	if (!daemon_write(fifos, &msg)) {
+	if (!daemon_write(fifos, msg)) {
 		stack;
 		return -EIO;
 	}
 
-	if (!daemon_read(fifos, &msg)) {
+	if (!daemon_read(fifos, msg)) {
 		stack;
 		return -EIO;
 	}
 
 	_unlock(LOCKFILE, &lf);
 
-	return msg.opcode.status;
+	return msg->opcode.status;
 }
 
 /* Fork and exec the daemon. */
@@ -244,6 +278,7 @@ static int fork_daemon(struct fifos *fifos)
 
 /* Wait for daemon to startup. */
 static int pf = -1;
+                                               
 static int daemon_startup(void)
 {
 	int ret, retry = 10;
@@ -323,21 +358,18 @@ static int device_exists(char *device)
 }
 
 /* Handle the event (de)registration call and return negative error codes. */
-static int do_event(int cmd, char *dso_name, char *device,
-		    enum event_type events)
+static int do_event(int cmd, struct daemon_message *msg,
+		    char *dso_name, char *device, enum event_type events)
 {
 	int ret;
 	struct fifos fifos;
-
-	if (!device_exists(device))
-		return -ENODEV;
 
 	if (!init_client(&fifos)) {
 		stack;
 		return -ESRCH;
 	}
 
-	if ((ret = daemon_talk(&fifos, cmd, dso_name, device, events)) < 0)
+	if ((ret = daemon_talk(&fifos, msg, cmd, dso_name, device, events)) < 0)
 		stack;
 
 	return ret;
@@ -346,12 +378,37 @@ static int do_event(int cmd, char *dso_name, char *device,
 /* External library interface. */
 int dm_register_for_event(char *dso_name, char *device, enum event_type events)
 {
-	return do_event(CMD_REGISTER_FOR_EVENT, dso_name, device, events);
+	struct daemon_message msg;
+
+	if (!device_exists(device))
+		return -ENODEV;
+
+	return do_event(CMD_REGISTER_FOR_EVENT, &msg, dso_name, device, events);
 }
 
-int dm_unregister_for_event(char *dso_name, char *device, uint32_t events)
+int dm_unregister_for_event(char *dso_name, char *device,
+			   enum event_type events)
 {
-	return do_event(CMD_UNREGISTER_FOR_EVENT, dso_name, device, events);
+	struct daemon_message msg;
+
+	if (!device_exists(device))
+		return -ENODEV;
+
+	return do_event(CMD_UNREGISTER_FOR_EVENT, &msg, dso_name,
+			device, events);
+}
+
+int dm_get_next_registered_device(char **dso_name, char **device,
+				  enum event_type *events)
+{
+	int ret;
+	struct daemon_message msg;
+
+	if (!(ret = do_event(CMD_GET_NEXT_REGISTERED_DEVICE, &msg,
+			     *dso_name, *device, *events)))
+		ret = parse_message(&msg, dso_name, device, events);
+
+	return ret;
 }
 
 /*
