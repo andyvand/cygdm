@@ -14,6 +14,7 @@
 
 #include "lib.h"
 #include "libdm-event.h"
+#include "dmeventd.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -25,7 +26,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
-
+#include <signal.h>
+#include <sys/wait.h>
 
 /* Fetch a string off src and duplicate it into *dest. */
 /* FIXME: move to seperate module to share with the daemon. */
@@ -140,33 +142,62 @@ log_print("%s: \"%s\"\n", __func__, msg->msg);
 	return msg->opcode.status;
 }
 
-/* Fork and exec the daemon. */
-static int fork_daemon(void)
-{
-	int ret;
-	pid_t pid;
-
-	if (!(pid = fork())) {
-		execvp(DAEMON, NULL);
-		log_err("Unable to exec daemon at %s\n", DAEMON);
-		ret = 0; /* We should never get here. */
-	} else if (pid > 0) /* Parent. */
-	 	ret = 1;
-
-	return ret;
+static int daemon_running = 0;
+static void daemon_running_signal_handler(int sig){
+	daemon_running=1;
 }
 
-
-/* Conditionaly start daemon in case it is not already running. */
+/* start_daemon
+ *
+ * This function forks off a process (dmeventd) that will handle
+ * the events.  A signal must be returned from the child to
+ * indicate when it is ready to handle requests.  The parent
+ * (this function) returns 1 if there is a daemon running. 
+ *
+ * Returns: 1 on success, 0 otherwise
+ */
 static int start_daemon(void)
 {
-        int ret;
+	int pid, ret=0;
+	void *old_hand;
 
-	if ((ret = fork_daemon())){
-		/* still need to add functions to start daemon properly */
-		sleep(5);
+	old_hand = signal(SIGUSR1, &daemon_running_signal_handler);
+	
+	pid = fork();
+
+	if(pid < 0){
+		log_err("Unable to fork.\n");
+	} else if(pid){ /* parent waits for child to get ready for requests */
+		int status;
+
+		while(!waitpid(pid, &status, WNOHANG) && !daemon_running);
+
+		if(daemon_running){
+			log_print("dmeventd started.\n");
+			ret = 1;
+		} else {
+			switch(WEXITSTATUS(status)){
+			case EXIT_LOCKFILE_INUSE:
+				/* Note, this is ok... we still have daemon **
+				** that we can communicate with............ */
+				log_print("Starting dmeventd failed: "
+					  "dmeventd already running.\n");
+				ret = 1;
+				break;
+			default:
+				log_err("Unable to start dmeventd.\n");
+				break;
+			}
+		}
+	} else {
+		/* dmeventd function is responsible for properly setting **
+		** itself up.  It must never return - only exit.  This is**
+		** why it is followed by an EXIT_FAILURE                 */
+		dmeventd();
+		exit(EXIT_FAILURE);
 	}
 
+	signal(SIGUSR1, old_hand);
         return ret;
 }
 
@@ -219,7 +250,7 @@ static int init_client(struct fifos *fifos)
 		}
 
 		/* Daemon is started, retry the open */
-		fifos->client = open(fifos->client_path, O_RDWR | O_NONBLOCK);
+		fifos->client = open(fifos->client_path, O_WRONLY | O_NONBLOCK);
 		if(fifos->client < 0){
 			log_err("%s: open client fifo %s\n",
 				__func__, fifos->client_path);
@@ -243,6 +274,8 @@ static void dtr_client(struct fifos *fifos){
 static int device_exists(char *device)
 {
 	int f;
+
+	/* Do we need to do a stat to ensure that it's a block dev? */
 
 	if ((f = open(device, O_RDONLY)) == -1)
 		return 0;

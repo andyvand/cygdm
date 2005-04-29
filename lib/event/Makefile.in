@@ -16,7 +16,8 @@ top_srcdir = @top_srcdir@
 VPATH = @srcdir@
 interface = @interface@
 
-SOURCES = libdm-event.c
+SOURCES = libdm-event.c \
+	dmeventd.c
 
 LIB_STATIC = libdmevent.a
 
