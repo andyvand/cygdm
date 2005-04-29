@@ -26,14 +26,6 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-/* FIXME Replace with log.h */
-#undef log_print
-#undef log_err
-#undef stack
-#define log_print(x...)	   fprintf(stderr, "[dmeventdlib] " x)
-#define log_err(x...)	   log_print(x)
-#define stack log_print("trace: %s:%s(%d)\n", __FILE__, __func__, __LINE__);
-
 
 /* Fetch a string off src and duplicate it into *dest. */
 /* FIXME: move to seperate module to share with the daemon. */
@@ -98,13 +90,14 @@ static int daemon_write(struct fifos *fifos, struct daemon_message *msg)
 	int bytes = 0, ret = 0;
 	fd_set fds;
 
-	do {
-		/* Watch daemon write FIFO to be ready for output. */
-		FD_ZERO(&fds);
-		FD_SET(fifos->client, &fds);
-	} while (select(fifos->client + 1, NULL, &fds, NULL, NULL) <= 0);
-
+	errno = 0;
 	while (bytes < sizeof(*msg) && errno != EIO) {
+		do {
+			/* Watch daemon write FIFO to be ready for output. */
+			FD_ZERO(&fds);
+			FD_SET(fifos->client, &fds);
+		} while (select(fifos->client +1, NULL, &fds, NULL, NULL) != 1);
+
 		ret = write(fifos->client, msg, sizeof(*msg) - bytes);
 		bytes += ret > 0 ? ret : 0;
 	}
@@ -267,8 +260,7 @@ static int do_event(int cmd, struct daemon_message *msg,
 		return -ESRCH;
 	}
 
-	if ((ret = daemon_talk(&fifos, msg, cmd, dso_name, device, events)) < 0)
-		stack;
+	ret = daemon_talk(&fifos, msg, cmd, dso_name, device, events);
 
 	/* what is the opposite of init? */
 	dtr_client(&fifos);
@@ -299,14 +291,15 @@ int dm_unregister_for_event(char *dso_name, char *device,
 			device, events);
 }
 
-int dm_get_next_registered_device(char **dso_name, char **device,
-				  enum event_type *events)
+int dm_get_registered_device(char **dso_name, char **device,
+			     enum event_type *events, int next)
 {
 	int ret;
 	struct daemon_message msg;
 
-	if (!(ret = do_event(CMD_GET_NEXT_REGISTERED_DEVICE, &msg,
-			     *dso_name, *device, *events)))
+	if (!(ret = do_event(next ? CMD_GET_NEXT_REGISTERED_DEVICE :
+				    CMD_GET_REGISTERED_DEVICE,
+			     &msg, *dso_name, *device, *events)))
 		ret = parse_message(&msg, dso_name, device, events);
 
 	return ret;
