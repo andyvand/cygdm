@@ -142,9 +142,11 @@ log_print("%s: \"%s\"\n", __func__, msg->msg);
 	return msg->opcode.status;
 }
 
-static int daemon_running = 0;
-static void daemon_running_signal_handler(int sig){
-	daemon_running=1;
+static volatile sig_atomic_t daemon_running = 0;
+
+static void daemon_running_signal_handler(int sig)
+{
+	daemon_running = 1;
 }
 
 /* start_daemon
