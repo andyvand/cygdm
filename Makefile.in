@@ -42,7 +42,7 @@ include make.tmpl
 
 lib: include
 dmsetup: lib
-dmeventd: lib
+dmeventd: lib multilog
 po: dmsetup dmeventd
 
 ifeq ("@INTL@", "yes")
