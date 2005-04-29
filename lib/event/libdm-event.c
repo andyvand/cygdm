@@ -1,4 +1,4 @@
-/*
+	/*
  * Copyright (C) 2005 Red Hat, Inc. All rights reserved.
  *
  * This file is part of the device-mapper userspace tools.
@@ -81,6 +81,7 @@ static int daemon_read(struct fifos *fifos, struct daemon_message *msg)
 		bytes += ret > 0 ? ret : 0;
 	}
 
+log_print("%s: \"%s\"\n", __func__, msg->msg);
 	return bytes == sizeof(*msg);
 }
 
@@ -90,6 +91,8 @@ static int daemon_write(struct fifos *fifos, struct daemon_message *msg)
 	int bytes = 0, ret = 0;
 	fd_set fds;
 
+
+log_print("%s: \"%s\"\n", __func__, msg->msg);
 	errno = 0;
 	while (bytes < sizeof(*msg) && errno != EIO) {
 		do {
@@ -118,6 +121,7 @@ static int daemon_talk(struct fifos *fifos, struct daemon_message *msg,
 	msg->opcode.cmd = cmd;
 	snprintf(msg->msg, sizeof(msg->msg), "%s %s %u",
 		 dso_name, device, events);
+log_print("%s: \"%s\"\n", __func__, msg->msg);
 
 	/*
 	 * Write command and message to and
@@ -215,7 +219,7 @@ static int init_client(struct fifos *fifos)
 		}
 
 		/* Daemon is started, retry the open */
-		fifos->client = open(fifos->client_path, O_WRONLY | O_NONBLOCK);
+		fifos->client = open(fifos->client_path, O_RDWR | O_NONBLOCK);
 		if(fifos->client < 0){
 			log_err("%s: open client fifo %s\n",
 				__func__, fifos->client_path);
