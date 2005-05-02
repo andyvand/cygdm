@@ -4979,7 +4979,7 @@ fi
 
 
 ################################################################################
-ac_config_files="$ac_config_files Makefile make.tmpl include/Makefile dmeventd/Makefile dmsetup/Makefile lib/Makefile lib/event/Makefile lib/libdm-common.h kernel/Makefile man/Makefile multilog/Makefile multilog/tests/Makefile po/Makefile"
+ac_config_files="$ac_config_files Makefile make.tmpl include/Makefile dmeventd/Makefile dmsetup/Makefile lib/Makefile lib/event/Makefile lib/libdm-common.h kernel/Makefile man/Makefile multilog/Makefile multilog/async/Makefile multilog/tests/Makefile po/Makefile"
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
 # tests run on this system so they can be shared between configure
@@ -5488,6 +5488,7 @@ do
   "kernel/Makefile" ) CONFIG_FILES="$CONFIG_FILES kernel/Makefile" ;;
   "man/Makefile" ) CONFIG_FILES="$CONFIG_FILES man/Makefile" ;;
   "multilog/Makefile" ) CONFIG_FILES="$CONFIG_FILES multilog/Makefile" ;;
+  "multilog/async/Makefile" ) CONFIG_FILES="$CONFIG_FILES multilog/async/Makefile" ;;
   "multilog/tests/Makefile" ) CONFIG_FILES="$CONFIG_FILES multilog/tests/Makefile" ;;
   "po/Makefile" ) CONFIG_FILES="$CONFIG_FILES po/Makefile" ;;
   *) { { echo "$as_me:$LINENO: error: invalid argument: $ac_config_target" >&5
