@@ -51,7 +51,7 @@
 #define	dbg_free(x...)		free(x)
 
 /* List (un)link macros. */
-#define	LINK(x, head)		list_add(&(x)->list, head)
+#define	LINK(x, head)		list_add(head, &(x)->list)
 #define	LINK_DSO(dso)		LINK(dso, &dso_registry)
 #define	LINK_THREAD(thread)	LINK(thread, &thread_registry)
 
@@ -215,9 +215,7 @@ static int parse_message(struct message_data *message_data)
 {
 	char *p = message_data->msg->msg;
 
-log_print("%s: here\n", __func__);
-fflush(stdout);
-	memset(message_data, 0, sizeof(*message_data));
+log_print("%s\n", __func__);
 
 	/*
 	 * Retrieve application identifier, mapped device
@@ -238,6 +236,7 @@ log_print("%s: %s %s %s\n", __func__, message_data->dso_name, message_data->devi
 			message_data->events.field = i;
 		}
 
+log_print("%s: XXX %u\n", __func__, message_data->events.field);
 		return 1;
 	}
 
@@ -546,9 +545,11 @@ log_print("%s: \"%s\"\n", __func__, data->dso_name);
 	ret->dso_handle = dl;
 	lib_get(ret);
 
+log_print("%s: DSO \"%s\" LOADED\n", __func__, data->dso_name);
 	lock_mutex();
 	LINK_DSO(ret);
 	unlock_mutex();
+log_print("%s: DSO \"%s\" linked\n", __func__, data->dso_name);
 
 	goto free_dso_file;
 
@@ -583,11 +584,11 @@ static int register_for_event(struct message_data *message_data)
 		goto out;
 	}
 log_print("%s\n", __func__);
-fflush(stdout);
 
 	if (!(dso_data = lookup_dso(message_data)) &&
 	    !(dso_data = load_dso(message_data))) {
 		stack;
+log_print("%s: no DSO %s\n", __func__, message_data->dso_name);
 		ret = -ELIBACC;
 		goto out;
 	}
@@ -755,7 +756,7 @@ static int get_registered_device(struct message_data *message_data, int next)
 
    out:
 	if (list_empty(&thread->list) ||
-	    list_end(&thread_registry, &thread->list)) {
+	    &thread->list == &thread_registry) {
 		unlock_mutex();
 		return -ENOENT;
 	}
@@ -775,13 +776,13 @@ static void init_fifos(struct fifos *fifos)
 static int open_fifos(struct fifos *fifos)
 {
 	/* Blocks until client is ready to write. */
-	if ((fifos->server = open(fifos->server_path, O_WRONLY | O_NONBLOCK)) < 0) {
+	if ((fifos->server = open(fifos->server_path, O_WRONLY)) < 0) {
 		stack;
 		return 0;
 	}
 
 	/* Need to open read+write for select() to work. */
-        if ((fifos->client = open(fifos->client_path, O_RDONLY | O_NONBLOCK)) < 0) {
+        if ((fifos->client = open(fifos->client_path, O_RDWR)) < 0) {
 		stack;
 		close(fifos->server);
 		return 0;
@@ -844,12 +845,12 @@ static int do_process_request(struct daemon_message *msg)
 	static struct message_data message_data;
 
 log_print("%s: \"%s\"\n", __func__, msg->msg);
+fflush(stdout);
 	/* Parse the message. */
 	message_data.msg = msg;
 	if (msg->opcode.cmd != CMD_ACTIVE &&
 	    !parse_message(&message_data)) {
 		stack;
-fflush(stdout);
 		return -EINVAL;
 	}
 
@@ -888,6 +889,7 @@ static void process_request(struct fifos *fifos)
 
 	/* FIXME: do better error handling */
 
+log_print("%s %s %s\n", __func__, __func__, __func__);
 	/* Read the request from the client. */
 	memset(&msg, 0, sizeof(msg));
 	if (!client_read(fifos, &msg)) {
@@ -897,7 +899,8 @@ static void process_request(struct fifos *fifos)
 
 	msg.opcode.status = do_process_request(&msg);
 
-	memset(&(msg.msg), 0, sizeof(msg.msg));
+log_print("%s: status: %d\n", __func__, msg.opcode.status);
+	memset(&msg.msg, 0, sizeof(msg.msg));
 	if (!client_write(fifos, &msg))
 		stack;
 }
@@ -917,35 +920,33 @@ void dmeventd(void)
 {
 	int lf;
 	struct fifos fifos;
-//	pthread_t log_thread = {0};
+//	pthread_t log_thread = { 0 };
 
 
 	setsid();
-	if(chdir("/")){
+	if (chdir("/"))
 		exit(EXIT_CHDIR_FAILURE);
-	}
 
+/* FIXME: activate again.
 	if((close(STDIN_FILENO) < 0) ||
 	   (close(STDOUT_FILENO) < 0) ||
 	   (close(STDERR_FILENO) < 0)){
 		exit(EXIT_DESC_CLOSE_FAILURE);
 	}
+*/
 
 	/* reopen on /dev/null ? */
 
-	if((lf = open(pidfile, O_CREAT | O_RDWR, 0644)) < 0){
+	if ((lf = open(pidfile, O_CREAT | O_RDWR, 0644)) < 0)
 		exit(EXIT_OPEN_PID_FAILURE);
-	}
-	if(flock(lf, LOCK_EX | LOCK_NB) < 0){
-		exit(EXIT_LOCKFILE_INUSE);
-	}
 
-	if(!storepid(lf)){
+	if (flock(lf, LOCK_EX | LOCK_NB) < 0)
+		exit(EXIT_LOCKFILE_INUSE);
+
+	if (!storepid(lf))
 		exit(EXIT_FAILURE);
-	}
 
 	init_thread_signals();
-
 
 	/* Startup the syslog thread now so log_* macros work */
 /*
@@ -961,25 +962,24 @@ void dmeventd(void)
 	init_fifos(&fifos);
 	pthread_mutex_init(&mutex, NULL);
 
-	if (mlockall(MCL_FUTURE) == -1) {
+	if (mlockall(MCL_FUTURE) == -1)
 		exit(EXIT_FAILURE);
-	}
 
-	if(!open_fifos(&fifos)){
+	if (!open_fifos(&fifos))
 		exit(EXIT_FIFO_FAILURE);
-	}
 
+log_print("%s: fifos open\n", __func__);
 	/* Signal parent, letting them know we are ready to go. */
 	kill(getppid(), SIGUSR1);
 
 	/* FIXME: we should exit when there are no more devices **
 	** to watch.  That is, when the last unregister happens */
-	while(1){
+	while(1)
 		process_request(&fifos);
-	}
 
 	munlockall();
 	pthread_mutex_destroy(&mutex);
+
 	exit(EXIT_SUCCESS);
 }
 
