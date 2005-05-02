@@ -22,7 +22,7 @@ INSTALL_TYPE = install_dynamic
 SOURCES = test-multilog.c
 CLEAN_TARGETS = test-multilog
 
-LDFLAGS += -ldl -ldevmapper -lpthread -lmultilog
+LDFLAGS += -ldl -ldevmapper -lpthread -lmultilog -L..
 
 include ../../make.tmpl
 

@@ -16,7 +16,8 @@
 #ifndef LIB_MULTILOG_H
 #define LIB_MULTILOG_H
 
-/* The #defines here were almost exactly copied from lvm2 */
+#include <sys/types.h>
+/* The code here was almost exactly copied from lvm2 &device-mapper */
 
 #define _LOG_DEBUG 7
 #define _LOG_INFO 6
@@ -26,7 +27,53 @@
 #define _LOG_FATAL 2
 
 
-#define plog(p, x...) write_to_buf(p, __FILE__, __func__, __LINE__, ## x)
+
+struct file_log {
+	const char *filename;
+};
+
+struct threaded_syslog_log {
+	pthread_t thread;
+	void *dlh;
+};
+
+union log_info {
+	struct file_log logfile;
+	struct threaded_syslog_log threaded_syslog;
+	void *custom;
+};
+
+struct log_data {
+	int verbose_level;
+	union log_info info;
+};
+
+enum log_type {
+	standard,
+	logfile,
+	std_syslog,
+	threaded_syslog,
+	custom,
+};
+
+typedef void (*multilog_fn) (int level, const char *file, int line,
+			     const char *f);
+
+void multilog(int level, const char *file, int line, const char *f, ...)
+         __attribute__ ((format(printf, 4, 5)));
+/*
+ * The library user may wish to register their own
+ * logging function, by default errors go to stderr.
+ * Use dm_log_init(NULL) to restore the default log fn.
+ */
+
+
+int multilog_add_type(enum log_type type, struct log_data *data);
+void multilog_del_type(enum log_type type, struct log_data *data);
+void multilog_custom(multilog_fn fn);
+void multilog_init_verbose(int level);
+
+#define plog(p, x...) multilog(p, __FILE__, __LINE__, ## x)
 
 #define log_debug(x...) plog(_LOG_DEBUG, x)
 #define log_info(x...) plog(_LOG_INFO, x)
@@ -41,11 +88,6 @@
 #define log_print(args...) log_warn(args)
 #define log_verbose(args...) log_notice(args)
 #define log_very_verbose(args...) log_info(args)
-
-
-int write_to_buf(int priority, const char *file, const char *func, int line,
-		 const char *format, ...)
-                 __attribute__ ((format(printf, 5, 6)));
 
 int start_syslog_thread(pthread_t *thread, long usecs);
 

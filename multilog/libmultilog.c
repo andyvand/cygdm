@@ -12,295 +12,179 @@
  * Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#include <dlfcn.h>
 #include <pthread.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <sys/param.h>
 #include <sys/select.h>
+#include "list.h"
 #include "libmultilog.h"
 
 #include <unistd.h>
 
-#define MIN(x,y)  (x < y) ? x : y
-
-#define CBUFSIZE 1024 * 8
-#define MAX_FILELEN 256
-#define MAX_FUNCLEN MAX_FILELEN
-#define MAX_LINELEN 10
-
-struct circ_buf {
-	pthread_mutex_t mutex;
-	pthread_cond_t cond;
-	char buf[CBUFSIZE];
-	int read_pos;
-	int write_pos;
-	int should_sig:1;
-	int initialized:1;
+struct log_list {
+	struct list list;
+	enum log_type type;
+	multilog_fn log;
+	void *data;
 };
 
-/* Need a circular buffer to hold the messages - this will have to be
- * global so all threads can see it */
-static struct circ_buf cbuf = {.initialized = 0};
+/* FIXME: probably shouldn't do it this way, but... */
+static LIST_INIT(logs);
 
-static int will_overrun(int read_pos, int write_pos,
-			int first_len, int second_len) {
+/* Noop logging until the custom log fxn gets registered */
+static void nop_log(int priority, const char *file, int line,
+		    const char *string)
+{
+	return;
+}
+static void standard_log(int priority, const char *file, int line,
+			 const char *string)
+{
 
-	if(((read_pos > write_pos) &&
-	    (write_pos + first_len >= read_pos)) ||
-	   ((read_pos < write_pos) &&
-	    (second_len >= read_pos)))
-		return 1;
-	else
-		return 0;
+/*	switch (priority) {
+	case _LOG_*/
+	fprintf(stderr, string);
+	fputc('\n', stderr);
 }
 
-/* Messages are encoded in the buffer with the following format:
-   priority:file:func:line:msg
-*/
-int write_to_buf(int priority, const char *file, const char *func, int line,
-		 const char *format, ...)
+static int start_threaded_syslog(struct log_list *logl, struct log_data *logdata)
 {
-	char buf[CBUFSIZE];
-	char *curpos = buf;
-	int written_len;
-	int buf_len;
-	int first_len;
-	int second_len;
-	int ret = 0;
-	va_list args;
 
-	/* The first character in a message is its priority */
-	sprintf(curpos, "%u", priority);
-	curpos++;
-
-	written_len = snprintf(curpos, CBUFSIZE-1, ":%s:%s:%d:",
-			       file, func, line);
-	/* file, func, line were too long for the buffer,
-	   so leave them blank */
-	if(written_len >= (CBUFSIZE-1)) {
-		sprintf(curpos, "::::");
-		written_len = 4;
-	}
-	curpos += written_len;
-
-	va_start(args, format);
-
-	pthread_mutex_lock(&cbuf.mutex);
-
-	/* write message to circular buffer - what kind of delimiter do we
-	 * want?  Is NULL ok? */
-	buf_len = vsnprintf(curpos, CBUFSIZE-written_len, format, args);
-
-	/* FIXME - do we care if the log was truncated here?
-	if(buf_len == (CBUFSIZE - written_len)) {
-	*/
-	/* FIXME - if the message is too long for the buffer, should
-	 * we retry without the filename, function and line number? */
-
-	va_end(args);
-
-	buf_len = strlen(buf) + 1;
-	/* Need to split the write into parts */
-	if((cbuf.write_pos + buf_len) >= CBUFSIZE) {
-		first_len = CBUFSIZE - (cbuf.write_pos);
-		second_len = buf_len - first_len;
-		/* Protect from overrun */
-		if(!will_overrun(cbuf.read_pos, cbuf.write_pos,
-				 first_len, second_len)) {
-			strncpy(&cbuf.buf[cbuf.write_pos], buf, first_len);
-			strncpy(&cbuf.buf[0], buf + first_len, second_len);
-			cbuf.write_pos = second_len;
-			ret = 1;
-		} else
-			ret = 0;
-	} else {
-		/* Protect from overrun */
-		if(!will_overrun(cbuf.read_pos, cbuf.write_pos,
-				 buf_len, -1)) {
-			strncpy(&cbuf.buf[cbuf.write_pos], buf, buf_len);
-			cbuf.write_pos += buf_len;
-			ret = 1;
-		} else
-			ret = 0;
+	if(!(logdata->info.threaded_syslog.dlh = dlopen("libmultilog_async.so", RTLD_NOW))) {
+		fprintf(stderr, "%s\n", dlerror());
+		return 0;
 	}
 
-	/* We don't need to signal the syslog thread when it's writing
-	 * to syslog */
-	if(cbuf.should_sig)
-		pthread_cond_signal(&cbuf.cond);
+	void (*log_fxn) (int priority, const char *file, int line,
+			 const char *string);
+	int (*start_syslog) (pthread_t *t, long usecs);
 
-	pthread_mutex_unlock(&cbuf.mutex);
+	log_fxn = dlsym(logdata->info.threaded_syslog.dlh, "write_to_buf");
+	start_syslog = dlsym(logdata->info.threaded_syslog.dlh, "start_syslog_thread");
 
-	return ret;
+	if(!start_syslog(&(logdata->info.threaded_syslog.thread), 100))
+		fprintf(stderr, "Gah\n");
+	logl->log = log_fxn;
+	return 1;
 
 }
 
-static int read_from_buf(int *priority, char *file, char *func, int *line,
-			 char *msg, int len)
+/* FIXME: Can currently add multiple logging types */
+int multilog_add_type(enum log_type type, struct log_data *data)
 {
-	char *pos;
-	int first_len;
-	char pbuf[MAX_LINELEN];
-	char tmpbuf[CBUFSIZE] = {0};
-	char *curpos = &cbuf.buf[cbuf.read_pos];
+	struct log_list *logl;
+	struct list *tmp;
 
-	/* Pull the entire message into a temporary buffer first to
-	 * handle wraparound cleanly */
-	first_len = CBUFSIZE - cbuf.read_pos;
-	strncpy(tmpbuf, &cbuf.buf[cbuf.read_pos], first_len);
-
-	if(tmpbuf[first_len - 1] != '\0') {
-		/* FIXME: Make sure we're null terminated */
-		strncpy(tmpbuf+first_len, &cbuf.buf[0], cbuf.read_pos);
-		cbuf.read_pos = strlen(&cbuf.buf[0]) + 1;
-	} else {
-		cbuf.read_pos += strlen(tmpbuf) + 1;
-	}
-
-	/* Parse the message for various fields */
-	curpos = tmpbuf;
-
-	if(!(pos = strchr(curpos, ':'))) {
+	if(!(logl = malloc(sizeof(*logl))))
 		return 0;
-	}
-	pbuf[0] = curpos[0];
-	pbuf[1] = '\0';
-	sscanf(pbuf, "%d", priority);
-	curpos = pos;
-
-	if(!(pos = strchr(curpos+1, ':'))) {
+	if(!(memset(logl, 0, sizeof(*logl))))
 		return 0;
-	}
-	if(pos != curpos + 1) {
-		strncpy(file, curpos + 1, MAX_FILELEN - 1);
-		file[pos - (curpos + 1)] = '\0';
-	}
-	curpos = pos;
 
-	if(!(pos = strchr(curpos+1, ':'))) {
-		return 0;
+	/* If the type has already been registered, it doesn't need to
+	 * be registered again */
+	list_iterate(tmp, &logs) {
+		logl = list_item(tmp, struct log_list);
+		if(logl->type == type)
+			return 1;
 	}
-	if(pos != curpos + 1) {
-		strncpy(func, curpos + 1, MAX_FUNCLEN - 1);
-		func[pos - (curpos + 1)] = '\0';
+
+	list_init(&logl->list);
+	logl->type = type;
+	logl->data = data;
+
+	switch(type) {
+	case standard:
+		logl->log = standard_log;
+		break;
+	case logfile:
+		/* FIXME: Not implemented yet */
+		logl->log = nop_log;
+		break;
+	case std_syslog:
+		/* FIXME: Not implemented yet */
+		logl->log = nop_log;
+		break;
+	case threaded_syslog:
+		if(!start_threaded_syslog(logl, data)) {
+			return 0;
+		}
+		break;
+	case custom:
+		/* Caller should use multilog_custom to set their
+		 * logging fxn */
+		logl->log = nop_log;
+		break;
 	}
-	curpos = pos;
 
-	if(!(pos = strchr(curpos+1, ':'))) {
-		return 0;
-	}
-	if(pos != curpos + 1) {
-		strncpy(pbuf, curpos + 1, MIN(MAX_LINELEN, pos - (curpos + 1)));
-		sscanf(pbuf, "%d", line);
-	} else
-		*line = -1;
-	curpos = pos + 1;
-
-	strncpy(msg, curpos, MIN(len, (CBUFSIZE - (curpos - tmpbuf))));
-
-	//cbuf.read_pos += strlen(msg) + (curpos - tmpbuf) + 1;
-
+	list_add(&logs, &logl->list);
 	return 1;
 }
 
-static void init_cbuf(void)
+/* FIXME: Might want to have this return an error if we can't find the type */
+void multilog_del_type(enum log_type type, struct log_data *data)
 {
-	memset(cbuf.buf, 0, CBUFSIZE);
-	cbuf.write_pos = cbuf.read_pos = 0;
-	cbuf.should_sig = 0;
-	pthread_mutex_init(&cbuf.mutex, NULL);
-	pthread_cond_init(&cbuf.cond, NULL);
-	cbuf.initialized = 1;
-}
+	struct list *tmp, *next;
+	struct log_list *logl;
 
-static void finish_processing(void *arg)
-{
-	int priority;
-	char file[256];
-	char func[256];
-	int line;
-	char mybuf[CBUFSIZE] = {0};
-
-	while(cbuf.write_pos != cbuf.read_pos) {
-		/*call read_from_buf, unlock mutex,
-		 * and write to syslog */
-		read_from_buf(&priority, file, func, &line,
-			      mybuf, CBUFSIZE);
-
-		/* Unlock the mutex before writing to syslog
-		 * so we don't block the writer threads - but
-		 * then how to we handle
-		 * pthread_cond_signal? */
-		pthread_mutex_unlock(&cbuf.mutex);
-		syslog(priority, "%s", mybuf);
-		pthread_mutex_lock(&cbuf.mutex);
+	list_iterate_safe(tmp, next, &logs) {
+		logl = list_item(tmp, struct log_list);
+		if(logl->type == type) {
+			if(logl->type == threaded_syslog) {
+				int (*stop_syslog) (struct log_data *log);
+				stop_syslog = dlsym(data->info.threaded_syslog.dlh,
+						    "stop_syslog_thread");
+				stop_syslog(data);
+			}
+			list_del(tmp);
+			break;
+		}
 	}
 
-	pthread_mutex_unlock(&cbuf.mutex);
 }
 
-/* handle logging to syslog through circular buffer so that syslog
- * blocking doesn't hold anyone up */
-static void *process_syslog(void *arg)
+void multilog_custom(multilog_fn fn)
 {
-	char mybuf[CBUFSIZE] = {0};
-	int priority;
-	char file[256];
-	char func[256];
-	int line;
-//	pthread_t *thread = (pthread_t *)arg;
-
-	init_cbuf();
-
-	pthread_cleanup_push(finish_processing, NULL);
-	openlog("dmeventd", LOG_NDELAY | LOG_PID, LOG_DAEMON);
-
-	pthread_mutex_lock(&cbuf.mutex);
-
-	while (1) {
-		/* check write_pos & read_pos */
-		if(cbuf.write_pos != cbuf.read_pos) {
-			/*call read_from_buf, unlock mutex,
-			 * and write to syslog */
-			read_from_buf(&priority, file, func, &line,
-				      mybuf, CBUFSIZE);
-
-			/* Unlock the mutex before writing to syslog
-			 * so we don't block the writer threads */
-			pthread_mutex_unlock(&cbuf.mutex);
-
-			syslog(priority, "%s", mybuf);
-
-			pthread_mutex_lock(&cbuf.mutex);
-		} else {
-			/* set the should_sig var before waiting so
-			 * the threads using the log know to signal it
-			 * to wake up after adding to the log */
-			cbuf.should_sig = 1;
-			pthread_cond_wait(&cbuf.cond, &cbuf.mutex);
-			cbuf.should_sig = 0;
-		}
-        }
-	closelog();
-	pthread_cleanup_pop(0);
-	return NULL;
+	struct list *tmp;
+	struct log_list *logl;
+	/* FIXME: Should we present an error if we can't find a
+	 * suitable target? */
+	list_iterate(tmp, &logs) {
+		logl = list_item(tmp, struct log_list);
+		if(logl->type == custom && logl->log == nop_log)
+			logl->log = fn;
+	}
 }
 
 
-int start_syslog_thread(pthread_t *thread, long usecs)
+void multilog(int priority, const char *file, int line, const char *format, ...)
 {
-	struct timeval ts = {0, usecs};
+	struct list *tmp;
+	struct log_list *logl;
+	char buf[4096];
 
-	pthread_create(thread, NULL, process_syslog, NULL);
+	/* If someone trys to write a message and there are no log
+	 * types registered, register the standard log type */
+	if(list_empty(&logs)) {
+		multilog_add_type(standard, NULL);
+	}
 
-	select(0, NULL, NULL, NULL, &ts);
-	/* Not grabbing the mutex before I check this - mainly
-	 * because it better be atomic - either 0 or 1, and if
-	 * it changes from 0 -> 1 while i'm reading it, I
-	 * don't really care */
-	if(cbuf.initialized)
-		return 1;
+	va_list args;
+	/* FIXME: shove everything into a single string */
+	va_start(args, format);
 
-	return 0;
+	vsnprintf(buf, 4096, format, args);
+
+	va_end(args);
+
+	list_iterate(tmp, &logs) {
+		logl = list_item(tmp, struct log_list);
+		logl->log(priority, file, line, buf);
+	}
+
 }

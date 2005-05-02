@@ -16,21 +16,19 @@ top_srcdir = @top_srcdir@
 VPATH = @srcdir@
 interface = @interface@
 
-SUBDIRS += async
+SOURCES = async_logger.c
 
-SOURCES = libmultilog.c
-
-LIB_STATIC = libmultilog.a
+LIB_STATIC = libmultilog_async.a
 
 ifeq ("@LIB_SUFFIX@","dylib")
-  LIB_SHARED = libmultilog.dylib
+  LIB_SHARED = libmultilog_async.dylib
 else
-  LIB_SHARED = libmultilog.so
+  LIB_SHARED = libmultilog_async.so
 endif
 
 LDFLAGS += -ldl -ldevmapper -lpthread -L..
 
-include ../make.tmpl
+include ../../make.tmpl
 
 .PHONY: install_dynamic install_static
 
@@ -42,14 +40,13 @@ endif
 
 install: $(INSTALL_TYPE)
 
-install_dynamic: libmultilog.$(LIB_SUFFIX)
+install_dynamic: libmultilog_async.$(LIB_SUFFIX)
 	$(INSTALL) -D $(OWNER) $(GROUP) -m 555 $(STRIP) $< \
-		$(libdir)/libmultilog.$(LIB_SUFFIX).$(LIB_VERSION)
-	$(LN_S) -f libmultilog.$(LIB_SUFFIX).$(LIB_VERSION) \
-		$(libdir)/libmultilog.$(LIB_SUFFIX)
+		$(libdir)/libmultilog_async.$(LIB_SUFFIX).$(LIB_VERSION)
+	$(LN_S) -f libmultilog_async.$(LIB_SUFFIX).$(LIB_VERSION) \
+		$(libdir)/libmultilog_async.$(LIB_SUFFIX)
 
-install_static: libmultilog.a
+install_static: libmultilog_async.a
 	$(INSTALL) -D $(OWNER) $(GROUP) -m 555 $(STRIP) $< \
-		$(libdir)/libmultilog.a.$(LIB_VERSION)
-	$(LN_S) -f libmultilog.a.$(LIB_VERSION) $(libdir)/libmultilog.a
-
+		$(libdir)/libmultilog_async.a.$(LIB_VERSION)
+	$(LN_S) -f libmultilog_async.a.$(LIB_VERSION) $(libdir)/libmultilog_async.a
