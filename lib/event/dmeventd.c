@@ -215,8 +215,6 @@ static int parse_message(struct message_data *message_data)
 {
 	char *p = message_data->msg->msg;
 
-log_print("%s\n", __func__);
-
 	/*
 	 * Retrieve application identifier, mapped device
 	 * path and events # string from message.
@@ -224,7 +222,6 @@ log_print("%s\n", __func__);
 	if ((message_data->dso_name    = fetch_string(&p)) &&
 	    (message_data->device_path = fetch_string(&p)) &&
 	    (message_data->events.str  = fetch_string(&p))) {
-log_print("%s: %s %s %s\n", __func__, message_data->dso_name, message_data->device_path, message_data->events.str);
 		if (message_data->events.str) {
 			enum event_type i = atoi(message_data->events.str);
 
@@ -236,7 +233,6 @@ log_print("%s: %s %s %s\n", __func__, message_data->dso_name, message_data->devi
 			message_data->events.field = i;
 		}
 
-log_print("%s: XXX %u\n", __func__, message_data->events.field);
 		return 1;
 	}
 
@@ -409,9 +405,6 @@ static void *monitor_thread(void *arg)
 		if (!event_wait(thread))
 			continue;
 
-/* REMOVEME: */
-log_print("%s: cycle on %s\n", __func__, thread->device_path);
-
 		/*
 		 * Check against filter.
 		 *
@@ -512,8 +505,6 @@ static char *create_dso_file_name(char *dso_name)
 			      strlen(suffix) + 1)))
 		sprintf(ret, "%s%s%s", prefix, dso_name, suffix);
 
-log_print("%s: \"%s\"\n", __func__, ret);
-
 	return ret;
 }
 
@@ -523,8 +514,6 @@ static struct dso_data *load_dso(struct message_data *data)
 	void *dl;
 	struct dso_data *ret = NULL;
 	char *dso_file;
-
-log_print("%s: \"%s\"\n", __func__, data->dso_name);
 
 	if (!(dso_file = create_dso_file_name(data->dso_name)))
 		return NULL;
@@ -545,11 +534,9 @@ log_print("%s: \"%s\"\n", __func__, data->dso_name);
 	ret->dso_handle = dl;
 	lib_get(ret);
 
-log_print("%s: DSO \"%s\" LOADED\n", __func__, data->dso_name);
 	lock_mutex();
 	LINK_DSO(ret);
 	unlock_mutex();
-log_print("%s: DSO \"%s\" linked\n", __func__, data->dso_name);
 
 	goto free_dso_file;
 
@@ -583,12 +570,10 @@ static int register_for_event(struct message_data *message_data)
 		ret = -ENODEV;
 		goto out;
 	}
-log_print("%s\n", __func__);
 
 	if (!(dso_data = lookup_dso(message_data)) &&
 	    !(dso_data = load_dso(message_data))) {
 		stack;
-log_print("%s: no DSO %s\n", __func__, message_data->dso_name);
 		ret = -ELIBACC;
 		goto out;
 	}
@@ -725,26 +710,33 @@ static int get_registered_device(struct message_data *message_data, int next)
 	    !message_data->device_path)
 		goto out;
 		
-
 	list_iterate_items(thread, &thread_registry) {
 		dev = dso = 0;
 
-		/* If we've got a DSO name. */
+		/* If DSO name equals. */
 		if (message_data->dso_name &&
 		    !strcmp(message_data->dso_name,
 			    thread->dso_data->dso_name))
 			dso = 1;
 
+		/* If dev path equals. */
 		if (message_data->device_path &&
 		    !strcmp(message_data->device_path,
 			    thread->device_path))
 			dev = 1;
 
-		/* We've got both DSO name and device patch. */
-		if ((dso && dev) || dso || dev) {
+		/* We've got both DSO name and device patch or either. */
+		/* FIXME: wrong logic! */
+		if (message_data->dso_name && message_data->device_path &&
+		    dso && dev)
 			hit = 1;
+		else if (message_data->dso_name && dso)
+			hit = 1;
+		else if (message_data->device_path && dev)
+			hit = 1;
+
+		if (hit)
 			break;
-		}
 	}
 
 	/*
@@ -761,6 +753,7 @@ static int get_registered_device(struct message_data *message_data, int next)
 		return -ENOENT;
 	}
 
+log_print("%s: return %s %s %u\n", __func__, thread->dso_data->dso_name, thread->device_path, thread->events);
 	return registered_device(message_data, thread);
 }
 
@@ -844,8 +837,6 @@ static int do_process_request(struct daemon_message *msg)
 	int ret;
 	static struct message_data message_data;
 
-log_print("%s: \"%s\"\n", __func__, msg->msg);
-fflush(stdout);
 	/* Parse the message. */
 	message_data.msg = msg;
 	if (msg->opcode.cmd != CMD_ACTIVE &&
@@ -854,8 +845,7 @@ fflush(stdout);
 		return -EINVAL;
 	}
 
-log_print("%s (2nd): \"%s\"\n", __func__, message_data.msg->msg);
-fflush(stdout);
+log_print("%s: %u \"%s\"\n", __func__, msg->opcode.cmd, message_data.msg->msg);
 
 	/* Check the request type. */
 	switch (msg->opcode.cmd) {
@@ -887,9 +877,8 @@ static void process_request(struct fifos *fifos)
 {
 	struct daemon_message msg;
 
-	/* FIXME: do better error handling */
+	/* FIXME: better error handling */
 
-log_print("%s %s %s\n", __func__, __func__, __func__);
 	/* Read the request from the client. */
 	memset(&msg, 0, sizeof(msg));
 	if (!client_read(fifos, &msg)) {
@@ -914,37 +903,53 @@ static void init_thread_signals(void)
 	pthread_sigmask(SIG_BLOCK, &sigset, NULL);
 }
 
-static char pidfile[] = "/var/run/dmeventd.pid";
+static int daemonize(void)
+{
+	setsid();
+	if (chdir("/"))
+		return EXIT_CHDIR_FAILURE;
+
+/* FIXME: activate again after we're done with tracing.
+	if((close(STDIN_FILENO) < 0) ||
+	   (close(STDOUT_FILENO) < 0) ||
+	   (close(STDERR_FILENO) < 0))
+		return EXIT_DESC_CLOSE_FAILURE;
+*/
+
+	return 0;
+}
+
+static int lock_pidfile(void)
+{
+	int lf;
+	char pidfile[] = "/var/run/dmeventd.pid";
+
+	if ((lf = open(pidfile, O_CREAT | O_RDWR, 0644)) < 0)
+		return EXIT_OPEN_PID_FAILURE;
+
+	if (flock(lf, LOCK_EX | LOCK_NB) < 0)
+		return EXIT_LOCKFILE_INUSE;
+
+	if (!storepid(lf))
+		return EXIT_FAILURE;
+
+	return 0;
+}
 
 void dmeventd(void)
 {
-	int lf;
+	int ret;
 	struct fifos fifos;
 //	pthread_t log_thread = { 0 };
 
+	if ((ret = daemonize()))
+		exit(ret);
 
-	setsid();
-	if (chdir("/"))
-		exit(EXIT_CHDIR_FAILURE);
+	/* FIXME: set daemon name. */
+	// set_name();
 
-/* FIXME: activate again.
-	if((close(STDIN_FILENO) < 0) ||
-	   (close(STDOUT_FILENO) < 0) ||
-	   (close(STDERR_FILENO) < 0)){
-		exit(EXIT_DESC_CLOSE_FAILURE);
-	}
-*/
-
-	/* reopen on /dev/null ? */
-
-	if ((lf = open(pidfile, O_CREAT | O_RDWR, 0644)) < 0)
-		exit(EXIT_OPEN_PID_FAILURE);
-
-	if (flock(lf, LOCK_EX | LOCK_NB) < 0)
-		exit(EXIT_LOCKFILE_INUSE);
-
-	if (!storepid(lf))
-		exit(EXIT_FAILURE);
+	if ((ret = lock_pidfile()))
+		exit(ret);
 
 	init_thread_signals();
 
@@ -968,12 +973,13 @@ void dmeventd(void)
 	if (!open_fifos(&fifos))
 		exit(EXIT_FIFO_FAILURE);
 
-log_print("%s: fifos open\n", __func__);
 	/* Signal parent, letting them know we are ready to go. */
 	kill(getppid(), SIGUSR1);
 
-	/* FIXME: we should exit when there are no more devices **
-	** to watch.  That is, when the last unregister happens */
+	/*
+	 * FIXME: we should exit when there are no more devices
+	 * to watch.  That is, when the last unregister happens.
+	 */
 	while(1)
 		process_request(&fifos);
 
