@@ -1,4 +1,4 @@
-	/*
+ /*
  * Copyright (C) 2005 Red Hat, Inc. All rights reserved.
  *
  * This file is part of the device-mapper userspace tools.
@@ -14,6 +14,7 @@
 
 #include "lib.h"
 #include "libdm-event.h"
+#include "libmultilog.h"
 #include "dmeventd.h"
 
 #include <errno.h>
@@ -28,6 +29,10 @@
 #include <unistd.h>
 #include <signal.h>
 #include <sys/wait.h>
+
+/* Set by any of the external fxns the first time one of them is
+ * called */
+static int _logging = 0;
 
 /* Fetch a string off src and duplicate it into *dest. */
 /* FIXME: move to seperate module to share with the daemon. */
@@ -319,6 +324,7 @@ int dm_register_for_event(char *dso_name, char *device_path,
 			  enum event_type events)
 {
 	struct daemon_message msg;
+	struct log_data *ldata;
 
 	if (!device_exists(device_path))
 		return -ENODEV;
@@ -331,6 +337,7 @@ int dm_unregister_for_event(char *dso_name, char *device_path,
 			   enum event_type events)
 {
 	struct daemon_message msg;
+	struct log_data *ldata;
 
 	if (!device_exists(device_path))
 		return -ENODEV;
@@ -345,6 +352,7 @@ int dm_get_registered_device(char **dso_name, char **device_path,
 	int ret;
 	char *dso_name_sav = NULL, *device_path_sav = NULL;
 	struct daemon_message msg;
+	struct log_data *ldata;
 
 	if (next) {
 		dso_name_sav = *dso_name;

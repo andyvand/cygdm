@@ -65,7 +65,7 @@ static int will_overrun(int read_pos, int write_pos,
 /* Messages are encoded in the buffer with the following format:
    priority:file:line:msg
 */
-void write_to_buf(int priority, const char *file, int line,
+void write_to_buf(void *data, int priority, const char *file, int line,
 		  const char *string)
 {
 	char buf[CBUFSIZE];
@@ -246,8 +246,8 @@ static void *process_syslog(void *arg)
 	cbuf.initialized = 1;
 
 	pthread_cleanup_push(finish_processing, NULL);
+	/* FIXME: The program name needs to be variable */
 	openlog("dmeventd", LOG_NDELAY | LOG_PID, LOG_DAEMON);
-
 
 	while (1) {
 		/* check write_pos & read_pos */

@@ -56,7 +56,7 @@ enum log_type {
 	custom,
 };
 
-typedef void (*multilog_fn) (int level, const char *file, int line,
+typedef void (*multilog_fn) (void *data, int level, const char *file, int line,
 			     const char *f);
 
 void multilog(int level, const char *file, int line, const char *f, ...)
@@ -69,9 +69,17 @@ void multilog(int level, const char *file, int line, const char *f, ...)
 
 
 int multilog_add_type(enum log_type type, struct log_data *data);
+void multilog_clear_logging(void);
 void multilog_del_type(enum log_type type, struct log_data *data);
 void multilog_custom(multilog_fn fn);
 void multilog_init_verbose(int level);
+
+
+#undef plog
+#undef log_error
+#undef log_print
+#undef log_verbose
+#undef log_very_verbose
 
 #define plog(p, x...) multilog(p, __FILE__, __LINE__, ## x)
 

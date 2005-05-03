@@ -19,11 +19,11 @@
  */
 
 #include "libdevmapper.h"
-#include "log.h"
+//#include "log.h"
 #include "libdm-event.h"
 #include "list.h"
 #include "dmeventd.h"
-// #include "libmultilog.h"
+#include "libmultilog.h"
 
 
 #include <dlfcn.h>
@@ -959,7 +959,11 @@ void dmeventd(void)
 {
 	int ret;
 	struct fifos fifos;
-//	pthread_t log_thread = { 0 };
+	struct log_data *tsdata = malloc(sizeof(*tsdata));
+	if(!tsdata)
+		exit(-ENOMEM);
+	if(!memset(tsdata, 0, sizeof(*tsdata)))
+		exit(-ENOMEM);
 
 	if ((ret = daemonize()))
 		exit(ret);
@@ -972,16 +976,11 @@ void dmeventd(void)
 
 	init_thread_signals();
 
-	/* Startup the syslog thread now so log_* macros work */
-/*
-                if(!start_syslog_thread(&log_thread, 100)) {
-                        fprintf(stderr, "Could not start logging thread\n");
-                        munlockall();
-                        pthread_mutex_destroy(&mutex);
-                        break;
-                }
-*/
-	
+	multilog_clear_logging();
+	tsdata->verbose_level = _LOG_DEBUG;
+	multilog_add_type(threaded_syslog, tsdata);
+
+
 
 	init_fifos(&fifos);
 	pthread_mutex_init(&mutex, NULL);
