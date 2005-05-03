@@ -83,7 +83,7 @@ static int daemon_read(struct fifos *fifos, struct daemon_message *msg)
 		bytes += ret > 0 ? ret : 0;
 	}
 
-log_print("%s: \"%s\"\n", __func__, msg->msg);
+// log_print("%s: \"%s\"\n", __func__, msg->msg);
 	return bytes == sizeof(*msg);
 }
 
@@ -94,7 +94,7 @@ static int daemon_write(struct fifos *fifos, struct daemon_message *msg)
 	fd_set fds;
 
 
-log_print("%s: \"%s\"\n", __func__, msg->msg);
+// log_print("%s: \"%s\"\n", __func__, msg->msg);
 	errno = 0;
 	while (bytes < sizeof(*msg) && errno != EIO) {
 		do {
@@ -122,7 +122,7 @@ static int daemon_talk(struct fifos *fifos, struct daemon_message *msg,
 	 */
 	msg->opcode.cmd = cmd;
 	snprintf(msg->msg, sizeof(msg->msg), "%s %s %u",
-		 dso_name, device, events);
+		 dso_name ? dso_name : "", device ? device : "", events);
 
 	/*
 	 * Write command and message to and
@@ -228,12 +228,12 @@ static int init_client(struct fifos *fifos)
 	 * Open the fifo used to read from the daemon.
 	 * Allows daemon to create its write fifo...
 	 */
-	if((fifos->server = open(fifos->server_path, O_RDWR)) < 0){
-		log_err("%s: open server fifo %s\n", __func__, fifos->server_path);
+	if ((fifos->server = open(fifos->server_path, O_RDWR)) < 0) {
+		log_err("%s: open server fifo %s\n",
+			__func__, fifos->server_path);
 		stack;
 		return 0;
 	}
-log_print("%s: server path open\n", __func__);
 
 	/* Lock out anyone else trying to do communication with the daemon. */
 	if (flock(fifos->server, LOCK_EX) < 0){
@@ -241,10 +241,10 @@ log_print("%s: server path open\n", __func__);
 		close(fifos->server);
 		return 0;
 	}
-log_print("%s: server fifo locked\n", __func__);
 
 	/* Anyone listening?  If not, errno will be ENXIO */
-	if((fifos->client = open(fifos->client_path, O_WRONLY | O_NONBLOCK)) < 0){
+	if ((fifos->client = open(fifos->client_path,
+				  O_WRONLY | O_NONBLOCK)) < 0) {
 		if(errno != ENXIO){
 			log_err("%s: open client fifo %s\n",
 				__func__, fifos->client_path);
@@ -252,7 +252,6 @@ log_print("%s: server fifo locked\n", __func__);
 			stack;
 			return 0;
 		}
-log_print("%s: client path open\n", __func__);
 		
 		if(!start_daemon()){
 			stack;
@@ -342,12 +341,19 @@ int dm_get_registered_device(char **dso_name, char **device,
 			     enum event_type *events, int next)
 {
 	int ret;
+	char *dso_name_sav = *dso_name, *device_sav = *device;
 	struct daemon_message msg;
 
 	if (!(ret = do_event(next ? CMD_GET_NEXT_REGISTERED_DEVICE :
 				    CMD_GET_REGISTERED_DEVICE,
 			     &msg, *dso_name, *device, *events)))
 		ret = parse_message(&msg, dso_name, device, events);
+
+	if (dso_name_sav)
+		free(dso_name_sav);
+
+	if (device_sav)
+		free(device_sav);
 
 	return ret;
 }

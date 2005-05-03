@@ -181,18 +181,32 @@ static void free_dso_data(struct dso_data *data)
 	dbg_free(data);
 }
 
-/* Fetch a string off src and duplicate it into *dest. */
+/*
+ * Fetch a string off src and duplicate it into *ptr.
+ * Pay attention to 0 lenght strings.
+ */
 /* FIXME: move to separate module to share with the client lib. */
 static const char delimiter = ' ';
-static char *fetch_string(char **src)
+static int fetch_string(char **ptr, char **src)
 {
-	char *p, *ret;
+	int ret = 0;
+	char *p;
+	size_t len;
 
 	if ((p = strchr(*src, delimiter)))
 		*p = 0;
 
-	if ((ret = strdup(*src)))
-		*src += strlen(ret) + 1;
+	if ((*ptr = dbg_strdup(*src))) {
+		if ((len = strlen(*ptr)))
+			*src += len;
+		else {
+			dbg_free(*ptr);
+			*ptr = NULL;
+		}
+
+		(*src)++;
+		ret = 1;
+	}
 
 	if (p)
 		*p = delimiter;
@@ -219,9 +233,9 @@ static int parse_message(struct message_data *message_data)
 	 * Retrieve application identifier, mapped device
 	 * path and events # string from message.
 	 */
-	if ((message_data->dso_name    = fetch_string(&p)) &&
-	    (message_data->device_path = fetch_string(&p)) &&
-	    (message_data->events.str  = fetch_string(&p))) {
+	if (fetch_string(&message_data->dso_name, &p) &&
+	    fetch_string(&message_data->device_path, &p) &&
+	    fetch_string(&message_data->events.str, &p)) {
 		if (message_data->events.str) {
 			enum event_type i = atoi(message_data->events.str);
 
@@ -585,18 +599,23 @@ static int register_for_event(struct message_data *message_data)
 		goto out;
 	}
 
-	if (!(ret = do_register_device(thread_new)))
-			goto out;
-
 	lock_mutex();
 
-	if ((thread = lookup_thread_status(message_data)))
-		ret = -EPERM;
-	else {
+	if (!(thread = lookup_thread_status(message_data))) {
+		unlock_mutex();
+
+		/*
+		 * FIXME: better do this asynchronously in the
+		 *        monitoring thread ?
+		 */
+		if (!(ret = do_register_device(thread_new)))
+			goto out;
+
 		thread = thread_new;
 		thread_new = NULL;
 
 		/* Try to create the monitoring thread for this device. */
+		lock_mutex();
 		if ((ret = -create_thread(thread))) {
 			unlock_mutex();
 			free_thread_status(thread);
@@ -641,7 +660,7 @@ static int unregister_for_event(struct message_data *message_data)
 
 	if (!(thread = lookup_thread_status(message_data))) {
 		unlock_mutex();
-		ret = -ESRCH;
+		ret = -ENODEV;
 		goto out;
 	}
 
@@ -680,7 +699,7 @@ static int unregister_for_event(struct message_data *message_data)
 }
 
 /*
- * Get next registered device.
+ * Get registered device.
  *
  * Only one caller at a time here as with register_for_event().
  */
@@ -698,63 +717,63 @@ static int registered_device(struct message_data *message_data,
 	return 0;
 }
 
+static int want_registered_device(char *dso_name, char *device_path,
+				  struct thread_status *thread)
+{
+	/* If DSO names and device paths are equal. */
+	if (dso_name && device_path)
+		return !strcmp(dso_name, thread->dso_data->dso_name) &&
+		       !strcmp(device_path, thread->device_path);
+
+	/* If DSO names are equal. */
+	if (dso_name)
+		return !strcmp(dso_name, thread->dso_data->dso_name);
+		
+	/* If device paths are equal. */
+	if (device_path)
+		return !strcmp(device_path, thread->device_path);
+
+	return 1;
+}
+
 static int get_registered_device(struct message_data *message_data, int next)
 {
-	int dev, dso, hit = 0;
-	struct thread_status *thread = list_item(thread_registry.n,
-				    		 struct thread_status);
+	int hit = 0;
+	struct thread_status *thread;
 
 	lock_mutex();
 
-	if (!message_data->dso_name &&
-	    !message_data->device_path)
-		goto out;
-		
+	/* Iterate list of threads checking if we want a particular one. */
 	list_iterate_items(thread, &thread_registry) {
-		dev = dso = 0;
-
-		/* If DSO name equals. */
-		if (message_data->dso_name &&
-		    !strcmp(message_data->dso_name,
-			    thread->dso_data->dso_name))
-			dso = 1;
-
-		/* If dev path equals. */
-		if (message_data->device_path &&
-		    !strcmp(message_data->device_path,
-			    thread->device_path))
-			dev = 1;
-
-		/* We've got both DSO name and device patch or either. */
-		/* FIXME: wrong logic! */
-		if (message_data->dso_name && message_data->device_path &&
-		    dso && dev)
-			hit = 1;
-		else if (message_data->dso_name && dso)
-			hit = 1;
-		else if (message_data->device_path && dev)
-			hit = 1;
-
-		if (hit)
+		if ((hit = want_registered_device(message_data->dso_name,
+						  message_data->device_path,
+						  thread)))
 			break;
 	}
 
 	/*
 	 * If we got a registered device and want the next one ->
-	 * fetch next element off the list.
+	 * fetch next conforming element off the list.
 	 */
-	if (hit && next)
-		thread = list_item(&thread->list.n, struct thread_status);
+	if (hit) {
+		if (next) {
+			do {
+				if (list_end(&thread_registry, &thread->list))
+					goto out;
+				
+				thread = list_item(thread->list.n,
+						   struct thread_status);
+			} while (!want_registered_device(message_data->dso_name,
+							 NULL, thread));
+		}
 
-   out:
-	if (list_empty(&thread->list) ||
-	    &thread->list == &thread_registry) {
-		unlock_mutex();
-		return -ENOENT;
+		return registered_device(message_data, thread);
 	}
 
-log_print("%s: return %s %s %u\n", __func__, thread->dso_data->dso_name, thread->device_path, thread->events);
-	return registered_device(message_data, thread);
+   out:
+	unlock_mutex();
+
+	return -ENOENT;
 }
 
 /* Initialize a fifos structure with path names. */
@@ -888,8 +907,7 @@ static void process_request(struct fifos *fifos)
 
 	msg.opcode.status = do_process_request(&msg);
 
-log_print("%s: status: %d\n", __func__, msg.opcode.status);
-	memset(&msg.msg, 0, sizeof(msg.msg));
+log_print("%s: status: %s\n", __func__, strerror(-msg.opcode.status));
 	if (!client_write(fifos, &msg))
 		stack;
 }
@@ -910,9 +928,9 @@ static int daemonize(void)
 		return EXIT_CHDIR_FAILURE;
 
 /* FIXME: activate again after we're done with tracing.
-	if((close(STDIN_FILENO) < 0) ||
-	   (close(STDOUT_FILENO) < 0) ||
-	   (close(STDERR_FILENO) < 0))
+	if ((close(STDIN_FILENO) < 0) ||
+	    (close(STDOUT_FILENO) < 0) ||
+	    (close(STDERR_FILENO) < 0))
 		return EXIT_DESC_CLOSE_FAILURE;
 */
 
