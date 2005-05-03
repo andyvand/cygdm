@@ -315,45 +315,52 @@ static int do_event(int cmd, struct daemon_message *msg,
 }
 
 /* External library interface. */
-int dm_register_for_event(char *dso_name, char *device, enum event_type events)
+int dm_register_for_event(char *dso_name, char *device_path,
+			  enum event_type events)
 {
 	struct daemon_message msg;
 
-	if (!device_exists(device))
+	if (!device_exists(device_path))
 		return -ENODEV;
 
-	return do_event(CMD_REGISTER_FOR_EVENT, &msg, dso_name, device, events);
+	return do_event(CMD_REGISTER_FOR_EVENT, &msg,
+			dso_name, device_path, events);
 }
 
-int dm_unregister_for_event(char *dso_name, char *device,
+int dm_unregister_for_event(char *dso_name, char *device_path,
 			   enum event_type events)
 {
 	struct daemon_message msg;
 
-	if (!device_exists(device))
+	if (!device_exists(device_path))
 		return -ENODEV;
 
-	return do_event(CMD_UNREGISTER_FOR_EVENT, &msg, dso_name,
-			device, events);
+	return do_event(CMD_UNREGISTER_FOR_EVENT, &msg,
+			dso_name, device_path, events);
 }
 
-int dm_get_registered_device(char **dso_name, char **device,
+int dm_get_registered_device(char **dso_name, char **device_path,
 			     enum event_type *events, int next)
 {
 	int ret;
-	char *dso_name_sav = *dso_name, *device_sav = *device;
+	char *dso_name_sav = NULL, *device_path_sav = NULL;
 	struct daemon_message msg;
+
+	if (next) {
+		dso_name_sav = *dso_name;
+		device_path_sav = *device_path;
+	}
 
 	if (!(ret = do_event(next ? CMD_GET_NEXT_REGISTERED_DEVICE :
 				    CMD_GET_REGISTERED_DEVICE,
-			     &msg, *dso_name, *device, *events)))
-		ret = parse_message(&msg, dso_name, device, events);
+			     &msg, *dso_name, *device_path, *events)))
+		ret = parse_message(&msg, dso_name, device_path, events);
 
 	if (dso_name_sav)
 		free(dso_name_sav);
 
-	if (device_sav)
-		free(device_sav);
+	if (device_path_sav)
+		free(device_path_sav);
 
 	return ret;
 }

@@ -351,6 +351,7 @@ static int event_wait(struct thread_status *thread)
 	if (!(dmt = dm_task_create(DM_DEVICE_WAITEVENT)))
 		return 0;
 
+/* FIXME: check for event_nr increased. */
 	if ((ret = dm_task_set_name(dmt, basename(thread->device_path))) &&
 	    (ret = dm_task_set_event_nr(dmt, 0)) &&
 	    (ret = dm_task_run(dmt))) {
