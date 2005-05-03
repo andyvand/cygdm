@@ -123,7 +123,6 @@ static int daemon_talk(struct fifos *fifos, struct daemon_message *msg,
 	msg->opcode.cmd = cmd;
 	snprintf(msg->msg, sizeof(msg->msg), "%s %s %u",
 		 dso_name, device, events);
-log_print("%s: \"%s\"\n", __func__, msg->msg);
 
 	/*
 	 * Write command and message to and
@@ -149,7 +148,8 @@ static void daemon_running_signal_handler(int sig)
 	daemon_running = 1;
 }
 
-/* start_daemon
+/*
+ * start_daemon
  *
  * This function forks off a process (dmeventd) that will handle
  * the events.  A signal must be returned from the child to
@@ -167,21 +167,23 @@ static int start_daemon(void)
 	
 	pid = fork();
 
-	if(pid < 0){
+	if (pid < 0)
 		log_err("Unable to fork.\n");
-	} else if(pid){ /* parent waits for child to get ready for requests */
+	else if (pid){ /* parent waits for child to get ready for requests */
 		int status;
 
-		while(!waitpid(pid, &status, WNOHANG) && !daemon_running);
+		while (!waitpid(pid, &status, WNOHANG) && !daemon_running);
 
 		if(daemon_running){
 			log_print("dmeventd started.\n");
 			ret = 1;
 		} else {
-			switch(WEXITSTATUS(status)){
+			switch (WEXITSTATUS(status)) {
 			case EXIT_LOCKFILE_INUSE:
-				/* Note, this is ok... we still have daemon **
-				** that we can communicate with............ */
+				/*
+				 * Note, this is ok... we still have daemon
+				 * that we can communicate with...
+				 */
 				log_print("Starting dmeventd failed: "
 					  "dmeventd already running.\n");
 				ret = 1;
@@ -200,6 +202,7 @@ static int start_daemon(void)
 	}
 
 	signal(SIGUSR1, old_hand);
+
         return ret;
 }
 
@@ -212,8 +215,8 @@ static int init_client(struct fifos *fifos)
         fifos->server_path = FIFO_SERVER;
 
 	/* Create fifos */
-	if(((mkfifo(fifos->client_path, 0600) == -1) && errno != EEXIST) ||
-	   ((mkfifo(fifos->server_path, 0600) == -1) && errno != EEXIST)){
+	if (((mkfifo(fifos->client_path, 0600) == -1) && errno != EEXIST) ||
+	    ((mkfifo(fifos->server_path, 0600) == -1) && errno != EEXIST)) {
 		log_err("%s: Failed to create a fifo.\n", __func__);
                 return 0;
 	}
@@ -221,20 +224,24 @@ static int init_client(struct fifos *fifos)
 	chmod(fifos->client_path, 0600);
 	chmod(fifos->server_path, 0600);
 
-	/* Open the fifo used to read from the daemon. **
-	** Allows daemon to create its write fifo..... */
-	if((fifos->server = open(fifos->server_path, O_RDONLY | O_NONBLOCK)) < 0){
+	/*
+	 * Open the fifo used to read from the daemon.
+	 * Allows daemon to create its write fifo...
+	 */
+	if((fifos->server = open(fifos->server_path, O_RDWR)) < 0){
 		log_err("%s: open server fifo %s\n", __func__, fifos->server_path);
 		stack;
 		return 0;
 	}
+log_print("%s: server path open\n", __func__);
 
-	/* Lock out anyone else trying to do communication with the daemon */
-	if(flock(fifos->server, LOCK_EX) < 0){
+	/* Lock out anyone else trying to do communication with the daemon. */
+	if (flock(fifos->server, LOCK_EX) < 0){
 		log_err("%s: flock %s\n", __func__, fifos->server_path);
 		close(fifos->server);
 		return 0;
 	}
+log_print("%s: server fifo locked\n", __func__);
 
 	/* Anyone listening?  If not, errno will be ENXIO */
 	if((fifos->client = open(fifos->client_path, O_WRONLY | O_NONBLOCK)) < 0){
@@ -245,6 +252,7 @@ static int init_client(struct fifos *fifos)
 			stack;
 			return 0;
 		}
+log_print("%s: client path open\n", __func__);
 		
 		if(!start_daemon()){
 			stack;
@@ -253,7 +261,7 @@ static int init_client(struct fifos *fifos)
 
 		/* Daemon is started, retry the open */
 		fifos->client = open(fifos->client_path, O_WRONLY | O_NONBLOCK);
-		if(fifos->client < 0){
+		if (fifos->client < 0) {
 			log_err("%s: open client fifo %s\n",
 				__func__, fifos->client_path);
 			close(fifos->server);
