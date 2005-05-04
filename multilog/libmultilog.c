@@ -194,8 +194,22 @@ void multilog_clear_logging(void)
 {
 	struct list *tmp, *next;
 	struct log_list *logl;
+	struct list ll;
+
+	list_init(&ll);
+
+	/* First step: move elements to temporary local list safely. */
+	lock_mutex();
 
 	list_iterate_safe(tmp, next, &logs) {
+		list_del(tmp);
+		list_add(&ll, tmp);
+	}
+
+	unlock_mutex();
+
+	/* Second step: delete them. */
+	list_iterate_safe(tmp, next, &ll) {
 		logl = list_item(tmp, struct log_list);
 
 		if (logl->data)
