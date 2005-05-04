@@ -24,7 +24,6 @@
 #include "dmeventd.h"
 #include "libmultilog.h"
 
-
 #include <dlfcn.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -140,13 +139,13 @@ static struct thread_status *alloc_thread_status(struct message_data *data,
 	struct thread_status *ret = (typeof(ret)) dbg_malloc(sizeof(*ret));
 
 	if (ret) {
-		memset(ret, 0, sizeof(*ret));
-		if ((ret->device_path = dbg_strdup(data->device_path))) {
-			ret->dso_data = dso_data;
-			ret->events   = data->events.field;
-		} else {
+		if (!memset(ret, 0, sizeof(*ret)) ||
+		    !(ret->device_path = dbg_strdup(data->device_path))) {
 			dbg_free(ret);
 			ret = NULL;
+		} else {
+			ret->dso_data = dso_data;
+			ret->events   = data->events.field;
 		}
 	}
 
@@ -165,8 +164,8 @@ static struct dso_data *alloc_dso_data(struct message_data *data)
 	struct dso_data *ret = (typeof(ret)) dbg_malloc(sizeof(*ret));
 
 	if (ret) {
-		memset(ret, 0, sizeof(*ret));
-		if (!(ret->dso_name = dbg_strdup(data->dso_name))) {
+		if (!memset(ret, 0, sizeof(*ret)) ||
+		    !(ret->dso_name = dbg_strdup(data->dso_name))) {
 			dbg_free(ret);
 			ret = NULL;
 		}
@@ -179,6 +178,14 @@ static void free_dso_data(struct dso_data *data)
 {
 	dbg_free(data->dso_name);
 	dbg_free(data);
+}
+
+/* FIXME: Factor out. */
+static char *dm_basename(char *str)
+{
+	char *p = strrchr(str, '/');
+
+	return p ? p + 1 : str;
 }
 
 /*
@@ -334,7 +341,7 @@ static int error_detected(struct thread_status *thread, char *params)
 	if ((len = strlen(params)) &&
 	    params[len - 1] == 'F') {
 */
-	if((len = strlen(params))){
+	if (params && (len = strlen(params))) {
 		thread->current_events |= DEVICE_ERROR;
 		return 1;
 	}
@@ -355,7 +362,7 @@ static int event_wait(struct thread_status *thread)
 	if (!(dmt = dm_task_create(DM_DEVICE_WAITEVENT)))
 		return 0;
 
-	if ((ret = dm_task_set_name(dmt, basename(thread->device_path))) &&
+	if ((ret = dm_task_set_name(dmt, dm_basename(thread->device_path))) &&
 	    (ret = dm_task_set_event_nr(dmt, thread->event_nr)) &&
 	    (ret = dm_task_run(dmt))) {
 		do {
@@ -368,8 +375,9 @@ static int event_wait(struct thread_status *thread)
 			if ((ret = error_detected(thread, params)))
 				break;
 		} while(next);
-		dm_task_get_info(dmt, &info);
-		thread->event_nr = info.event_nr;
+
+		if ((ret = dm_task_get_info(dmt, &info)))
+			thread->event_nr = info.event_nr;
 	}
 
 	dm_task_destroy(dmt);
@@ -783,11 +791,16 @@ static int get_registered_device(struct message_data *message_data, int next)
 }
 
 /* Initialize a fifos structure with path names. */
-static void init_fifos(struct fifos *fifos)
+static int init_fifos(struct fifos *fifos)
 {
-	memset(fifos, 0, sizeof(*fifos));
-	fifos->client_path = FIFO_CLIENT;
-	fifos->server_path = FIFO_SERVER;
+	if (memset(fifos, 0, sizeof(*fifos))) {
+		fifos->client_path = FIFO_CLIENT;
+		fifos->server_path = FIFO_SERVER;
+
+		return 1;
+	}
+
+	return 0;
 }
 
 /* Open fifos used for client communication. */
@@ -905,8 +918,8 @@ static void process_request(struct fifos *fifos)
 	/* FIXME: better error handling */
 
 	/* Read the request from the client. */
-	memset(&msg, 0, sizeof(msg));
-	if (!client_read(fifos, &msg)) {
+	if (!memset(&msg, 0, sizeof(msg)) ||
+	    !client_read(fifos, &msg)) {
 		stack;
 		return;
 	}
@@ -965,8 +978,10 @@ void dmeventd(void)
 	int ret;
 	struct fifos fifos;
 	struct log_data *tsdata = malloc(sizeof(*tsdata));
+
 	if(!tsdata)
 		exit(-ENOMEM);
+
 	if(!memset(tsdata, 0, sizeof(*tsdata)))
 		exit(-ENOMEM);
 
@@ -985,9 +1000,9 @@ void dmeventd(void)
 	tsdata->verbose_level = _LOG_DEBUG;
 	multilog_add_type(threaded_syslog, tsdata);
 
+	if (!init_fifos(&fifos))
+		exit (-ENOMEM);
 
-
-	init_fifos(&fifos);
 	pthread_mutex_init(&mutex, NULL);
 
 	if (mlockall(MCL_FUTURE) == -1)

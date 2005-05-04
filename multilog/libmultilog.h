@@ -27,7 +27,6 @@
 #define _LOG_FATAL 2
 
 
-
 struct file_log {
 	const char *filename;
 };
@@ -59,21 +58,19 @@ enum log_type {
 typedef void (*multilog_fn) (void *data, int level, const char *file, int line,
 			     const char *f);
 
-void multilog(int level, const char *file, int line, const char *f, ...)
-         __attribute__ ((format(printf, 4, 5)));
+void multilog(int priority, const char *file, int line, const char *f, ...)
+	__attribute__ ((format(printf, 4, 5)));
+
 /*
  * The library user may wish to register their own
  * logging function, by default errors go to stderr.
  * Use dm_log_init(NULL) to restore the default log fn.
  */
-
-
 int multilog_add_type(enum log_type type, struct log_data *data);
 void multilog_clear_logging(void);
 void multilog_del_type(enum log_type type, struct log_data *data);
 void multilog_custom(multilog_fn fn);
 void multilog_init_verbose(int level);
-
 
 #undef plog
 #undef log_error
