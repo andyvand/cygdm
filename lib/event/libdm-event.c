@@ -357,7 +357,7 @@ int dm_get_registered_device(char **dso_name, char **device_path,
 	if (!(ret = do_event(next ? CMD_GET_NEXT_REGISTERED_DEVICE :
 				    CMD_GET_REGISTERED_DEVICE,
 			     &msg, *dso_name, *device_path, *events)))
-		ret = parse_message(&msg, dso_name_arg, device_path_arg,
+		ret = parse_message(&msg, &dso_name_arg, &device_path_arg,
 				    events);
 
 	if (next){
