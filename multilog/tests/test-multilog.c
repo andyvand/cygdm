@@ -36,7 +36,7 @@ int main(int argc, char **argv)
 	 * FIXME: locking on libmultilog bytes here, because the
 	 * threaded log is still active.
 	 */
-	// multilog_add_type(standard, NULL);
+	multilog_add_type(standard, NULL);
 
 	log_err("Test of errors5");
 	log_err("Test of errors6");

@@ -39,6 +39,16 @@ struct log_list {
 /* FIXME: probably shouldn't do it this way, but... */
 static LIST_INIT(logs);
 
+/* Mutext for logs accesses. */
+static void *mutex = NULL;
+static void lock_mutex(void)
+{
+}
+
+static void unlock_mutex(void)
+{
+}
+
 /* Noop logging until the custom log fxn gets registered */
 static void nop_log(void *data, int priority, const char *file, int line,
 		    const char *string)
@@ -60,11 +70,8 @@ static void standard_log(void *data, int priority, const char *file, int line,
 
 	switch (ldata->verbose_level) {
 	case _LOG_DEBUG:
-		if (!strcmp("<backtrace>", string) &&
-		    ldata->verbose_level <= _LOG_DEBUG)
-			break;
-
-		if (ldata->verbose_level >= _LOG_DEBUG)
+		if (strcmp("<backtrace>", string) &&
+		    ldata->verbose_level >= _LOG_DEBUG)
 			fprintf(stderr, "%s%s\n", locn, string);
 
 		break;
@@ -123,20 +130,29 @@ static int start_threaded_syslog(struct log_list *logl,
 /* FIXME: Can currently add multiple logging types. */
 int multilog_add_type(enum log_type type, struct log_data *data)
 {
-	struct log_list *logl;
+	struct log_list *logl, *ll;
+
+	/*
+	 * Preallocate because we don't want to sleep holding a lock.
+	 */
+	if (!(logl = malloc(sizeof(*logl))) ||
+	    !(memset(logl, 0, sizeof(*logl))))
+		return 0;
 
 	/*
 	 * If the type has already been registered,
 	 * it doesn't need to be registered again.
 	 */
-	list_iterate_items(logl, &logs) {
-		if (logl->type == type)
-			return 1;
-	}
+	lock_mutex();
 
-	if (!(logl = malloc(sizeof(*logl))) ||
-	    !(memset(logl, 0, sizeof(*logl))))
-		return 0;
+	list_iterate_items(ll, &logs) {
+		if (ll->type == type) {
+			unlock_mutex();
+			free(logl);
+
+			return 1;
+		}
+	}
 
 	list_init(&logl->list); /* Superfluous but safe ;) */
 	logl->type = type;
@@ -167,11 +183,13 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 	}
 
 	list_add(&logs, &logl->list);
+	unlock_mutex();
 
 	return 1;
 }
 
 /* Resets the logging handle to no logging */
+/* FIXME: how does this stop the logging threads ? */
 void multilog_clear_logging(void)
 {
 	struct list *tmp, *next;
@@ -191,25 +209,33 @@ void multilog_clear_logging(void)
 void multilog_del_type(enum log_type type, struct log_data *data)
 {
 	struct list *tmp, *next;
-	struct log_list *logl;
+	struct log_list *logl, *ll = NULL;
+
+	/* First delete type from list safely. */
+	lock_mutex();
 
 	list_iterate_safe(tmp, next, &logs) {
 		logl = list_item(tmp, struct log_list);	
 
 		if (logl->type == type) {
-			if (logl->type == threaded_syslog) {
-				int (*stop_syslog) (struct log_data *log);
-
-				if ((stop_syslog = dlsym(data->info.threaded_syslog.dlh, "stop_syslog_thread")))
-					stop_syslog(data);
-			}
-
+			ll = logl;
 			list_del(tmp);
-			free(logl);
 			break;
 		}
 	}
 
+	unlock_mutex();
+
+	if (ll) {
+		if (ll->type == threaded_syslog) {
+			int (*stop_syslog) (struct log_data *log);
+
+			if ((stop_syslog = dlsym(data->info.threaded_syslog.dlh, "stop_syslog_thread")))
+				stop_syslog(data);
+		}
+
+		free(ll);
+	}
 }
 
 void multilog_custom(multilog_fn fn)
@@ -220,10 +246,14 @@ void multilog_custom(multilog_fn fn)
 	 * FIXME: Should we present an error if
 	 * we can't find a suitable target?
 	 */
+	lock_mutex();
+
 	list_iterate_items(logl, &logs) {
 		if (logl->type == custom && logl->log == nop_log)
 			logl->log = fn;
 	}
+
+	unlock_mutex();
 }
 
 
@@ -239,6 +269,10 @@ void multilog(int priority, const char *file, int line, const char *format, ...)
 	vsnprintf(buf, 4096, format, args);
 	va_end(args);
 
+	lock_mutex();
+
 	list_iterate_items(logl, &logs)
 		logl->log(logl->data, priority, file, line, buf);
+
+	unlock_mutex();
 }
