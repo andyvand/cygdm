@@ -171,8 +171,11 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 		logl->log = nop_log;
 		break;
 	case threaded_syslog:
-		if (!start_threaded_syslog(logl, data))
+		if (!start_threaded_syslog(logl, data)) {
+			unlock_mutex();
+			free(logl);
 			return 0;
+		}
 
 		break;
 	case custom:
