@@ -16,21 +16,19 @@ top_srcdir = @top_srcdir@
 VPATH = @srcdir@
 interface = @interface@
 
-SUBDIRS += async pthread_lock
+SOURCES = pthread_lock.c
 
-SOURCES = libmultilog.c
-
-LIB_STATIC = libmultilog.a
+LIB_STATIC = libmultilog_pthread_lock.a
 
 ifeq ("@LIB_SUFFIX@","dylib")
-  LIB_SHARED = libmultilog.dylib
+  LIB_SHARED = libmultilog_pthread_lock.dylib
 else
-  LIB_SHARED = libmultilog.so
+  LIB_SHARED = libmultilog_pthread_lock.so
 endif
 
 LDFLAGS += -ldl -ldevmapper -lpthread -L..
 
-include ../make.tmpl
+include ../../make.tmpl
 
 .PHONY: install_dynamic install_static
 
@@ -42,14 +40,13 @@ endif
 
 install: $(INSTALL_TYPE)
 
-install_dynamic: libmultilog.$(LIB_SUFFIX)
+install_dynamic: libmultilog_pthread_lock.$(LIB_SUFFIX)
 	$(INSTALL) -D $(OWNER) $(GROUP) -m 555 $(STRIP) $< \
-		$(libdir)/libmultilog.$(LIB_SUFFIX).$(LIB_VERSION)
-	$(LN_S) -f libmultilog.$(LIB_SUFFIX).$(LIB_VERSION) \
-		$(libdir)/libmultilog.$(LIB_SUFFIX)
+		$(libdir)/libmultilog_pthread_lock.$(LIB_SUFFIX).$(LIB_VERSION)
+	$(LN_S) -f libmultilog_pthread_lock.$(LIB_SUFFIX).$(LIB_VERSION) \
+		$(libdir)/libmultilog_pthread_lock.$(LIB_SUFFIX)
 
-install_static: libmultilog.a
+install_static: libmultilog_pthread_lock.a
 	$(INSTALL) -D $(OWNER) $(GROUP) -m 555 $(STRIP) $< \
-		$(libdir)/libmultilog.a.$(LIB_VERSION)
-	$(LN_S) -f libmultilog.a.$(LIB_VERSION) $(libdir)/libmultilog.a
-
+		$(libdir)/libmultilog_pthread_lock.a.$(LIB_VERSION)
+	$(LN_S) -f libmultilog_pthread_lock.a.$(LIB_VERSION) $(libdir)/libmultilog_pthread_lock.a

@@ -364,6 +364,7 @@ kernel/Makefile								\
 man/Makefile								\
 multilog/Makefile							\
 multilog/async/Makefile							\
+multilog/pthread_lock/Makefile						\
 multilog/tests/Makefile							\
 po/Makefile								\
 )

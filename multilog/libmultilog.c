@@ -13,7 +13,6 @@
  */
 
 #include <dlfcn.h>
-#include <pthread.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -33,42 +32,89 @@ struct log_list {
 	struct list list;
 	enum log_type type;
 	multilog_fn log;
-	void *data;
+	struct log_data *data;
 };
 
 /* FIXME: probably shouldn't do it this way, but... */
 static LIST_INIT(logs);
 
-/* Mutext for logs accesses. */
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-static int (*lock_fn)(pthread_mutex_t *) = NULL;
-static int (*unlock_fn)(pthread_mutex_t *) = NULL;
+/* locking for log accesss */
+static void* (*init_lock_fn)(void) = NULL;
+static int (*lock_fn)(void *) = NULL;
+static int (*unlock_fn)(void *) = NULL;
+static void (*destroy_lock_fn)(void *) = NULL;
+void *lock_dlh = NULL;
+void *lock_handle = NULL;
 
-static void lock_mutex(void)
+static void *init_lock(void)
+{
+	return init_lock_fn ? init_lock_fn() : NULL;
+}
+
+static int lock_list(void *handle)
 {
 	if (lock_fn)
-		(*lock_fn)(&mutex);
+		return !(*lock_fn)(handle);
+	return 0;
 }
 
-static void unlock_mutex(void)
+static int unlock_list(void *handle)
 {
 	if (unlock_fn)
-		(*unlock_fn)(&mutex);
+		return !(*unlock_fn)(handle);
+	return 0;
 }
 
-static int load_pthread_syms(struct log_data *data)
+static void destroy_lock(void *handle)
+{
+	if(destroy_lock_fn)
+		(*destroy_lock_fn)(handle);
+}
+
+static void *init_nop_lock(void)
+{
+	return NULL;
+}
+
+static int nop_lock(void *handle)
+{
+	return 0;
+}
+
+static int nop_unlock(void *handle)
+{
+	return 0;
+}
+
+static void destroy_nop_lock(void *handle)
+{
+	return;
+}
+
+static int load_lock_syms(struct log_data *data)
 {
 	void *dlh;
 
-	if (!(dlh = dlopen("libpthread.so", RTLD_NOW))) {
-		fprintf(stderr, "%s\n", dlerror());
-		return 0;
+	if (!(dlh = dlopen("libmultilog_pthread_lock.so", RTLD_NOW))) {
+		//fprintf(stderr, "%s\n", dlerror());
+		if(strstr(dlerror(), "undefined symbol: pthread")) {
+			fprintf(stderr, "pthread library not linked in - using nop locking\n");
+			init_lock_fn = init_nop_lock;
+			lock_fn = nop_lock;
+			unlock_fn = nop_unlock;
+			destroy_lock_fn = destroy_nop_lock;
+			return 1;
+		}
+		else
+			return 0;
 	}
 
-	data->info.threaded_syslog.pthread_dlh = dlh;
+	lock_dlh = dlh;
 
-	return (lock_fn = dlsym(dlh, "pthread_mutex_lock")) &&
-	       (unlock_fn = dlsym(dlh, "pthread_mutex_unlock"));
+	return ((init_lock_fn = dlsym(dlh, "init_locking")) &&
+		(lock_fn = dlsym(dlh, "lock_fn")) &&
+		(unlock_fn = dlsym(dlh, "unlock_fn")) &&
+		(destroy_lock_fn = dlsym(dlh, "destroy_locking")));
 }
 
 
@@ -142,8 +188,7 @@ static int start_threaded_syslog(struct log_list *logl,
 	log_fxn = dlsym(logdata->info.threaded_syslog.dlh, "write_to_buf");
 	start_syslog = dlsym(logdata->info.threaded_syslog.dlh, "start_syslog_thread");
 
-	if (!log_fxn || !start_syslog ||
-	    !load_pthread_syms(logdata)) {
+	if (!log_fxn || !start_syslog) {
 		dlclose(logdata->info.threaded_syslog.dlh);
 		return 0;
 	}
@@ -161,6 +206,15 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 {
 	struct log_list *logl, *ll;
 
+	/* FIXME: Potential race here */
+	/* attempt to load locking protocol */
+	if(!init_lock_fn) {
+		if(!load_lock_syms(data)) {
+			fprintf(stderr, "Unalbe to load locking\n");
+			return 0;
+		}
+		lock_handle = init_lock();
+	}
 	/*
 	 * Preallocate because we don't want to sleep holding a lock.
 	 */
@@ -172,19 +226,19 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 	 * If the type has already been registered,
 	 * it doesn't need to be registered again.
 	 */
-	lock_mutex();
+	lock_list(lock_handle);
 
 	list_iterate_items(ll, &logs) {
 		if (ll->type == type) {
-			unlock_mutex();
+			unlock_list(lock_handle);
 			free(logl);
-
 			return 1;
 		}
 	}
-
 	logl->type = type;
 	logl->data = data;
+	list_add(&logs, &logl->list);
+	unlock_list(lock_handle);
 
 	switch (type) {
 	case standard:
@@ -200,7 +254,9 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 		break;
 	case threaded_syslog:
 		if (!start_threaded_syslog(logl, data)) {
-			unlock_mutex();
+			lock_list(lock_handle);
+			list_del(&logl->list);
+			unlock_list(lock_handle);
 			free(logl);
 			return 0;
 		}
@@ -212,9 +268,6 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 		logl->log = nop_log;
 		break;
 	}
-
-	list_add(&logs, &logl->list);
-	unlock_mutex();
 
 	return 1;
 }
@@ -230,24 +283,38 @@ void multilog_clear_logging(void)
 	list_init(&ll);
 
 	/* First step: move elements to temporary local list safely. */
-	lock_mutex();
+	lock_list(lock_handle);
 
 	list_iterate_safe(tmp, next, &logs) {
 		list_del(tmp);
 		list_add(&ll, tmp);
 	}
 
-	unlock_mutex();
+	unlock_list(lock_handle);
 
 	/* Second step: delete them. */
 	list_iterate_safe(tmp, next, &ll) {
 		logl = list_item(tmp, struct log_list);
+
+		if(logl->type == threaded_syslog) {
+			if(logl->data->info.threaded_syslog.dlh) {
+				int (*stop_syslog) (struct log_data *log);
+				stop_syslog = dlsym(logl->data->info.threaded_syslog.dlh,
+						    "stop_syslog_thread");
+				stop_syslog(logl->data);
+				dlclose(logl->data->info.threaded_syslog.dlh);
+			}
+		}
 
 		if (logl->data)
 			free(logl->data);
 
 		list_del(tmp);
 	}
+	/* FIXME: Not sure the destroy_lock call is really necessary */
+	destroy_lock(lock_handle);
+	dlclose(lock_dlh);
+
 }
 
 /* FIXME: Might want to have this return an error if we can't find the type */
@@ -257,7 +324,7 @@ void multilog_del_type(enum log_type type, struct log_data *data)
 	struct log_list *logl, *ll = NULL;
 
 	/* First delete type from list safely. */
-	lock_mutex();
+	lock_list(lock_handle);
 
 	list_iterate_safe(tmp, next, &logs) {
 		logl = list_item(tmp, struct log_list);	
@@ -269,7 +336,7 @@ void multilog_del_type(enum log_type type, struct log_data *data)
 		}
 	}
 
-	unlock_mutex();
+	unlock_list(lock_handle);
 
 	if (ll) {
 		if (ll->type == threaded_syslog) {
@@ -279,7 +346,6 @@ void multilog_del_type(enum log_type type, struct log_data *data)
 				stop_syslog(data);
 
 			dlclose(data->info.threaded_syslog.dlh);
-			dlclose(data->info.threaded_syslog.pthread_dlh);
 		}
 
 		free(ll);
@@ -294,14 +360,14 @@ void multilog_custom(multilog_fn fn)
 	 * FIXME: Should we present an error if
 	 * we can't find a suitable target?
 	 */
-	lock_mutex();
+	lock_list(lock_handle);
 
 	list_iterate_items(logl, &logs) {
 		if (logl->type == custom && logl->log == nop_log)
 			logl->log = fn;
 	}
 
-	unlock_mutex();
+	unlock_list(lock_handle);
 }
 
 
@@ -317,10 +383,10 @@ void multilog(int priority, const char *file, int line, const char *format, ...)
 	vsnprintf(buf, 4096, format, args);
 	va_end(args);
 
-	lock_mutex();
+	lock_list(lock_handle);
 
 	list_iterate_items(logl, &logs)
 		logl->log(logl->data, priority, file, line, buf);
 
-	unlock_mutex();
+	unlock_list(lock_handle);
 }
