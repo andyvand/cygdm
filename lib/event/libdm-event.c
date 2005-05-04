@@ -350,25 +350,29 @@ int dm_get_registered_device(char **dso_name, char **device_path,
 			     enum event_type *events, int next)
 {
 	int ret;
-	char *dso_name_sav = NULL, *device_path_sav = NULL;
+	char *dso_name_arg = NULL, *device_path_arg = NULL;
 	struct daemon_message msg;
 	struct log_data *ldata;
-
-	if (next) {
-		dso_name_sav = *dso_name;
-		device_path_sav = *device_path;
-	}
 
 	if (!(ret = do_event(next ? CMD_GET_NEXT_REGISTERED_DEVICE :
 				    CMD_GET_REGISTERED_DEVICE,
 			     &msg, *dso_name, *device_path, *events)))
-		ret = parse_message(&msg, dso_name, device_path, events);
+		ret = parse_message(&msg, dso_name_arg, device_path_arg,
+				    events);
 
-	if (dso_name_sav)
-		free(dso_name_sav);
-
-	if (device_path_sav)
-		free(device_path_sav);
+	if (next){
+		if (*dso_name)
+			free(*dso_name);
+		if (*device_path)
+			free(*device_path);
+		*dso_name = dso_name_arg;
+		*device_path = device_path_arg;
+	} else {
+		if (!(*dso_name))
+			*dso_name = dso_name_arg;
+		if (!(*device_path))
+			*device_path = device_path_arg;
+	}
 
 	return ret;
 }
