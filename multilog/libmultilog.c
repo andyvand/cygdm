@@ -40,14 +40,37 @@ struct log_list {
 static LIST_INIT(logs);
 
 /* Mutext for logs accesses. */
-static void *mutex = NULL;
+static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+static int (*lock_fn)(pthread_mutex_t *) = NULL;
+static int (*unlock_fn)(pthread_mutex_t *) = NULL;
+
 static void lock_mutex(void)
 {
+	if (lock_fn)
+		(*lock_fn)(&mutex);
 }
 
 static void unlock_mutex(void)
 {
+	if (unlock_fn)
+		(*unlock_fn)(&mutex);
 }
+
+static int load_pthread_syms(struct log_data *data)
+{
+	void *dlh;
+
+	if (!(dlh = dlopen("libpthread.so", RTLD_NOW))) {
+		fprintf(stderr, "%s\n", dlerror());
+		return 0;
+	}
+
+	data->info.threaded_syslog.pthread_dlh = dlh;
+
+	return (lock_fn = dlsym(dlh, "pthread_mutex_lock")) &&
+	       (unlock_fn = dlsym(dlh, "pthread_mutex_unlock"));
+}
+
 
 /* Noop logging until the custom log fxn gets registered */
 static void nop_log(void *data, int priority, const char *file, int line,
@@ -119,6 +142,12 @@ static int start_threaded_syslog(struct log_list *logl,
 	log_fxn = dlsym(logdata->info.threaded_syslog.dlh, "write_to_buf");
 	start_syslog = dlsym(logdata->info.threaded_syslog.dlh, "start_syslog_thread");
 
+	if (!log_fxn || !start_syslog ||
+	    !load_pthread_syms(logdata)) {
+		dlclose(logdata->info.threaded_syslog.dlh);
+		return 0;
+	}
+
 	/* FIXME: the timeout here probably can be tweaked */
 	/* FIXME: Probably want to do something if this fails */
 	if (start_syslog(&(logdata->info.threaded_syslog.thread), 100000))
@@ -154,7 +183,6 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 		}
 	}
 
-	list_init(&logl->list); /* Superfluous but safe ;) */
 	logl->type = type;
 	logl->data = data;
 
@@ -249,6 +277,9 @@ void multilog_del_type(enum log_type type, struct log_data *data)
 
 			if ((stop_syslog = dlsym(data->info.threaded_syslog.dlh, "stop_syslog_thread")))
 				stop_syslog(data);
+
+			dlclose(data->info.threaded_syslog.dlh);
+			dlclose(data->info.threaded_syslog.pthread_dlh);
 		}
 
 		free(ll);

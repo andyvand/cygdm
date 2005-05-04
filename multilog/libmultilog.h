@@ -34,6 +34,7 @@ struct file_log {
 struct threaded_syslog_log {
 	pthread_t thread;
 	void *dlh;
+	void *pthread_dlh;
 };
 
 union log_info {
