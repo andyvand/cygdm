@@ -19,7 +19,6 @@
  */
 
 #include "libdevmapper.h"
-//#include "log.h"
 #include "libdm-event.h"
 #include "list.h"
 #include "dmeventd.h"
@@ -127,6 +126,7 @@ struct thread_status {
 	struct dso_data *dso_data;/* DSO this thread accesses. */
 	
 	char *device_path;	/* Mapped device path. */
+	int event_nr;           /* event number */
 	enum event_type events;	/* bitfield for event filter. */
 	enum event_type current_events;/* bitfield for occured events. */
 	enum event_type processed_events;/* bitfield for processed events. */
@@ -329,9 +329,12 @@ static void exit_dm_lib(void)
 static int error_detected(struct thread_status *thread, char *params)
 {
 	size_t len;
-
+/*
+  Leave it to the DSO to decide how to interpret the status info
 	if ((len = strlen(params)) &&
 	    params[len - 1] == 'F') {
+*/
+	if((len = strlen(params))){
 		thread->current_events |= DEVICE_ERROR;
 		return 1;
 	}
@@ -347,13 +350,13 @@ static int event_wait(struct thread_status *thread)
 	char *params, *target_type;
 	uint64_t start, length;
 	struct dm_task *dmt;
+	struct dm_info info;
 
 	if (!(dmt = dm_task_create(DM_DEVICE_WAITEVENT)))
 		return 0;
 
-/* FIXME: check for event_nr increased. */
 	if ((ret = dm_task_set_name(dmt, basename(thread->device_path))) &&
-	    (ret = dm_task_set_event_nr(dmt, 0)) &&
+	    (ret = dm_task_set_event_nr(dmt, thread->event_nr)) &&
 	    (ret = dm_task_run(dmt))) {
 		do {
 			/* Retrieve next target. */
@@ -361,10 +364,12 @@ static int event_wait(struct thread_status *thread)
 			next = dm_get_next_target(dmt, next, &start, &length,
 						  &target_type, &params);
 
-log_print("%s: %s\n", __func__, params);
+			log_err("%s: %s\n", __func__, params);
 			if ((ret = error_detected(thread, params)))
 				break;
 		} while(next);
+		dm_task_get_info(dmt, &info);
+		thread->event_nr = info.event_nr;
 	}
 
 	dm_task_destroy(dmt);
