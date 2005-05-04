@@ -91,7 +91,7 @@ static void destroy_nop_lock(void *handle)
 	return;
 }
 
-static int load_lock_syms(struct log_data *data)
+static int load_lock_syms(void)
 {
 	void *dlh;
 
@@ -209,7 +209,7 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 	/* FIXME: Potential race here */
 	/* attempt to load locking protocol */
 	if(!init_lock_fn) {
-		if(!load_lock_syms(data)) {
+		if(!load_lock_syms()) {
 			fprintf(stderr, "Unalbe to load locking\n");
 			return 0;
 		}
@@ -313,7 +313,14 @@ void multilog_clear_logging(void)
 	}
 	/* FIXME: Not sure the destroy_lock call is really necessary */
 	destroy_lock(lock_handle);
-	dlclose(lock_dlh);
+
+	if(lock_dlh) {
+		dlclose(lock_dlh);
+		init_lock_fn = NULL;
+		lock_fn = NULL;
+		unlock_fn = NULL;
+		destroy_lock_fn = NULL;
+	}
 
 }
 
