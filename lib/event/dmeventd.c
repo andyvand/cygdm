@@ -546,8 +546,10 @@ static struct dso_data *load_dso(struct message_data *data)
 	if (!(dso_file = create_dso_file_name(data->dso_name)))
 		return NULL;
 
-	if (!(dl = dlopen(dso_file, RTLD_NOW)))
+	if (!(dl = dlopen(dso_file, RTLD_NOW))){
+		log_err("%s\n", dlerror());
 		goto free_dso_file;
+	}
 
 	if (!(ret = alloc_dso_data(data)))
 		goto close;
