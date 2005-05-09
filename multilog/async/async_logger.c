@@ -306,10 +306,10 @@ int start_syslog_thread(pthread_t *thread, long usecs)
 	return cbuf.initialized ? 1 : 0;
 }
 
-int stop_syslog_thread(struct log_data *data)
+int stop_syslog_thread(pthread_t thread)
 {
-	pthread_cancel(data->info.threaded_syslog.thread);
-	pthread_join(data->info.threaded_syslog.thread, NULL);
+	pthread_cancel(thread);
+	pthread_join(thread, NULL);
 
 	return 1;
 }

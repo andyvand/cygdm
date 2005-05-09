@@ -26,13 +26,35 @@
 
 #include <unistd.h>
 
-/* FIXME: add locking while updating logs registry. */
+#define DEFAULT_VERBOSITY 4
+
+
+struct threaded_syslog_log {
+	pthread_t thread;
+	void *dlh;
+};
+
+struct custom_log {
+	void (*destructor)(void *data);
+	void *custom;
+};
+
+union log_info {
+	int logfilefd;
+	struct threaded_syslog_log threaded_syslog;
+	struct custom_log cl;
+};
+
+struct log_data {
+	int verbose_level;
+	union log_info info;
+};
 
 struct log_list {
 	struct list list;
 	enum log_type type;
 	multilog_fn log;
-	struct log_data *data;
+	struct log_data data;
 };
 
 /* FIXME: probably shouldn't do it this way, but... */
@@ -173,13 +195,13 @@ static void standard_log(void *data, int priority, const char *file, int line,
 	};
 }
 
-static int start_threaded_syslog(struct log_list *logl,
-				 struct log_data *logdata)
+static int start_threaded_syslog(struct log_list *logl)
 {
 	void (*log_fxn) (void *data, int priority, const char *file, int line,
 			 const char *string);
 	int (*start_syslog) (pthread_t *t, long usecs);
-	int (*stop_syslog) (struct log_data *log);
+	int (*stop_syslog) (pthread_t t);
+	struct log_data *logdata = &logl->data;
 
 	if (!(logdata->info.threaded_syslog.dlh = dlopen("libmultilog_async.so", RTLD_NOW))) {
 		fprintf(stderr, "%s\n", dlerror());
@@ -188,7 +210,7 @@ static int start_threaded_syslog(struct log_list *logl,
 
 	log_fxn = dlsym(logdata->info.threaded_syslog.dlh, "write_to_buf");
 	start_syslog = dlsym(logdata->info.threaded_syslog.dlh, "start_syslog_thread");
-	stop_syslog = dlsym(logl->data->info.threaded_syslog.dlh, "stop_syslog_thread");
+	stop_syslog = dlsym(logl->data.info.threaded_syslog.dlh, "stop_syslog_thread");
 
 	if (!log_fxn || !start_syslog || !stop_syslog) {
 		dlclose(logdata->info.threaded_syslog.dlh);
@@ -204,7 +226,7 @@ static int start_threaded_syslog(struct log_list *logl,
 }
 
 /* FIXME: Can currently add multiple logging types. */
-int multilog_add_type(enum log_type type, struct log_data *data)
+int multilog_add_type(enum log_type type, void *data)
 {
 	struct log_list *logl, *ll;
 
@@ -212,7 +234,7 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 	/* attempt to load locking protocol */
 	if(!init_lock_fn) {
 		if(!load_lock_syms()) {
-			fprintf(stderr, "Unalbe to load locking\n");
+			fprintf(stderr, "Unable to load locking\n");
 			return 0;
 		}
 		lock_handle = init_lock();
@@ -238,7 +260,13 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 		}
 	}
 	logl->type = type;
-	logl->data = data;
+	if(!memset(&logl->data, 0, sizeof(logl->data))) {
+		/* Should never get here */
+		free(logl);
+		return 0;
+	}
+	logl->data.verbose_level = DEFAULT_VERBOSITY;
+	logl->log = nop_log;
 	list_add(&logs, &logl->list);
 	unlock_list(lock_handle);
 
@@ -255,7 +283,7 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 		logl->log = nop_log;
 		break;
 	case threaded_syslog:
-		if (!start_threaded_syslog(logl, data)) {
+		if (!start_threaded_syslog(logl)) {
 			lock_list(lock_handle);
 			list_del(&logl->list);
 			unlock_list(lock_handle);
@@ -275,59 +303,17 @@ int multilog_add_type(enum log_type type, struct log_data *data)
 }
 
 /* Resets the logging handle to no logging */
-/* FIXME: how does this stop the logging threads ? */
 void multilog_clear_logging(void)
 {
-	struct list *tmp, *next;
-	struct log_list *logl;
-	struct list ll;
+	enum log_type i;
 
-	list_init(&ll);
-
-	/* First step: move elements to temporary local list safely. */
-	lock_list(lock_handle);
-
-	list_iterate_safe(tmp, next, &logs) {
-		list_del(tmp);
-		list_add(&ll, tmp);
+	for(i = standard; i <= custom; i++) {
+		multilog_del_type(i);
 	}
-
-	unlock_list(lock_handle);
-
-	/* Second step: delete them. */
-	list_iterate_safe(tmp, next, &ll) {
-		logl = list_item(tmp, struct log_list);
-
-		if(logl->type == threaded_syslog) {
-			if(logl->data->info.threaded_syslog.dlh) {
-				int (*stop_syslog) (struct log_data *log);
-				stop_syslog = dlsym(logl->data->info.threaded_syslog.dlh,
-						    "stop_syslog_thread");
-				stop_syslog(logl->data);
-				dlclose(logl->data->info.threaded_syslog.dlh);
-			}
-		}
-
-		if (logl->data)
-			free(logl->data);
-
-		list_del(tmp);
-	}
-	/* FIXME: Not sure the destroy_lock call is really necessary */
-	destroy_lock(lock_handle);
-
-	if(lock_dlh) {
-		dlclose(lock_dlh);
-		init_lock_fn = NULL;
-		lock_fn = NULL;
-		unlock_fn = NULL;
-		destroy_lock_fn = NULL;
-	}
-
 }
 
 /* FIXME: Might want to have this return an error if we can't find the type */
-void multilog_del_type(enum log_type type, struct log_data *data)
+void multilog_del_type(enum log_type type)
 {
 	struct list *tmp, *next;
 	struct log_list *logl, *ll = NULL;
@@ -336,7 +322,7 @@ void multilog_del_type(enum log_type type, struct log_data *data)
 	lock_list(lock_handle);
 
 	list_iterate_safe(tmp, next, &logs) {
-		logl = list_item(tmp, struct log_list);	
+		logl = list_item(tmp, struct log_list);
 
 		if (logl->type == type) {
 			ll = logl;
@@ -349,19 +335,37 @@ void multilog_del_type(enum log_type type, struct log_data *data)
 
 	if (ll) {
 		if (ll->type == threaded_syslog) {
-			int (*stop_syslog) (struct log_data *log);
+			int (*stop_syslog) (pthread_t t);
+			stop_syslog = dlsym(logl->data.info.threaded_syslog.dlh, "stop_syslog_thread");
+			if(stop_syslog)
+				stop_syslog(ll->data.info.threaded_syslog.thread);
 
-			if ((stop_syslog = dlsym(data->info.threaded_syslog.dlh, "stop_syslog_thread")))
-				stop_syslog(data);
-
-			dlclose(data->info.threaded_syslog.dlh);
+			dlclose(ll->data.info.threaded_syslog.dlh);
+		}
+		if (ll->type == custom) {
+			if(ll->data.info.cl.destructor) {
+				ll->data.info.cl.destructor(ll->data.info.cl.custom);
+			}
 		}
 
 		free(ll);
 	}
+
+	if(list_empty(&logs)) {
+		/* FIXME: Not sure the destroy_lock call is really necessary */
+		destroy_lock(lock_handle);
+
+		if(lock_dlh) {
+			dlclose(lock_dlh);
+			init_lock_fn = NULL;
+			lock_fn = NULL;
+			unlock_fn = NULL;
+			destroy_lock_fn = NULL;
+		}
+	}
 }
 
-void multilog_custom(multilog_fn fn)
+void multilog_custom(multilog_fn fn, void (*destructor_fn)(void *data), void *data)
 {
 	struct log_list *logl;
 
@@ -372,8 +376,11 @@ void multilog_custom(multilog_fn fn)
 	lock_list(lock_handle);
 
 	list_iterate_items(logl, &logs) {
-		if (logl->type == custom && logl->log == nop_log)
+		if (logl->type == custom && logl->log == nop_log) {
 			logl->log = fn;
+			logl->data.info.cl.destructor = destructor_fn;
+			logl->data.info.cl.custom = data;
+		}
 	}
 
 	unlock_list(lock_handle);
@@ -387,15 +394,37 @@ void multilog(int priority, const char *file, int line, const char *format, ...)
 	struct log_list *logl;
 
 	va_list args;
-	/* FIXME: shove everything into a single string */
 	va_start(args, format);
 	vsnprintf(buf, 4096, format, args);
 	va_end(args);
 
 	lock_list(lock_handle);
 
-	list_iterate_items(logl, &logs)
-		logl->log(logl->data, priority, file, line, buf);
+	list_iterate_items(logl, &logs) {
+		/* Custom logging types do just get the custom data
+		 * they setup initially - multilog doesn't do any
+		 * handling of custom loggers data */
+		if(logl->type == custom)
+			logl->log(logl->data.info.cl.custom, priority, file, line, buf);
+		else
+			logl->log(&logl->data, priority, file, line, buf);
+	}
+	unlock_list(lock_handle);
+
+}
+
+
+void multilog_init_verbose(enum log_type type, int level)
+{
+	struct log_list *ll;
+
+	lock_list(lock_handle);
+
+	list_iterate_items(ll, &logs) {
+		if (ll->type == type) {
+			ll->data.verbose_level = level;
+		}
+	}
 
 	unlock_list(lock_handle);
 }

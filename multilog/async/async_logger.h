@@ -18,6 +18,6 @@
 void write_to_buf(void *data, int priority, const char *file, int line,
 		  const char *string);
 int start_syslog_thread(pthread_t *thread, long usecs);
-int stop_syslog_thread(struct log_data *data);
+int stop_syslog_thread(pthread_t thread);
 
 #endif

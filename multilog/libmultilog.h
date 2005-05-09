@@ -31,24 +31,9 @@ struct file_log {
 	const char *filename;
 };
 
-struct threaded_syslog_log {
-	pthread_t thread;
-	void *dlh;
-};
-
-union log_info {
-	struct file_log logfile;
-	struct threaded_syslog_log threaded_syslog;
-	void *custom;
-};
-
-struct log_data {
-	int verbose_level;
-	union log_info info;
-};
-
+/* Can only have one of these registered at a time */
 enum log_type {
-	standard,
+	standard = 1,
 	logfile,
 	std_syslog,
 	threaded_syslog,
@@ -62,15 +47,25 @@ void multilog(int priority, const char *file, int line, const char *f, ...)
 	__attribute__ ((format(printf, 4, 5)));
 
 /*
- * The library user may wish to register their own
- * logging function, by default errors go to stderr.
- * Use dm_log_init(NULL) to restore the default log fn.
+ * no logging functions are registered by default
  */
-int multilog_add_type(enum log_type type, struct log_data *data);
+int multilog_add_type(enum log_type type, void *data);
 void multilog_clear_logging(void);
-void multilog_del_type(enum log_type type, struct log_data *data);
-void multilog_custom(multilog_fn fn);
-void multilog_init_verbose(int level);
+void multilog_del_type(enum log_type type);
+
+/*
+ * Pass any info that you want passed to the custom log fxn in data,
+ * as well as a custom destructor for deallocating any data when the
+ * log is cleared (required for multilog_clear_logging)
+ */
+void multilog_custom(multilog_fn fn, void (*destroy_fn)(void *data), void *data);
+
+/*
+ * This does nothing if you're using the custom type, you need to
+ * handle all this yourself with the void *data info you pass into
+ * multilog_custom()
+ */
+void multilog_init_verbose(enum log_type type, int level);
 
 #undef plog
 #undef log_error

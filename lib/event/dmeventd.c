@@ -977,13 +977,6 @@ void dmeventd(void)
 {
 	int ret;
 	struct fifos fifos;
-	struct log_data *tsdata = malloc(sizeof(*tsdata));
-
-	if(!tsdata)
-		exit(-ENOMEM);
-
-	if(!memset(tsdata, 0, sizeof(*tsdata)))
-		exit(-ENOMEM);
 
 	if ((ret = daemonize()))
 		exit(ret);
@@ -997,8 +990,9 @@ void dmeventd(void)
 	init_thread_signals();
 
 	multilog_clear_logging();
-	tsdata->verbose_level = _LOG_DEBUG;
-	multilog_add_type(threaded_syslog, tsdata);
+	multilog_add_type(threaded_syslog, NULL);
+	multilog_init_verbose(threaded_syslog, _LOG_DEBUG);
+
 
 	if (!init_fifos(&fifos))
 		exit (-ENOMEM);
