@@ -179,6 +179,7 @@ static int start_threaded_syslog(struct log_list *logl,
 	void (*log_fxn) (void *data, int priority, const char *file, int line,
 			 const char *string);
 	int (*start_syslog) (pthread_t *t, long usecs);
+	int (*stop_syslog) (struct log_data *log);
 
 	if (!(logdata->info.threaded_syslog.dlh = dlopen("libmultilog_async.so", RTLD_NOW))) {
 		fprintf(stderr, "%s\n", dlerror());
@@ -187,8 +188,9 @@ static int start_threaded_syslog(struct log_list *logl,
 
 	log_fxn = dlsym(logdata->info.threaded_syslog.dlh, "write_to_buf");
 	start_syslog = dlsym(logdata->info.threaded_syslog.dlh, "start_syslog_thread");
+	stop_syslog = dlsym(logl->data->info.threaded_syslog.dlh, "stop_syslog_thread");
 
-	if (!log_fxn || !start_syslog) {
+	if (!log_fxn || !start_syslog || !stop_syslog) {
 		dlclose(logdata->info.threaded_syslog.dlh);
 		return 0;
 	}
