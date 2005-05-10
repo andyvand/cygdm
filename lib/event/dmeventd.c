@@ -365,8 +365,8 @@ static int event_wait(struct thread_status *thread)
 	if ((ret = dm_task_set_name(dmt, dm_basename(thread->device_path))) &&
 	    (ret = dm_task_set_event_nr(dmt, thread->event_nr)) &&
 	    (ret = dm_task_run(dmt))) {
+		/*
 		do {
-			/* Retrieve next target. */
 			params = NULL;
 			next = dm_get_next_target(dmt, next, &start, &length,
 						  &target_type, &params);
@@ -375,6 +375,17 @@ static int event_wait(struct thread_status *thread)
 			if ((ret = error_detected(thread, params)))
 				break;
 		} while(next);
+		*/
+		thread->current_events |= DEVICE_ERROR;
+		ret = 1;
+
+		/*
+		 * FIXME:  I am setting processed_events to zero here
+		 * because it is causing problems.  for example, the
+		 * mirror target emits a signal for INSYNC, then
+		 * subsequent events (device failures) are not handled
+		 */
+		thread->processed_events = 0;
 
 		if ((ret = dm_task_get_info(dmt, &info)))
 			thread->event_nr = info.event_nr;
