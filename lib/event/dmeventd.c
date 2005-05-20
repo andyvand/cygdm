@@ -14,8 +14,6 @@
 
 /*
  * dmeventd - dm event daemon to monitor active mapped devices
- *
- * Author - Heinz Mauelshagen, Red Hat GmbH.
  */
 
 #include "libdevmapper.h"
@@ -297,14 +295,9 @@ static int storepid(int lf)
 /* Check, if a device exists. */
 static int device_exists(char *device)
 {
-	int f;
+	struct stat st_buf;
 
-	if ((f = open(device, O_RDONLY)) == -1)
-		return 0;
-
-	close(f);
-
-	return 1;
+	return !stat(device, &st_buf) && S_ISBLK(st_buf.st_mode);
 }
 
 /*
@@ -353,9 +346,11 @@ static int error_detected(struct thread_status *thread, char *params)
 static int event_wait(struct thread_status *thread)
 {
 	int ret = 0;
+/*
 	void *next = NULL;
 	char *params, *target_type;
 	uint64_t start, length;
+*/
 	struct dm_task *dmt;
 	struct dm_info info;
 
@@ -365,7 +360,7 @@ static int event_wait(struct thread_status *thread)
 	if ((ret = dm_task_set_name(dmt, dm_basename(thread->device_path))) &&
 	    (ret = dm_task_set_event_nr(dmt, thread->event_nr)) &&
 	    (ret = dm_task_run(dmt))) {
-		/*
+/*
 		do {
 			params = NULL;
 			next = dm_get_next_target(dmt, next, &start, &length,
@@ -375,7 +370,7 @@ static int event_wait(struct thread_status *thread)
 			if ((ret = error_detected(thread, params)))
 				break;
 		} while(next);
-		*/
+*/
 		thread->current_events |= DEVICE_ERROR;
 		ret = 1;
 
@@ -597,8 +592,8 @@ static struct dso_data *load_dso(struct message_data *data)
 /*
  * Register for an event.
  *
- * Only one caller at a time here, because we use a FIFO and lock
- * it against multiple accesses.
+ * Only one caller at a time here, because we use
+ * a FIFO and lock it against multiple accesses.
  */
 static int register_for_event(struct message_data *message_data)
 {
@@ -694,8 +689,8 @@ static int unregister_for_event(struct message_data *message_data)
 	thread->events &= ~message_data->events.field;
 
 	/*
-	 * In case there's no events to monitor on this
-	 * device -> unlink and terminate its monitoring thread.
+	 * In case there's no events to monitor on this device ->
+	 * unlink and terminate its monitoring thread.
 	 */
 	if (!thread->events)
 		UNLINK_THREAD(thread);
@@ -704,12 +699,12 @@ static int unregister_for_event(struct message_data *message_data)
 
 	if (!thread->events) {
 		/* turn codes negative */
-		if ((ret = -terminate_thread(thread))) {
+		if ((ret = -terminate_thread(thread)))
 			stack;
-		} else {
+		else {
 			pthread_join(thread->thread, NULL);
-			lib_put(thread->dso_data);
 			free_thread_status(thread);
+			lib_put(thread->dso_data);
 
 			lock_mutex();
 			if (list_empty(&thread_registry))
@@ -1022,11 +1017,12 @@ void dmeventd(void)
 	kill(getppid(), SIGUSR1);
 
 	/*
-	 * FIXME: we should exit when there are no more devices
-	 * to watch.  That is, when the last unregister happens.
+	 * We exit when there are no more devices to watch.
+	 * That is, when the last unregister happens.
 	 */
-	while(1)
+	do {
 		process_request(&fifos);
+	} while(!list_empty(&thread_registry));
 
 	munlockall();
 	pthread_mutex_destroy(&mutex);

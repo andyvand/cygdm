@@ -30,8 +30,7 @@
 #include <signal.h>
 #include <sys/wait.h>
 
-/* Set by any of the external fxns the first time one of them is
- * called */
+/* Set by any of the external fxns the first time one of them is called */
 static int _logging = 0;
 
 /* Fetch a string off src and duplicate it into *dest. */
@@ -174,12 +173,12 @@ static int start_daemon(void)
 
 	if (pid < 0)
 		log_err("Unable to fork.\n");
-	else if (pid){ /* parent waits for child to get ready for requests */
+	else if (pid) { /* parent waits for child to get ready for requests */
 		int status;
 
 		while (!waitpid(pid, &status, WNOHANG) && !daemon_running);
 
-		if(daemon_running){
+		if (daemon_running) {
 			log_print("dmeventd started.\n");
 			ret = 1;
 		} else {
@@ -277,26 +276,21 @@ static int init_client(struct fifos *fifos)
 	return 1;
 }
 
-static void dtr_client(struct fifos *fifos){
+static void dtr_client(struct fifos *fifos)
+{
 	if (flock(fifos->server, LOCK_UN))
                 log_err("flock unlock %s\n", fifos->server_path);
+
 	close(fifos->client);
 	close(fifos->server);
 }
 
-/* Check, if a device exists. */
+/* Check, if a block device exists. */
 static int device_exists(char *device)
 {
-	int f;
+	struct stat st_buf;
 
-	/* Do we need to do a stat to ensure that it's a block dev? */
-
-	if ((f = open(device, O_RDONLY)) == -1)
-		return 0;
-
-	close(f);
-
-	return 1;
+	return !stat(device, &st_buf) && S_ISBLK(st_buf.st_mode);
 }
 
 /* Handle the event (de)registration call and return negative error codes. */
