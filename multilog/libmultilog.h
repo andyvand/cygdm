@@ -1,4 +1,3 @@
-
 /*
  * Copyright (C) 2005 Red Hat, Inc. All rights reserved.
  *
@@ -26,9 +25,14 @@
 #define _LOG_ERR 3
 #define _LOG_FATAL 2
 
+struct sys_log {
+	const char *ident;
+	int facility;
+};
 
 struct file_log {
 	const char *filename;
+	int append;
 };
 
 /* Can only have one of these registered at a time */
@@ -88,6 +92,13 @@ void multilog_init_verbose(enum log_type type, int level);
 #define log_print(args...) log_warn(args)
 #define log_verbose(args...) log_notice(args)
 #define log_very_verbose(args...) log_info(args)
+
+#define log_sys_error(x, y) \
+		log_err("%s: %s failed: %s", y, x, strerror(errno))
+#define log_sys_very_verbose(x, y) \
+		log_info("%s: %s failed: %s", y, x, strerror(errno))
+#define log_sys_debug(x, y) \
+		log_debug("%s: %s failed: %s", y, x, strerror(errno))
 
 int start_syslog_thread(pthread_t *thread, long usecs);
 

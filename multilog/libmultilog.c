@@ -13,6 +13,7 @@
  */
 
 #include <dlfcn.h>
+#include <errno.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -34,13 +35,14 @@ struct threaded_syslog_log {
 	void *dlh;
 };
 
+
 struct custom_log {
 	void (*destructor)(void *data);
 	void *custom;
 };
 
 union log_info {
-	int logfilefd;
+	FILE *logfile;
 	struct threaded_syslog_log threaded_syslog;
 	struct custom_log cl;
 };
@@ -147,6 +149,48 @@ static void nop_log(void *data, int priority, const char *file, int line,
 	return;
 }
 
+
+static void init_file_log(void *data, const char *filename, int append)
+{
+	struct log_data *ldata = (struct log_data *) data;
+	const char *open_mode = append ? "a" : "w";
+
+	if(!(ldata->info.logfile = fopen(filename, open_mode))) {
+		log_sys_error("fopen", filename);
+	}
+
+}
+
+static void file_log(void *data, int priority, const char *file, int line,
+			 const char *string)
+{
+	struct log_data *ldata = (struct log_data *) data;
+	fprintf(ldata->info.logfile, "%s:%d %s\n", file, line, string);
+}
+
+static void destroy_file_log(void *data)
+{
+	struct log_data *ldata = (struct log_data *) data;
+	fclose(ldata->info.logfile);
+}
+
+static void init_sys_log(const char *name, int facility)
+{
+	openlog(name, LOG_NDELAY, facility);
+
+}
+
+static void sys_log(void *data, int priority, const char *file, int line,
+			 const char *string)
+{
+	syslog(priority, "%s", string);
+}
+
+static void destroy_sys_log(void)
+{
+	closelog();
+}
+
 static void standard_log(void *data, int priority, const char *file, int line,
 			 const char *string)
 {
@@ -225,7 +269,6 @@ static int start_threaded_syslog(struct log_list *logl)
 	return logl->log ? 1 : 0;
 }
 
-/* FIXME: Can currently add multiple logging types. */
 int multilog_add_type(enum log_type type, void *data)
 {
 	struct log_list *logl, *ll;
@@ -247,8 +290,9 @@ int multilog_add_type(enum log_type type, void *data)
 		return 0;
 
 	/*
-	 * If the type has already been registered,
-	 * it doesn't need to be registered again.
+	 * If the type has already been registered, it doesn't need to
+	 * be registered again.  This means the caller will need to
+	 * explicitly unregister to change registration.
 	 */
 	lock_list(lock_handle);
 
@@ -274,14 +318,20 @@ int multilog_add_type(enum log_type type, void *data)
 	case standard:
 		logl->log = standard_log;
 		break;
-	case logfile:
-		/* FIXME: Not implemented yet */
-		logl->log = nop_log;
+	case logfile: {
+		struct file_log *fld = data;
+		/* FIXME: Need to pass in filename *and* append info */
+		init_file_log(&logl->data, fld->filename, fld->append);
+		logl->log = file_log;
 		break;
-	case std_syslog:
-		/* FIXME: Not implemented yet */
-		logl->log = nop_log;
+	}
+	case std_syslog: {
+		struct sys_log *sld = data;
+		/* FIXME: pass in the name and facility */
+		init_sys_log(sld->ident, sld->facility);
+		logl->log = sys_log;
 		break;
+	}
 	case threaded_syslog:
 		if (!start_threaded_syslog(logl)) {
 			lock_list(lock_handle);
