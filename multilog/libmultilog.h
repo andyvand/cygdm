@@ -40,7 +40,6 @@ enum log_type {
 	standard = 1,
 	logfile,
 	std_syslog,
-	threaded_syslog,
 	custom,
 };
 
@@ -70,6 +69,14 @@ void multilog_custom(multilog_fn fn, void (*destroy_fn)(void *data), void *data)
  * multilog_custom()
  */
 void multilog_init_verbose(enum log_type type, int level);
+
+/*
+ * Turn on or shut off asyncronous logging.  Regardless of whether
+ * async logging has been enabled or not, libmultilogger uses the
+ * logging types registered via multilog_add_type
+ */
+int multilog_async(int enabled);
+
 
 #undef plog
 #undef log_error

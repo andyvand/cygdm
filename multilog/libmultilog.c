@@ -24,15 +24,21 @@
 #include <sys/select.h>
 #include "list.h"
 #include "libmultilog.h"
+#include "multilog_internal.h"
 
 #include <unistd.h>
 
 #define DEFAULT_VERBOSITY 4
 
 
-struct threaded_syslog_log {
+struct threaded_log {
 	pthread_t thread;
 	void *dlh;
+	int (*start_log) (pthread_t *t, long usecs);
+	int (*stop_log) (pthread_t t);
+	void (*log) (int priority, const char *file,
+		     int line, const char *string);
+	int enabled;
 };
 
 
@@ -43,7 +49,6 @@ struct custom_log {
 
 union log_info {
 	FILE *logfile;
-	struct threaded_syslog_log threaded_syslog;
 	struct custom_log cl;
 };
 
@@ -61,6 +66,8 @@ struct log_list {
 
 /* FIXME: probably shouldn't do it this way, but... */
 static LIST_INIT(logs);
+
+static struct threaded_log tl;
 
 /* locking for log accesss */
 static void* (*init_lock_fn)(void) = NULL;
@@ -120,7 +127,7 @@ static int load_lock_syms(void)
 	void *dlh;
 
 	if (!(dlh = dlopen("libmultilog_pthread_lock.so", RTLD_NOW))) {
-		//fprintf(stderr, "%s\n", dlerror());
+		/* fprintf(stderr, "%s\n", dlerror()); */
 		if(strstr(dlerror(), "undefined symbol: pthread")) {
 			fprintf(stderr, "pthread library not linked in - using nop locking\n");
 			init_lock_fn = init_nop_lock;
@@ -239,34 +246,52 @@ static void standard_log(void *data, int priority, const char *file, int line,
 	};
 }
 
-static int start_threaded_syslog(struct log_list *logl)
+static int start_threaded_log(void)
 {
-	void (*log_fxn) (void *data, int priority, const char *file, int line,
-			 const char *string);
-	int (*start_syslog) (pthread_t *t, long usecs);
-	int (*stop_syslog) (pthread_t t);
-	struct log_data *logdata = &logl->data;
+	/*
+	 * We set this immediately so that even if the threaded
+	 * logging can't load, we don't log in a blocking manner - the
+	 * non-blocking behavior overrides the fact that we won't see
+	 * any logs if the async logging can't load
+	 */
+	tl.enabled = 1;
 
-	if (!(logdata->info.threaded_syslog.dlh = dlopen("libmultilog_async.so", RTLD_NOW))) {
+	if (!(tl.dlh = dlopen("libmultilog_async.so", RTLD_NOW))) {
 		fprintf(stderr, "%s\n", dlerror());
 		return 0;
 	}
 
-	log_fxn = dlsym(logdata->info.threaded_syslog.dlh, "write_to_buf");
-	start_syslog = dlsym(logdata->info.threaded_syslog.dlh, "start_syslog_thread");
-	stop_syslog = dlsym(logl->data.info.threaded_syslog.dlh, "stop_syslog_thread");
+	tl.start_log = dlsym(tl.dlh, "start_syslog_thread");
+	tl.stop_log = dlsym(tl.dlh, "stop_syslog_thread");
+	tl.log = dlsym(tl.dlh, "write_to_buf");
 
-	if (!log_fxn || !start_syslog || !stop_syslog) {
-		dlclose(logdata->info.threaded_syslog.dlh);
+	if (!tl.start_log || !tl.stop_log || !tl.log) {
+		fprintf(stderr, "Unable to load all fxns\n");
+		dlclose(tl.dlh);
+		tl.dlh = NULL;
 		return 0;
 	}
 
 	/* FIXME: the timeout here probably can be tweaked */
 	/* FIXME: Probably want to do something if this fails */
-	if (start_syslog(&(logdata->info.threaded_syslog.thread), 100000))
-		logl->log = log_fxn;
+	if (tl.start_log(&(tl.thread), 100000)) {
+		return 1;
+	}
+	fprintf(stderr, "Bleh!\n");
+	return 0;
+}
 
-	return logl->log ? 1 : 0;
+static int stop_threaded_log(void)
+{
+	if(tl.enabled) {
+		tl.enabled = 0;
+		if(tl.dlh) {
+			tl.stop_log(tl.thread);
+			dlclose(tl.dlh);
+			tl.dlh = NULL;
+		}
+	}
+	return 1;
 }
 
 int multilog_add_type(enum log_type type, void *data)
@@ -328,20 +353,12 @@ int multilog_add_type(enum log_type type, void *data)
 	case std_syslog: {
 		struct sys_log *sld = data;
 		/* FIXME: pass in the name and facility */
-		init_sys_log(sld->ident, sld->facility);
+		if(sld) {
+			init_sys_log(sld->ident, sld->facility);
+		}
 		logl->log = sys_log;
 		break;
 	}
-	case threaded_syslog:
-		if (!start_threaded_syslog(logl)) {
-			lock_list(lock_handle);
-			list_del(&logl->list);
-			unlock_list(lock_handle);
-			free(logl);
-			return 0;
-		}
-
-		break;
 	case custom:
 		/* Caller should use multilog_custom to set their
 		 * logging fxn */
@@ -384,14 +401,6 @@ void multilog_del_type(enum log_type type)
 	unlock_list(lock_handle);
 
 	if (ll) {
-		if (ll->type == threaded_syslog) {
-			int (*stop_syslog) (pthread_t t);
-			stop_syslog = dlsym(logl->data.info.threaded_syslog.dlh, "stop_syslog_thread");
-			if(stop_syslog)
-				stop_syslog(ll->data.info.threaded_syslog.thread);
-
-			dlclose(ll->data.info.threaded_syslog.dlh);
-		}
 		if (ll->type == custom) {
 			if(ll->data.info.cl.destructor) {
 				ll->data.info.cl.destructor(ll->data.info.cl.custom);
@@ -441,25 +450,21 @@ void multilog(int priority, const char *file, int line, const char *format, ...)
 {
 	/* FIXME: stack allocation of large buffer. */
 	char buf[4096];
-	struct log_list *logl;
 
 	va_list args;
 	va_start(args, format);
 	vsnprintf(buf, 4096, format, args);
 	va_end(args);
 
-	lock_list(lock_handle);
-
-	list_iterate_items(logl, &logs) {
-		/* Custom logging types do just get the custom data
-		 * they setup initially - multilog doesn't do any
-		 * handling of custom loggers data */
-		if(logl->type == custom)
-			logl->log(logl->data.info.cl.custom, priority, file, line, buf);
-		else
-			logl->log(&logl->data, priority, file, line, buf);
+	if(tl.enabled) {
+		/* send to async code */
+		if(tl.dlh) {
+			tl.log(priority, file, line, buf);
+		}
 	}
-	unlock_list(lock_handle);
+	else
+		/* Log directly */
+		logit(priority, file, line, buf);
 
 }
 
@@ -477,4 +482,34 @@ void multilog_init_verbose(enum log_type type, int level)
 	}
 
 	unlock_list(lock_handle);
+}
+
+/* Toggle asynchronous logging */
+int multilog_async(int enabled)
+{
+	if(enabled)
+		return start_threaded_log();
+	else
+		return stop_threaded_log();
+}
+
+
+/* Internal function */
+void logit(int priority, const char *file, int line, char *buf)
+{
+	struct log_list *logl;
+
+	lock_list(lock_handle);
+
+	list_iterate_items(logl, &logs) {
+		/* Custom logging types do just get the custom data
+		 * they setup initially - multilog doesn't do any
+		 * handling of custom loggers data */
+		if(logl->type == custom)
+			logl->log(logl->data.info.cl.custom, priority, file, line, buf);
+		else
+			logl->log(&logl->data, priority, file, line, buf);
+	}
+	unlock_list(lock_handle);
+
 }

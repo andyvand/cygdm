@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 #include <sys/file.h>
 #include <sys/mman.h>
 #include <sys/types.h>
@@ -55,6 +56,7 @@
 #define	UNLINK_DSO(x)		UNLINK(x)
 #define	UNLINK_THREAD(x)	UNLINK(x)
 
+#define DAEMON_NAME "dmeventd"
 
 /* Global mutex for list accesses. */
 static pthread_mutex_t mutex;
@@ -985,6 +987,7 @@ void dmeventd(void)
 {
 	int ret;
 	struct fifos fifos;
+	struct sys_log logdata = {DAEMON_NAME, LOG_DAEMON};
 
 	if ((ret = daemonize()))
 		exit(ret);
@@ -998,8 +1001,9 @@ void dmeventd(void)
 	init_thread_signals();
 
 	multilog_clear_logging();
-	multilog_add_type(threaded_syslog, NULL);
-	multilog_init_verbose(threaded_syslog, _LOG_DEBUG);
+	multilog_add_type(std_syslog, &logdata);
+	multilog_init_verbose(std_syslog, _LOG_DEBUG);
+	multilog_async(1);
 
 
 	if (!init_fifos(&fifos))

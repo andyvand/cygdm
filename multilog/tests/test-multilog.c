@@ -7,8 +7,9 @@
 int main(int argc, char **argv)
 {
 	int i;
+	struct sys_log logdat= {"test-multilog", 3};
 
-	if (!multilog_add_type(threaded_syslog, NULL))
+	if (!multilog_add_type(std_syslog, &logdat))
 		fprintf(stderr, "Unable to add threaded syslog logging\n");
 
 	multilog_add_type(standard, NULL);
@@ -20,6 +21,8 @@ int main(int argc, char **argv)
 
 		if (i == 5)
 			multilog_del_type(standard);
+		if (i == 10)
+			multilog_async(1);
 	}
 
 	log_debug("Testing debug");
@@ -37,10 +40,11 @@ int main(int argc, char **argv)
 	multilog_add_type(standard, NULL);
 
 	log_err("Test of errors5");
+	multilog_async(0);
 	log_err("Test of errors6");
 
 	multilog_del_type(standard);
-	multilog_del_type(threaded_syslog);
+	multilog_del_type(std_syslog);
 
 	exit(EXIT_SUCCESS);
 }

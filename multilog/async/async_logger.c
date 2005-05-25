@@ -21,6 +21,7 @@
 #include <sys/select.h>
 #include "libmultilog.h"
 #include "async_logger.h"
+#include "multilog_internal.h"
 
 #include <unistd.h>
 
@@ -66,7 +67,7 @@ static int will_overrun(int read_pos, int write_pos,
  *
  * priority:file:line:msg
  */
-void write_to_buf(void *data, int priority, const char *file, int line,
+void write_to_buf(int priority, const char *file, int line,
 		  const char *string)
 {
 	char buf[CBUFSIZE];
@@ -224,7 +225,7 @@ static void finish_processing(void *arg)
 		 * then how to we handle pthread_cond_signal?
 		 */
 		pthread_mutex_unlock(&cbuf.mutex);
-		syslog(priority, "%s", mybuf);
+		logit(priority, file, line, mybuf);
 		pthread_mutex_lock(&cbuf.mutex);
 	}
 
@@ -235,7 +236,7 @@ static void finish_processing(void *arg)
  * Handle logging to syslog through circular buffer so that syslog
  * blocking doesn't hold anyone up.
  */
-static void *process_syslog(void *arg)
+static void *process_log(void *arg)
 {
 	char mybuf[CBUFSIZE] = {0};
 	int priority;
@@ -253,9 +254,6 @@ static void *process_syslog(void *arg)
 	cbuf.initialized = 1;
 	pthread_cleanup_push(finish_processing, NULL);
 
-	/* FIXME: The program name needs to be variable. */
-	openlog("dmeventd", LOG_NDELAY | LOG_PID, LOG_DAEMON);
-
 	while (1) {
 		/* check write_pos & read_pos */
 		if (cbuf.write_pos != cbuf.read_pos) {
@@ -270,7 +268,8 @@ static void *process_syslog(void *arg)
 			 * so we don't block the writer threads.
 			 */
 			pthread_mutex_unlock(&cbuf.mutex);
-			syslog(priority, "%s", mybuf);
+			logit(priority, file, line, mybuf);
+/*			syslog(priority, "%s", mybuf);*/
 			pthread_mutex_lock(&cbuf.mutex);
 		} else {
 			/*
@@ -284,7 +283,6 @@ static void *process_syslog(void *arg)
 		}
         }
 
-	closelog();
 	pthread_cleanup_pop(0);
 
 	return NULL;
@@ -294,7 +292,11 @@ int start_syslog_thread(pthread_t *thread, long usecs)
 {
 	struct timeval ts = {0, usecs};
 
-	pthread_create(thread, NULL, process_syslog, NULL);
+	/* FIXME: should i protect this with the mutex? */
+	if(cbuf.initialized)
+		return 1;
+
+	pthread_create(thread, NULL, process_log, NULL);
 	select(0, NULL, NULL, NULL, &ts);
 
 	/*
@@ -310,6 +312,7 @@ int stop_syslog_thread(pthread_t thread)
 {
 	pthread_cancel(thread);
 	pthread_join(thread, NULL);
-
+	/* FIXME: should i protect this with the mutex? */
+	cbuf.initialized = 0;
 	return 1;
 }
