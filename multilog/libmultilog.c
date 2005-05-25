@@ -127,7 +127,6 @@ static int load_lock_syms(void)
 	void *dlh;
 
 	if (!(dlh = dlopen("libmultilog_pthread_lock.so", RTLD_NOW))) {
-		/* fprintf(stderr, "%s\n", dlerror()); */
 		if(strstr(dlerror(), "undefined symbol: pthread")) {
 			fprintf(stderr, "pthread library not linked in - using nop locking\n");
 			init_lock_fn = init_nop_lock;
@@ -277,7 +276,7 @@ static int start_threaded_log(void)
 	if (tl.start_log(&(tl.thread), 100000)) {
 		return 1;
 	}
-	fprintf(stderr, "Bleh!\n");
+
 	return 0;
 }
 
