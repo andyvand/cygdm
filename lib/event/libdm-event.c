@@ -224,7 +224,8 @@ static int init_client(struct fifos *fifos)
 		log_err("%s: Failed to create a fifo.\n", __func__);
                 return 0;
 	}
-	/* do we really need to chmod if they were created with right perms? */
+
+	/* If they were already there, make sure permissions are ok. */
 	chmod(fifos->client_path, 0600);
 	chmod(fifos->server_path, 0600);
 
@@ -249,7 +250,7 @@ static int init_client(struct fifos *fifos)
 	/* Anyone listening?  If not, errno will be ENXIO */
 	if ((fifos->client = open(fifos->client_path,
 				  O_WRONLY | O_NONBLOCK)) < 0) {
-		if(errno != ENXIO){
+		if (errno != ENXIO) {
 			log_err("%s: open client fifo %s\n",
 				__func__, fifos->client_path);
 			close(fifos->server);
@@ -257,7 +258,7 @@ static int init_client(struct fifos *fifos)
 			return 0;
 		}
 		
-		if(!start_daemon()){
+		if (!start_daemon()) {
 			stack;
 			return 0;
 		}
@@ -328,7 +329,7 @@ int dm_register_for_event(char *dso_name, char *device_path,
 }
 
 int dm_unregister_for_event(char *dso_name, char *device_path,
-			   enum event_type events)
+			    enum event_type events)
 {
 	struct daemon_message msg;
 	struct log_data *ldata;
