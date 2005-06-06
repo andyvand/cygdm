@@ -405,7 +405,7 @@ static int do_unregister_device(struct thread_status *thread)
 	return thread->dso_data->unregister_device(thread->device_path);
 }
 
-/* Process an event the DSO. */
+/* Process an event in the DSO. */
 static void do_process_event(struct thread_status *thread)
 {
 	thread->dso_data->process_event(thread->device_path,
@@ -807,10 +807,10 @@ static int init_fifos(struct fifos *fifos)
 		fifos->client_path = FIFO_CLIENT;
 		fifos->server_path = FIFO_SERVER;
 
-		return 1;
+		return 0;
 	}
 
-	return 0;
+	return -ENOMEM;
 }
 
 /* Open fifos used for client communication. */
@@ -819,17 +819,17 @@ static int open_fifos(struct fifos *fifos)
 	/* Blocks until client is ready to write. */
 	if ((fifos->server = open(fifos->server_path, O_WRONLY)) < 0) {
 		stack;
-		return 0;
+		return -EXIT_FIFO_FAILURE;
 	}
 
 	/* Need to open read+write for select() to work. */
         if ((fifos->client = open(fifos->client_path, O_RDWR)) < 0) {
 		stack;
 		close(fifos->server);
-		return 0;
+		return -EXIT_FIFO_FAILURE;
 	}
 
-	return 1;
+	return 0;
 }
 
 /*
@@ -954,13 +954,13 @@ static int daemonize(void)
 {
 	setsid();
 	if (chdir("/"))
-		return EXIT_CHDIR_FAILURE;
+		return -EXIT_CHDIR_FAILURE;
 
 /* FIXME: activate again after we're done with tracing.
 	if ((close(STDIN_FILENO) < 0) ||
 	    (close(STDOUT_FILENO) < 0) ||
 	    (close(STDERR_FILENO) < 0))
-		return EXIT_DESC_CLOSE_FAILURE;
+		return -EXIT_DESC_CLOSE_FAILURE;
 */
 
 	return 0;
@@ -972,13 +972,13 @@ static int lock_pidfile(void)
 	char pidfile[] = "/var/run/dmeventd.pid";
 
 	if ((lf = open(pidfile, O_CREAT | O_RDWR, 0644)) < 0)
-		return EXIT_OPEN_PID_FAILURE;
+		return -EXIT_OPEN_PID_FAILURE;
 
 	if (flock(lf, LOCK_EX | LOCK_NB) < 0)
-		return EXIT_LOCKFILE_INUSE;
+		return -EXIT_LOCKFILE_INUSE;
 
 	if (!storepid(lf))
-		return EXIT_FAILURE;
+		return -EXIT_FAILURE;
 
 	return 0;
 }
@@ -990,13 +990,13 @@ void dmeventd(void)
 	struct sys_log logdata = {DAEMON_NAME, LOG_DAEMON};
 
 	if ((ret = daemonize()))
-		exit(ret);
+		exit(-ret);
 
 	/* FIXME: set daemon name. */
 	// set_name();
 
 	if ((ret = lock_pidfile()))
-		exit(ret);
+		exit(-ret);
 
 	init_thread_signals();
 
@@ -1005,17 +1005,16 @@ void dmeventd(void)
 	multilog_init_verbose(std_syslog, _LOG_DEBUG);
 	multilog_async(1);
 
-
-	if (!init_fifos(&fifos))
-		exit (-ENOMEM);
+	if ((ret = init_fifos(&fifos)))
+		exit(-ret);
 
 	pthread_mutex_init(&mutex, NULL);
 
 	if (mlockall(MCL_FUTURE) == -1)
 		exit(EXIT_FAILURE);
 
-	if (!open_fifos(&fifos))
-		exit(EXIT_FIFO_FAILURE);
+	if ((ret = open_fifos(&fifos)))
+		exit(-ret);
 
 	/* Signal parent, letting them know we are ready to go. */
 	kill(getppid(), SIGUSR1);
