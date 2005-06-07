@@ -30,7 +30,6 @@
 
 #define DEFAULT_VERBOSITY 4
 
-
 struct threaded_log {
 	pthread_t thread;
 	void *dlh;
@@ -84,21 +83,17 @@ static void *init_lock(void)
 
 static int lock_list(void *handle)
 {
-	if (lock_fn)
-		return !(*lock_fn)(handle);
-	return 0;
+	return lock_fn ? !(*lock_fn)(handle) : 0;
 }
 
 static int unlock_list(void *handle)
 {
-	if (unlock_fn)
-		return !(*unlock_fn)(handle);
-	return 0;
+	return unlock_fn ? !(*unlock_fn)(handle) : 0;
 }
 
 static void destroy_lock(void *handle)
 {
-	if(destroy_lock_fn)
+	if (destroy_lock_fn)
 		(*destroy_lock_fn)(handle);
 }
 
@@ -127,26 +122,24 @@ static int load_lock_syms(void)
 	void *dlh;
 
 	if (!(dlh = dlopen("libmultilog_pthread_lock.so", RTLD_NOW))) {
-		if(strstr(dlerror(), "undefined symbol: pthread")) {
+		if (strstr(dlerror(), "undefined symbol: pthread")) {
 			fprintf(stderr, "pthread library not linked in - using nop locking\n");
 			init_lock_fn = init_nop_lock;
 			lock_fn = nop_lock;
 			unlock_fn = nop_unlock;
 			destroy_lock_fn = destroy_nop_lock;
 			return 1;
-		}
-		else
+		} else
 			return 0;
 	}
 
 	lock_dlh = dlh;
 
-	return ((init_lock_fn = dlsym(dlh, "init_locking")) &&
-		(lock_fn = dlsym(dlh, "lock_fn")) &&
-		(unlock_fn = dlsym(dlh, "unlock_fn")) &&
+	return ((init_lock_fn    = dlsym(dlh, "init_locking")) &&
+		(lock_fn         = dlsym(dlh, "lock_fn")) &&
+		(unlock_fn       = dlsym(dlh, "unlock_fn")) &&
 		(destroy_lock_fn = dlsym(dlh, "destroy_locking")));
 }
-
 
 /* Noop logging until the custom log fxn gets registered */
 static void nop_log(void *data, int priority, const char *file, int line,
@@ -155,35 +148,26 @@ static void nop_log(void *data, int priority, const char *file, int line,
 	return;
 }
 
-
-static void init_file_log(void *data, const char *filename, int append)
+static void init_file_log(void *data, struct file_log *fld)
 {
-	struct log_data *ldata = (struct log_data *) data;
-	const char *open_mode = append ? "a" : "w";
-
-	if(!(ldata->info.logfile = fopen(filename, open_mode))) {
-		log_sys_error("fopen", filename);
-	}
-
+	if (!(((struct log_data *) data)->info.logfile = fopen(fld->filename, fld->append ? "a" : "w")))
+		log_sys_error("fopen", fld->filename);
 }
 
 static void file_log(void *data, int priority, const char *file, int line,
 			 const char *string)
 {
-	struct log_data *ldata = (struct log_data *) data;
-	fprintf(ldata->info.logfile, "%s:%d %s\n", file, line, string);
+	fprintf(((struct log_data *) data)->info.logfile, "%s:%d %s\n", file, line, string);
 }
 
 static void destroy_file_log(void *data)
 {
-	struct log_data *ldata = (struct log_data *) data;
-	fclose(ldata->info.logfile);
+	fclose(((struct log_data *)data)->info.logfile);
 }
 
-static void init_sys_log(const char *name, int facility)
+static void init_sys_log(struct sys_log *sld)
 {
-	openlog(name, LOG_NDELAY, facility);
-
+	openlog(sld->ident, LOG_NDELAY, sld->facility);
 }
 
 static void sys_log(void *data, int priority, const char *file, int line,
@@ -207,7 +191,7 @@ static void standard_log(void *data, int priority, const char *file, int line,
 	if (ldata->verbose_level > _LOG_DEBUG)
 		snprintf(locn, sizeof(locn), "#%s:%d ", file, line);
 	else
-		locn[0] = '\0';
+		*locn = '\0';
 
 	switch (ldata->verbose_level) {
 	case _LOG_DEBUG:
@@ -260,11 +244,9 @@ static int start_threaded_log(void)
 		return 0;
 	}
 
-	tl.start_log = dlsym(tl.dlh, "start_syslog_thread");
-	tl.stop_log = dlsym(tl.dlh, "stop_syslog_thread");
-	tl.log = dlsym(tl.dlh, "write_to_buf");
-
-	if (!tl.start_log || !tl.stop_log || !tl.log) {
+	if (!(tl.start_log = dlsym(tl.dlh, "start_syslog_thread")) ||
+	    !(tl.stop_log  = dlsym(tl.dlh, "stop_syslog_thread")) ||
+	    !(tl.log       = dlsym(tl.dlh, "write_to_buf"))) {
 		fprintf(stderr, "Unable to load all fxns\n");
 		dlclose(tl.dlh);
 		tl.dlh = NULL;
@@ -273,23 +255,21 @@ static int start_threaded_log(void)
 
 	/* FIXME: the timeout here probably can be tweaked */
 	/* FIXME: Probably want to do something if this fails */
-	if (tl.start_log(&(tl.thread), 100000)) {
-		return 1;
-	}
-
-	return 0;
+	return tl.start_log(&tl.thread, 100000);
 }
 
 static int stop_threaded_log(void)
 {
-	if(tl.enabled) {
+	if (tl.enabled) {
 		tl.enabled = 0;
-		if(tl.dlh) {
+
+		if (tl.dlh) {
 			tl.stop_log(tl.thread);
 			dlclose(tl.dlh);
 			tl.dlh = NULL;
 		}
 	}
+
 	return 1;
 }
 
@@ -299,13 +279,15 @@ int multilog_add_type(enum log_type type, void *data)
 
 	/* FIXME: Potential race here */
 	/* attempt to load locking protocol */
-	if(!init_lock_fn) {
-		if(!load_lock_syms()) {
+	if (!init_lock_fn) {
+		if (!load_lock_syms()) {
 			fprintf(stderr, "Unable to load locking\n");
 			return 0;
 		}
+
 		lock_handle = init_lock();
 	}
+
 	/*
 	 * Preallocate because we don't want to sleep holding a lock.
 	 */
@@ -327,12 +309,15 @@ int multilog_add_type(enum log_type type, void *data)
 			return 1;
 		}
 	}
+
 	logl->type = type;
+
 	if(!memset(&logl->data, 0, sizeof(logl->data))) {
 		/* Should never get here */
 		free(logl);
 		return 0;
 	}
+
 	logl->data.verbose_level = DEFAULT_VERBOSITY;
 	logl->log = nop_log;
 	list_add(&logs, &logl->list);
@@ -342,25 +327,18 @@ int multilog_add_type(enum log_type type, void *data)
 	case standard:
 		logl->log = standard_log;
 		break;
-	case logfile: {
-		struct file_log *fld = data;
-		/* FIXME: Need to pass in filename *and* append info */
-		init_file_log(&logl->data, fld->filename, fld->append);
+	case logfile:
+		init_file_log(&logl->data, (struct file_log *) data);
 		logl->log = file_log;
 		break;
-	}
-	case std_syslog: {
-		struct sys_log *sld = data;
-		/* FIXME: pass in the name and facility */
-		if(sld) {
-			init_sys_log(sld->ident, sld->facility);
-		}
+	case std_syslog:
+		if (data)
+			init_sys_log((struct sys_log *) data);
+
 		logl->log = sys_log;
 		break;
-	}
 	case custom:
-		/* Caller should use multilog_custom to set their
-		 * logging fxn */
+		/* Caller should use multilog_custom to set their logging fxn */
 		logl->log = nop_log;
 		break;
 	}
@@ -373,9 +351,8 @@ void multilog_clear_logging(void)
 {
 	enum log_type i;
 
-	for(i = standard; i <= custom; i++) {
+	for (i = standard; i <= custom; i++)
 		multilog_del_type(i);
-	}
 }
 
 /* FIXME: Might want to have this return an error if we can't find the type */
@@ -400,16 +377,14 @@ void multilog_del_type(enum log_type type)
 	unlock_list(lock_handle);
 
 	if (ll) {
-		if (ll->type == custom) {
-			if(ll->data.info.cl.destructor) {
-				ll->data.info.cl.destructor(ll->data.info.cl.custom);
-			}
-		}
+		if (ll->type == custom &&
+		    ll->data.info.cl.destructor)
+			ll->data.info.cl.destructor(ll->data.info.cl.custom);
 
 		free(ll);
 	}
 
-	if(list_empty(&logs)) {
+	if (list_empty(&logs)) {
 		/* FIXME: Not sure the destroy_lock call is really necessary */
 		destroy_lock(lock_handle);
 
@@ -423,7 +398,8 @@ void multilog_del_type(enum log_type type)
 	}
 }
 
-void multilog_custom(multilog_fn fn, void (*destructor_fn)(void *data), void *data)
+void multilog_custom(multilog_fn fn, void (*destructor_fn)(void *data),
+		     void *data)
 {
 	struct log_list *logl;
 
@@ -455,13 +431,11 @@ void multilog(int priority, const char *file, int line, const char *format, ...)
 	vsnprintf(buf, 4096, format, args);
 	va_end(args);
 
-	if(tl.enabled) {
+	if (tl.enabled) {
 		/* send to async code */
-		if(tl.dlh) {
+		if (tl.dlh)
 			tl.log(priority, file, line, buf);
-		}
-	}
-	else
+	} else
 		/* Log directly */
 		logit(priority, file, line, buf);
 
@@ -475,9 +449,8 @@ void multilog_init_verbose(enum log_type type, int level)
 	lock_list(lock_handle);
 
 	list_iterate_items(ll, &logs) {
-		if (ll->type == type) {
+		if (ll->type == type)
 			ll->data.verbose_level = level;
-		}
 	}
 
 	unlock_list(lock_handle);
@@ -486,10 +459,7 @@ void multilog_init_verbose(enum log_type type, int level)
 /* Toggle asynchronous logging */
 int multilog_async(int enabled)
 {
-	if(enabled)
-		return start_threaded_log();
-	else
-		return stop_threaded_log();
+	return enabled ? start_threaded_log() : stop_threaded_log();
 }
 
 
@@ -504,11 +474,9 @@ void logit(int priority, const char *file, int line, char *buf)
 		/* Custom logging types do just get the custom data
 		 * they setup initially - multilog doesn't do any
 		 * handling of custom loggers data */
-		if(logl->type == custom)
-			logl->log(logl->data.info.cl.custom, priority, file, line, buf);
-		else
-			logl->log(&logl->data, priority, file, line, buf);
+		logl->log(logl->type == custom ? logl->data.info.cl.custom : &logl->data, priority, file, line, buf);
 	}
+
 	unlock_list(lock_handle);
 
 }
