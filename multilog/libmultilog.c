@@ -123,7 +123,8 @@ static int load_lock_syms(void)
 
 	if (!(dlh = dlopen("libmultilog_pthread_lock.so", RTLD_NOW))) {
 		if (strstr(dlerror(), "undefined symbol: pthread")) {
-			fprintf(stderr, "pthread library not linked in - using nop locking\n");
+			fprintf(stderr, "pthread library not linked in - "
+				"using nop locking\n");
 			init_lock_fn = init_nop_lock;
 			lock_fn = nop_lock;
 			unlock_fn = nop_unlock;
@@ -150,14 +151,16 @@ static void nop_log(void *data, int priority, const char *file, int line,
 
 static void init_file_log(void *data, struct file_log *fld)
 {
-	if (!(((struct log_data *) data)->info.logfile = fopen(fld->filename, fld->append ? "a" : "w")))
+	if (!(((struct log_data *) data)->info.logfile =
+	      fopen(fld->filename, fld->append ? "a" : "w")))
 		log_sys_error("fopen", fld->filename);
 }
 
 static void file_log(void *data, int priority, const char *file, int line,
 			 const char *string)
 {
-	fprintf(((struct log_data *) data)->info.logfile, "%s:%d %s\n", file, line, string);
+	fprintf(((struct log_data *) data)->info.logfile,
+		"%s:%d %s\n", file, line, string);
 }
 
 static void destroy_file_log(void *data)
@@ -474,7 +477,9 @@ void logit(int priority, const char *file, int line, char *buf)
 		/* Custom logging types do just get the custom data
 		 * they setup initially - multilog doesn't do any
 		 * handling of custom loggers data */
-		logl->log(logl->type == custom ? logl->data.info.cl.custom : &logl->data, priority, file, line, buf);
+		logl->log(logl->type == custom ?
+			  logl->data.info.cl.custom : &logl->data,
+			  priority, file, line, buf);
 	}
 
 	unlock_list(lock_handle);
