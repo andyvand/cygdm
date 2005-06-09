@@ -40,7 +40,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
+#include <stdarg.h>
 
 
 #define	dbg_malloc(x...)	malloc(x)
@@ -108,6 +108,10 @@ struct message_data {
 		char *str;	/* Events string as fetched from message. */
 		enum event_type field;	/* Events bitfield. */
 	} events;
+	union {
+		char *str;
+		uint32_t secs;
+	} timeout;
 	struct daemon_message *msg;	/* Pointer to message buffer. */
 };
 
@@ -129,8 +133,16 @@ struct thread_status {
 	enum event_type events;	/* bitfield for event filter. */
 	enum event_type current_events;/* bitfield for occured events. */
 	enum event_type processed_events;/* bitfield for processed events. */
+	time_t next_time;
+	uint32_t timeout;
+	struct list timeout_list;
 };
 static LIST_INIT(thread_registry);
+
+static int timeout_running;
+static LIST_INIT(timeout_registry);
+static pthread_mutex_t timeout_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t timeout_cond = PTHREAD_COND_INITIALIZER;
 
 /* Allocate/free the status structure for a monitoring thread. */
 static struct thread_status *alloc_thread_status(struct message_data *data,
@@ -146,6 +158,8 @@ static struct thread_status *alloc_thread_status(struct message_data *data,
 		} else {
 			ret->dso_data = dso_data;
 			ret->events   = data->events.field;
+			ret->timeout  = data->timeout.secs;
+			list_init(&ret->timeout_list);
 		}
 	}
 
@@ -242,7 +256,8 @@ static int parse_message(struct message_data *message_data)
 	 */
 	if (fetch_string(&message_data->dso_name, &p) &&
 	    fetch_string(&message_data->device_path, &p) &&
-	    fetch_string(&message_data->events.str, &p)) {
+	    fetch_string(&message_data->events.str, &p) &&
+	    fetch_string(&message_data->timeout.str, &p)) {
 		if (message_data->events.str) {
 			enum event_type i = atoi(message_data->events.str);
 
@@ -252,6 +267,12 @@ static int parse_message(struct message_data *message_data)
 			 */
 			dbg_free(message_data->events.str);
 			message_data->events.field = i;
+		}
+		if (message_data->timeout.str) {
+			uint32_t secs = atoi(message_data->timeout.str);
+			dbg_free(message_data->timeout.str);
+			message_data->timeout.secs = secs ? secs :
+							    DEFAULT_TIMEOUT;
 		}
 
 		return 1;
@@ -344,9 +365,115 @@ static int error_detected(struct thread_status *thread, char *params)
 	return 0;
 }
 
+static void exit_timeout(void *unused)
+{
+	timeout_running = 0;
+	pthread_mutex_unlock(&timeout_mutex);
+}
+
+/* wake up monitor threads every so often */
+static void *timeout_thread(void *unused)
+{
+	struct timespec timeout;
+	time_t curr_time;
+
+	timeout.tv_nsec = 0;
+	pthread_cleanup_push(exit_timeout, NULL);
+	pthread_mutex_lock(&timeout_mutex);
+	while(1) {
+		struct thread_status *thread;
+		timeout.tv_sec = (time_t)-1;
+		curr_time = time(NULL);
+		if (list_empty(&timeout_registry))
+			break;
+		list_iterate_items_gen(thread, &timeout_registry,
+				       timeout_list) {
+			if (thread->next_time < curr_time) {
+				thread->next_time = curr_time + thread->timeout;
+				pthread_kill(thread->thread, SIGALRM);
+			}
+			if (thread->next_time < timeout.tv_sec)
+				timeout.tv_sec = thread->next_time;
+		}
+		pthread_cond_timedwait(&timeout_cond, &timeout_mutex, &timeout);
+	}
+	timeout_running = 0;
+	pthread_mutex_unlock(&timeout_mutex);
+	pthread_cleanup_pop(0);
+
+	return NULL;
+}
+
+static int register_for_timeout(struct thread_status *thread)
+{
+	int ret = 0;
+	pthread_mutex_lock(&timeout_mutex);
+	thread->next_time = time(NULL) + thread->timeout;
+	if (list_empty(&thread->timeout_list)) {
+		list_add(&timeout_registry, &thread->timeout_list);
+		if (timeout_running)
+			pthread_cond_signal(&timeout_cond);
+	}
+	if (!timeout_running) {
+		pthread_t timeout_id;
+		ret = -pthread_create(&timeout_id, NULL, timeout_thread, NULL);
+		if (ret)
+			goto out;
+		timeout_running = 1;
+	}
+   out:
+	pthread_mutex_unlock(&timeout_mutex);
+	return ret;
+}
+
+static void unregister_for_timeout(struct thread_status *thread)
+{
+	pthread_mutex_lock(&timeout_mutex);
+	if (!list_empty(&thread->timeout_list)) {
+		list_del(&thread->timeout_list);
+		list_init(&thread->timeout_list);
+	}
+	pthread_mutex_unlock(&timeout_mutex);
+}
+
+static void no_intr_log(int level, const char *file, int line,
+		       const char *f, ...)
+{
+	va_list ap;
+
+	if (errno == EINTR)
+		return;
+	if (level > _LOG_WARN)
+		return;
+
+	va_start(ap, f);
+
+	if (level < _LOG_WARN)
+		vfprintf(stderr, f, ap);
+	else
+		vprintf(f, ap);
+
+	va_end(ap);
+
+	if (level < _LOG_WARN)
+		fprintf(stderr, "\n");
+	else
+		fprintf(stdout, "\n");
+}
+
+static sigset_t unblock_sigalrm(void)
+{
+	sigset_t set, old;
+	sigemptyset(&set);
+	sigaddset(&set, SIGALRM);
+	pthread_sigmask(SIG_UNBLOCK, &set, &old);
+	return old;
+}
+
 /* Wait on a device until an event occurs. */
 static int event_wait(struct thread_status *thread)
 {
+	sigset_t set;
 	int ret = 0;
 /*
 	void *next = NULL;
@@ -359,9 +486,15 @@ static int event_wait(struct thread_status *thread)
 	if (!(dmt = dm_task_create(DM_DEVICE_WAITEVENT)))
 		return 0;
 
-	if ((ret = dm_task_set_name(dmt, dm_basename(thread->device_path))) &&
-	    (ret = dm_task_set_event_nr(dmt, thread->event_nr)) &&
-	    (ret = dm_task_run(dmt))) {
+	if (!(ret = dm_task_set_name(dmt, dm_basename(thread->device_path))) ||
+	    !(ret = dm_task_set_event_nr(dmt, thread->event_nr)))
+		goto out;
+	/* This is so that you can break out of waiting on an event,
+	   either for a timeout event, or to cancel the thread */
+	set = unblock_sigalrm();
+	dm_log_init(no_intr_log);
+	errno = 0;
+	if ((ret = dm_task_run(dmt))) {
 /*
 		do {
 			params = NULL;
@@ -386,8 +519,15 @@ static int event_wait(struct thread_status *thread)
 
 		if ((ret = dm_task_get_info(dmt, &info)))
 			thread->event_nr = info.event_nr;
+	} else if (thread->events & TIMEOUT && errno == EINTR) {
+		thread->current_events |= TIMEOUT;
+		ret = 1;
+		thread->processed_events = 0;
 	}
+	pthread_sigmask(SIG_SETMASK, &set, NULL);
+	dm_log_init(NULL);
 
+   out:
 	dm_task_destroy(dmt);
 
 	return ret;
@@ -469,7 +609,11 @@ static int create_thread(struct thread_status *thread)
 
 static int terminate_thread(struct thread_status *thread)
 {
-	return pthread_cancel(thread->thread);
+	int ret;
+	if ((ret = pthread_cancel(thread->thread)))
+		return ret;
+	ret = pthread_kill(thread->thread, SIGALRM);
+	return ret;
 }
 
 /* DSO reference counting. */
@@ -600,7 +744,7 @@ static struct dso_data *load_dso(struct message_data *data)
 static int register_for_event(struct message_data *message_data)
 {
 	int ret = 0;
-	struct thread_status *thread, *thread_new;
+	struct thread_status *thread, *thread_new = NULL;
 	struct dso_data *dso_data;
 
 	if (!device_exists(message_data->device_path)) {
@@ -642,6 +786,7 @@ static int register_for_event(struct message_data *message_data)
 		lock_mutex();
 		if ((ret = -create_thread(thread))) {
 			unlock_mutex();
+			do_unregister_device(thread);
 			free_thread_status(thread);
 			goto out;
 		} else
@@ -652,7 +797,16 @@ static int register_for_event(struct message_data *message_data)
 	thread->events |= message_data->events.field;
 
 	unlock_mutex();
+	/* FIXME - If you fail to register for timeout events, you
+	   still monitor all the other events. Is this the right
+	   action for newly created devices?  Also, you are still
+	   on the timeout registry, so if a timeout thread is
+	   successfully started up later, you will start receiving
+	   TIMEOUT events */
+	if (thread->events & TIMEOUT)
+		ret = -register_for_timeout(thread);
 
+   out:
 	/*
 	 * Deallocate thread status after releasing
 	 * the lock in case we haven't used it.
@@ -660,7 +814,6 @@ static int register_for_event(struct message_data *message_data)
 	if (thread_new)
 		free_thread_status(thread_new);
 
-   out:
 	free_message(message_data);
 
 	return ret;
@@ -690,6 +843,8 @@ static int unregister_for_event(struct message_data *message_data)
 
 	thread->events &= ~message_data->events.field;
 
+	if (!(thread->events & TIMEOUT))
+		unregister_for_timeout(thread);
 	/*
 	 * In case there's no events to monitor on this device ->
 	 * unlink and terminate its monitoring thread.
@@ -795,10 +950,52 @@ static int get_registered_device(struct message_data *message_data, int next)
 	}
 
    out:
+	free_message(message_data);
 	unlock_mutex();
 
 	return -ENOENT;
 }
+
+static int set_timeout(struct message_data *message_data)
+{
+	int ret = 0;
+	struct thread_status *thread;
+
+	lock_mutex();
+	if (!(thread = lookup_thread_status(message_data))) {
+		unlock_mutex();
+		ret = -ENODEV;
+		goto out;
+	}
+	thread->timeout = message_data->timeout.secs; 
+	unlock_mutex();
+
+   out:
+	free_message(message_data);
+
+	return ret;
+}
+
+static int get_timeout(struct message_data *message_data)
+{
+	int ret = 0;
+	struct thread_status *thread;
+	struct daemon_message *msg = message_data->msg;
+
+	lock_mutex();
+	if (!(thread = lookup_thread_status(message_data))) {
+		unlock_mutex();
+		ret = -ENODEV;
+		goto out;
+	}
+	snprintf(msg->msg, sizeof(msg->msg), "%"PRIu32, thread->timeout);
+	unlock_mutex();
+   out:
+	free_message(message_data);
+
+	return ret;
+}
+	
 
 /* Initialize a fifos structure with path names. */
 static int init_fifos(struct fifos *fifos)
@@ -912,6 +1109,12 @@ log_print("%s: %u \"%s\"\n", __func__, msg->opcode.cmd, message_data.msg->msg);
 	case CMD_GET_NEXT_REGISTERED_DEVICE:
 		ret = get_registered_device(&message_data, 1);
 		break;
+	case CMD_SET_TIMEOUT:
+		ret = set_timeout(&message_data);
+		break;
+	case CMD_GET_TIMEOUT:
+		ret = get_timeout(&message_data);
+		break;
 	default:
 		ret = -EINVAL;
 		break;
@@ -941,11 +1144,20 @@ log_print("%s: status: %s\n", __func__, strerror(-msg.opcode.status));
 		stack;
 }
 
+static void sig_alarm(int signum)
+{
+	pthread_testcancel();
+}
+
 /* Init thread signal handling. */
 static void init_thread_signals(void)
 {
 	sigset_t sigset;
+	struct sigaction act;
 	
+	memset(&act, 0, sizeof(act));
+	act.sa_handler = sig_alarm;
+	sigaction(SIGALRM, &act, NULL);
 	sigfillset(&sigset);
 	pthread_sigmask(SIG_BLOCK, &sigset, NULL);
 }

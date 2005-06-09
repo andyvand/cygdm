@@ -116,7 +116,7 @@ static int daemon_write(struct fifos *fifos, struct daemon_message *msg)
 
 static int daemon_talk(struct fifos *fifos, struct daemon_message *msg,
 		       int cmd, char *dso_name, char *device,
-		       enum event_type events)
+		       enum event_type events, uint32_t timeout)
 {
 	memset(msg, 0, sizeof(*msg));
 
@@ -125,8 +125,9 @@ static int daemon_talk(struct fifos *fifos, struct daemon_message *msg,
 	 * into ASCII message string.
 	 */
 	msg->opcode.cmd = cmd;
-	snprintf(msg->msg, sizeof(msg->msg), "%s %s %u",
-		 dso_name ? dso_name : "", device ? device : "", events);
+	snprintf(msg->msg, sizeof(msg->msg), "%s %s %u %"PRIu32,
+		 dso_name ? dso_name : "", device ? device : "",
+		 events, timeout);
 
 	/*
 	 * Write command and message to and
@@ -296,7 +297,8 @@ static int device_exists(char *device)
 
 /* Handle the event (de)registration call and return negative error codes. */
 static int do_event(int cmd, struct daemon_message *msg,
-		    char *dso_name, char *device, enum event_type events)
+		    char *dso_name, char *device, enum event_type events,
+		    uint32_t timeout)
 {
 	int ret;
 	struct fifos fifos;
@@ -306,7 +308,7 @@ static int do_event(int cmd, struct daemon_message *msg,
 		return -ESRCH;
 	}
 
-	ret = daemon_talk(&fifos, msg, cmd, dso_name, device, events);
+	ret = daemon_talk(&fifos, msg, cmd, dso_name, device, events, timeout);
 
 	/* what is the opposite of init? */
 	dtr_client(&fifos);
@@ -325,7 +327,7 @@ int dm_register_for_event(char *dso_name, char *device_path,
 		return -ENODEV;
 
 	return do_event(CMD_REGISTER_FOR_EVENT, &msg,
-			dso_name, device_path, events);
+			dso_name, device_path, events, 0);
 }
 
 int dm_unregister_for_event(char *dso_name, char *device_path,
@@ -338,7 +340,7 @@ int dm_unregister_for_event(char *dso_name, char *device_path,
 		return -ENODEV;
 
 	return do_event(CMD_UNREGISTER_FOR_EVENT, &msg,
-			dso_name, device_path, events);
+			dso_name, device_path, events, 0);
 }
 
 int dm_get_registered_device(char **dso_name, char **device_path,
@@ -351,7 +353,7 @@ int dm_get_registered_device(char **dso_name, char **device_path,
 
 	if (!(ret = do_event(next ? CMD_GET_NEXT_REGISTERED_DEVICE :
 				    CMD_GET_REGISTERED_DEVICE,
-			     &msg, *dso_name, *device_path, *events)))
+			     &msg, *dso_name, *device_path, *events, 0)))
 		ret = parse_message(&msg, &dso_name_arg, &device_path_arg,
 				    events);
 
@@ -372,6 +374,27 @@ int dm_get_registered_device(char **dso_name, char **device_path,
 	return ret;
 }
 
+int dm_set_event_timeout(char *device_path, uint32_t timeout)
+{
+	struct daemon_message msg;
+
+	if (!device_exists(device_path))
+		return -ENODEV;
+	return do_event(CMD_SET_TIMEOUT, &msg,
+			NULL, device_path, 0, timeout);
+}
+
+int dm_get_event_timeout(char *device_path, uint32_t *timeout)
+{
+	int ret;
+	struct daemon_message msg;
+
+	if (!device_exists(device_path))
+		return -ENODEV;
+	if (!(ret = do_event(CMD_GET_TIMEOUT, &msg, NULL, device_path, 0, 0)))
+		*timeout = atoi(msg.msg);
+	return ret;
+}
 /*
  * Overrides for Emacs so that we follow Linus's tabbing style.
  * Emacs will notice this stuff at the end of the file and automatically
