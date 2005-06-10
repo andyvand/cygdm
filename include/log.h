@@ -35,4 +35,6 @@ extern dm_log_fn _log;
 #define log_very_verbose(x...) plog(_LOG_INFO, x)
 #define log_debug(x...) plog(_LOG_DEBUG, x)
 
+#define stack log_debug("<backtrace>")  /* Backtrace on error */
+
 #endif
