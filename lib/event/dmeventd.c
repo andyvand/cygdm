@@ -278,8 +278,6 @@ static int parse_message(struct message_data *message_data)
 		return 1;
 	}
 
-	free_message(message_data);
-
 	return 0;
 };
 
@@ -371,7 +369,7 @@ static void exit_timeout(void *unused)
 	pthread_mutex_unlock(&timeout_mutex);
 }
 
-/* wake up monitor threads every so often */
+/* Wake up monitor threads every so often. */
 static void *timeout_thread(void *unused)
 {
 	struct timespec timeout;
@@ -380,25 +378,27 @@ static void *timeout_thread(void *unused)
 	timeout.tv_nsec = 0;
 	pthread_cleanup_push(exit_timeout, NULL);
 	pthread_mutex_lock(&timeout_mutex);
-	while(1) {
+
+	while (!list_empty(&timeout_registry)) {
 		struct thread_status *thread;
+
 		timeout.tv_sec = (time_t)-1;
 		curr_time = time(NULL);
-		if (list_empty(&timeout_registry))
-			break;
+
 		list_iterate_items_gen(thread, &timeout_registry,
 				       timeout_list) {
 			if (thread->next_time < curr_time) {
 				thread->next_time = curr_time + thread->timeout;
 				pthread_kill(thread->thread, SIGALRM);
 			}
+
 			if (thread->next_time < timeout.tv_sec)
 				timeout.tv_sec = thread->next_time;
 		}
+
 		pthread_cond_timedwait(&timeout_cond, &timeout_mutex, &timeout);
 	}
-	timeout_running = 0;
-	pthread_mutex_unlock(&timeout_mutex);
+
 	pthread_cleanup_pop(0);
 
 	return NULL;
@@ -407,22 +407,27 @@ static void *timeout_thread(void *unused)
 static int register_for_timeout(struct thread_status *thread)
 {
 	int ret = 0;
+
 	pthread_mutex_lock(&timeout_mutex);
+
 	thread->next_time = time(NULL) + thread->timeout;
+
 	if (list_empty(&thread->timeout_list)) {
 		list_add(&timeout_registry, &thread->timeout_list);
 		if (timeout_running)
 			pthread_cond_signal(&timeout_cond);
 	}
+
 	if (!timeout_running) {
 		pthread_t timeout_id;
-		ret = -pthread_create(&timeout_id, NULL, timeout_thread, NULL);
-		if (ret)
-			goto out;
-		timeout_running = 1;
+
+		if (!(ret = -pthread_create(&timeout_id, NULL,
+					    timeout_thread, NULL)))
+			timeout_running = 1;
 	}
-   out:
+
 	pthread_mutex_unlock(&timeout_mutex);
+
 	return ret;
 }
 
@@ -464,6 +469,7 @@ static void no_intr_log(int level, const char *file, int line,
 static sigset_t unblock_sigalrm(void)
 {
 	sigset_t set, old;
+
 	sigemptyset(&set);
 	sigaddset(&set, SIGALRM);
 	pthread_sigmask(SIG_UNBLOCK, &set, &old);
@@ -489,8 +495,11 @@ static int event_wait(struct thread_status *thread)
 	if (!(ret = dm_task_set_name(dmt, dm_basename(thread->device_path))) ||
 	    !(ret = dm_task_set_event_nr(dmt, thread->event_nr)))
 		goto out;
-	/* This is so that you can break out of waiting on an event,
-	   either for a timeout event, or to cancel the thread */
+
+	/*
+	 * This is so that you can break out of waiting on an event,
+	 * either for a timeout event, or to cancel the thread.
+	 */
 	set = unblock_sigalrm();
 	dm_log_init(no_intr_log);
 	errno = 0;
@@ -524,6 +533,7 @@ static int event_wait(struct thread_status *thread)
 		ret = 1;
 		thread->processed_events = 0;
 	}
+
 	pthread_sigmask(SIG_SETMASK, &set, NULL);
 	dm_log_init(NULL);
 
@@ -570,7 +580,7 @@ static void *monitor_thread(void *arg)
 	pthread_setcanceltype(PTHREAD_CANCEL_DEFERRED, NULL);
 	pthread_cleanup_push(monitor_unregister, thread);
 
-	/* Wait for comm_thread() to finish its task. */
+	/* Wait for do_process_reques() to finish its task. */
 	lock_mutex();
 	unlock_mutex();
 
@@ -610,10 +620,11 @@ static int create_thread(struct thread_status *thread)
 static int terminate_thread(struct thread_status *thread)
 {
 	int ret;
+
 	if ((ret = pthread_cancel(thread->thread)))
 		return ret;
-	ret = pthread_kill(thread->thread, SIGALRM);
-	return ret;
+
+	return pthread_kill(thread->thread, SIGALRM);
 }
 
 /* DSO reference counting. */
@@ -735,6 +746,12 @@ static struct dso_data *load_dso(struct message_data *data)
 }
 
 
+/* Return success on daemon active check. */
+static int active(struct message_data *message_data)
+{
+	return 0;
+}
+
 /*
  * Register for an event.
  *
@@ -796,7 +813,8 @@ static int register_for_event(struct message_data *message_data)
 	/* Or event # into events bitfield. */
 	thread->events |= message_data->events.field;
 
-	unlock_mutex();
+	unlock_mutex(); 
+
 	/* FIXME - If you fail to register for timeout events, you
 	   still monitor all the other events. Is this the right
 	   action for newly created devices?  Also, you are still
@@ -813,8 +831,6 @@ static int register_for_event(struct message_data *message_data)
 	 */
 	if (thread_new)
 		free_thread_status(thread_new);
-
-	free_message(message_data);
 
 	return ret;
 }
@@ -872,8 +888,6 @@ static int unregister_for_event(struct message_data *message_data)
 
 
    out:
-	free_message(message_data);
-
 	return ret;
 }
 
@@ -915,7 +929,7 @@ static int want_registered_device(char *dso_name, char *device_path,
 	return 1;
 }
 
-static int get_registered_device(struct message_data *message_data, int next)
+static int _get_registered_device(struct message_data *message_data, int next)
 {
 	int hit = 0;
 	struct thread_status *thread;
@@ -950,50 +964,45 @@ static int get_registered_device(struct message_data *message_data, int next)
 	}
 
    out:
-	free_message(message_data);
 	unlock_mutex();
 
 	return -ENOENT;
 }
 
+static int get_registered_device(struct message_data *message_data)
+{
+	return _get_registered_device(message_data, 0);
+}
+
+static int get_next_registered_device(struct message_data *message_data)
+{
+	return _get_registered_device(message_data, 1);
+}
+
 static int set_timeout(struct message_data *message_data)
 {
-	int ret = 0;
 	struct thread_status *thread;
 
 	lock_mutex();
-	if (!(thread = lookup_thread_status(message_data))) {
-		unlock_mutex();
-		ret = -ENODEV;
-		goto out;
-	}
-	thread->timeout = message_data->timeout.secs; 
+	if ((thread = lookup_thread_status(message_data)))
+		thread->timeout = message_data->timeout.secs; 
 	unlock_mutex();
 
-   out:
-	free_message(message_data);
-
-	return ret;
+	return thread ? 0 : -ENODEV;
 }
 
 static int get_timeout(struct message_data *message_data)
 {
-	int ret = 0;
 	struct thread_status *thread;
 	struct daemon_message *msg = message_data->msg;
 
 	lock_mutex();
-	if (!(thread = lookup_thread_status(message_data))) {
-		unlock_mutex();
-		ret = -ENODEV;
-		goto out;
-	}
-	snprintf(msg->msg, sizeof(msg->msg), "%"PRIu32, thread->timeout);
+	if ((thread = lookup_thread_status(message_data)))
+		snprintf(msg->msg, sizeof(msg->msg),
+			 "%"PRIu32, thread->timeout);
 	unlock_mutex();
-   out:
-	free_message(message_data);
 
-	return ret;
+	return thread ? 0 : -ENODEV;
 }
 	
 
@@ -1076,6 +1085,36 @@ static int client_write(struct fifos *fifos, struct daemon_message *msg)
 	return bytes == sizeof(*msg);
 }
 
+/*
+ * Handle a client request.
+ *
+ * We put the request handling functions into
+ * a list because of the growing number.
+ */
+static int handle_request(struct daemon_message *msg,
+			  struct message_data *message_data)
+{
+	static struct {
+		unsigned int cmd;
+		int (*f)(struct message_data*);
+	} requests[] = {
+		{ CMD_REGISTER_FOR_EVENT,         register_for_event },
+		{ CMD_UNREGISTER_FOR_EVENT,       unregister_for_event },
+		{ CMD_GET_REGISTERED_DEVICE,      get_registered_device },
+		{ CMD_GET_NEXT_REGISTERED_DEVICE, get_next_registered_device },
+		{ CMD_SET_TIMEOUT,                set_timeout },
+		{ CMD_GET_TIMEOUT,                get_timeout },
+		{ CMD_ACTIVE,                     active },
+	}, *req;
+
+	for (req = requests; req < requests + sizeof(requests); req++) {
+		if (req->cmd == msg->opcode.cmd)
+			return req->f(message_data);
+	}
+
+	return -EINVAL;
+}
+
 /* Process a request passed from the communication thread. */
 static int do_process_request(struct daemon_message *msg)
 {
@@ -1083,42 +1122,18 @@ static int do_process_request(struct daemon_message *msg)
 	static struct message_data message_data;
 
 	/* Parse the message. */
+	memset(&message_data, 0, sizeof(message_data));
 	message_data.msg = msg;
 	if (msg->opcode.cmd != CMD_ACTIVE &&
 	    !parse_message(&message_data)) {
 		stack;
-		return -EINVAL;
-	}
-
-log_print("%s: %u \"%s\"\n", __func__, msg->opcode.cmd, message_data.msg->msg);
-
-	/* Check the request type. */
-	switch (msg->opcode.cmd) {
-	case CMD_ACTIVE:
-		ret = 0;
-		break;
-	case CMD_REGISTER_FOR_EVENT:
-		ret = register_for_event(&message_data);
-		break;
-	case CMD_UNREGISTER_FOR_EVENT:
-		ret = unregister_for_event(&message_data);
-		break;
-	case CMD_GET_REGISTERED_DEVICE:
-		ret = get_registered_device(&message_data, 0);
-		break;
-	case CMD_GET_NEXT_REGISTERED_DEVICE:
-		ret = get_registered_device(&message_data, 1);
-		break;
-	case CMD_SET_TIMEOUT:
-		ret = set_timeout(&message_data);
-		break;
-	case CMD_GET_TIMEOUT:
-		ret = get_timeout(&message_data);
-		break;
-	default:
 		ret = -EINVAL;
-		break;
+	} else {
+log_print("%s: %u \"%s\"\n", __func__, msg->opcode.cmd, message_data.msg->msg);
+		ret = handle_request(msg, &message_data);
 	}
+
+	free_message(&message_data);
 
 	return ret;
 }
