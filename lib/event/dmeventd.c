@@ -399,7 +399,7 @@ static void *timeout_thread(void *unused)
 		pthread_cond_timedwait(&timeout_cond, &timeout_mutex, &timeout);
 	}
 
-	pthread_cleanup_pop(0);
+	pthread_cleanup_pop(1);
 
 	return NULL;
 }
