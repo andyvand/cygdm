@@ -26,7 +26,7 @@ else
   LIB_SHARED = libmultilog_pthread_lock.so
 endif
 
-LDFLAGS += -ldl -ldevmapper -lpthread -L..
+CLDFLAGS += -ldl -ldevmapper -lpthread -L..
 
 include ../../make.tmpl
 

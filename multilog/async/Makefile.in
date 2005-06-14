@@ -27,7 +27,7 @@ else
 endif
 
 CFLAGS += -I..
-LDFLAGS += -ldl -ldevmapper -lpthread -L..
+CLDFLAGS += -ldl -ldevmapper -lpthread -L..
 
 include ../../make.tmpl
 

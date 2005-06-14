@@ -27,7 +27,7 @@ else
   LIB_SHARED = libdmevent.so
 endif
 
-LDFLAGS += -ldl -ldevmapper -lpthread
+CLDFLAGS += -ldl -ldevmapper -lpthread
 
 include ../../make.tmpl
 
