@@ -1,5 +1,6 @@
 /*
  * Copyright (C) 2001 - 2003 Sistina Software (UK) Limited.
+ * Copyright (C) 2004 - 2005 Red Hat, Inc. All rights reserved.
  *
  * This file is released under the LGPL.
  */
@@ -114,7 +115,7 @@ struct dm_ioctl {
 	uint32_t target_count;	/* in/out */
 	int32_t open_count;	/* out */
 	uint32_t flags;		/* in/out */
-	uint32_t event_nr;      /* in/out */
+	uint32_t event_nr;      	/* in/out */
 	uint32_t padding;
 
 	uint64_t dev;		/* in/out */
@@ -158,7 +159,7 @@ struct dm_target_spec {
  * Used to retrieve the target dependencies.
  */
 struct dm_target_deps {
-	uint32_t count;		/* Array size */
+	uint32_t count;	/* Array size */
 	uint32_t padding;	/* unused */
 	uint64_t dev[0];	/* out */
 };
@@ -177,10 +178,10 @@ struct dm_name_list {
  * Used to retrieve the target versions
  */
 struct dm_target_versions {
-	uint32_t next;
-	uint32_t version[3];
+        uint32_t next;
+        uint32_t version[3];
 
-	char name[0];
+        char name[0];
 };
 
 /*
@@ -273,9 +274,9 @@ typedef char ioctl_struct[308];
 #define DM_TARGET_MSG	 _IOWR(DM_IOCTL, DM_TARGET_MSG_CMD, struct dm_ioctl)
 
 #define DM_VERSION_MAJOR	4
-#define DM_VERSION_MINOR	2
+#define DM_VERSION_MINOR	5
 #define DM_VERSION_PATCHLEVEL	0
-#define DM_VERSION_EXTRA	"-ioctl (2004-06-08)"
+#define DM_VERSION_EXTRA	"-ioctl (2005-10-04)"
 
 /* Status bits */
 #define DM_READONLY_FLAG	(1 << 0) /* In/Out */
@@ -302,8 +303,13 @@ typedef char ioctl_struct[308];
 #define DM_BUFFER_FULL_FLAG	(1 << 8) /* Out */
 
 /*
- * Set this to improve performance when you aren't going to use open_count
+ * Set this to improve performance when you aren't going to use open_count.
  */
 #define DM_SKIP_BDGET_FLAG	(1 << 9) /* In */
+
+/*
+ * Set this to avoid attempting to freeze any filesystem when suspending.
+ */
+#define DM_SKIP_LOCKFS_FLAG	(1 << 10) /* In */
 
 #endif				/* _LINUX_DM_IOCTL_H */
