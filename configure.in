@@ -64,6 +64,7 @@ AC_HEADER_TIME
 
 AC_CHECK_HEADERS(ctype.h dirent.h errno.h fcntl.h getopt.h inttypes.h limits.h stdarg.h stdio.h stdlib.h string.h sys/ioctl.h sys/param.h sys/stat.h sys/types.h unistd.h,,AC_MSG_ERROR(bailing out))
 
+AC_CHECK_HEADERS(termios.h)
 ################################################################################
 dnl -- Checks for typedefs, structures, and compiler characteristics.
 AC_C_CONST

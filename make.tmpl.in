@@ -24,6 +24,7 @@ INSTALL = @INSTALL@
 MSGFMT = @MSGFMT@
 LN_S = @LN_S@
 LIBS = @LIBS@
+CFLAGS += @DEFS@
 CFLAGS += @CFLAGS@
 CLDFLAGS += @CLDFLAGS@
 LDDEPS += @LDDEPS@
@@ -64,6 +65,7 @@ CFLAGS += @COPTIMISE_FLAG@
 
 ifeq ("@DEBUG@", "yes")
   CFLAGS += -g -fno-omit-frame-pointer -DDEBUG
+  CFLAGS += -DDEBUG_MEM
 endif
 
 ifeq ("@INTL@", "yes")
@@ -79,6 +81,9 @@ endif
 ifeq ("@DMIOCTLS@", "yes")
   CFLAGS += -DDM_IOCTLS
 endif
+
+#CFLAGS += -DDEBUG_POOL
+#CFLAGS += -DBOUNDS_CHECK
 
 #CFLAGS += -pg
 #LDFLAGS += -pg

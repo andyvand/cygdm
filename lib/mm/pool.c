@@ -13,29 +13,40 @@
  * Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-/*
- * This file must be included first by every library source file.
- */
-#ifndef _LVM_LIB_H
-#define _LVM_LIB_H
-
-#define _REENTRANT
-#define _GNU_SOURCE
-#define _FILE_OFFSET_BITS 64
-
-#include "log.h"
-#include "intl.h"
-#include "dbg_malloc.h"
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-
-/* Define some portable printing types */
-#define PRIsize_t "zu"
-
+#ifdef DEBUG_POOL
+#include "pool-debug.c"
+#else
+#include "pool-fast.c"
 #endif
+
+char *pool_strdup(struct pool *p, const char *str)
+{
+	char *ret = pool_alloc(p, strlen(str) + 1);
+
+	if (ret)
+		strcpy(ret, str);
+
+	return ret;
+}
+
+char *pool_strndup(struct pool *p, const char *str, size_t n)
+{
+	char *ret = pool_alloc(p, n + 1);
+
+	if (ret) {
+		strncpy(ret, str, n);
+		ret[n] = '\0';
+	}
+
+	return ret;
+}
+
+void *pool_zalloc(struct pool *p, size_t s)
+{
+	void *ptr = pool_alloc(p, s);
+
+	if (ptr)
+		memset(ptr, 0, s);
+
+	return ptr;
+}

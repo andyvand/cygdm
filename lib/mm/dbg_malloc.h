@@ -13,29 +13,34 @@
  * Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-/*
- * This file must be included first by every library source file.
- */
-#ifndef _LVM_LIB_H
-#define _LVM_LIB_H
+#ifndef _LVM_DBG_MALLOC_H
+#define _LVM_DBG_MALLOC_H
 
-#define _REENTRANT
-#define _GNU_SOURCE
-#define _FILE_OFFSET_BITS 64
-
-#include "log.h"
-#include "intl.h"
-#include "dbg_malloc.h"
-
-#include <stdio.h>
 #include <stdlib.h>
-#include <errno.h>
 #include <string.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/stat.h>
 
-/* Define some portable printing types */
-#define PRIsize_t "zu"
+void *malloc_aux(size_t s, const char *file, int line);
+#define dbg_malloc(s) malloc_aux((s), __FILE__, __LINE__)
+
+char *dbg_strdup(const char *str);
+
+#ifdef DEBUG_MEM
+
+void free_aux(void *p);
+void *realloc_aux(void *p, unsigned int s, const char *file, int line);
+int dump_memory(void);
+void bounds_check(void);
+
+#  define dbg_free(p) free_aux(p)
+#  define dbg_realloc(p, s) realloc_aux(p, s, __FILE__, __LINE__)
+
+#else
+
+#  define dbg_free(p) free(p)
+#  define dbg_realloc(p, s) realloc(p, s)
+#  define dump_memory()
+#  define bounds_check()
+
+#endif
 
 #endif
