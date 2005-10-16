@@ -1,9 +1,5 @@
-../lib/datastruct/bitset.h
-../lib/datastruct/hash.h
 ../lib/libdevmapper.h
 ../lib/libdm-file.h
 ../lib/libdm-event.h
-../lib/mm/dbg_malloc.h
-../lib/mm/pool.h
 ../multilog/libmultilog.h
 ../po/pogen.h
