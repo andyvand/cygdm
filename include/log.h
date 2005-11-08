@@ -37,4 +37,7 @@ extern dm_log_fn _log;
 
 #define stack log_debug("<backtrace>")  /* Backtrace on error */
 
+#define return_0	do { stack; return 0; } while (0)
+#define return_NULL	do { stack; return NULL; } while (0)
+
 #endif
