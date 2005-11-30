@@ -76,11 +76,14 @@ static int daemon_read(struct fifos *fifos, struct daemon_message *msg)
 
 	memset(msg, 0, sizeof(*msg));
 	errno = 0;
+	/* FIXME Fix error handling. Check 'ret' before errno. EINTR? EAGAIN? */
+	/* FIXME errno != EOF?   RTFM! */
 	while (bytes < sizeof(*msg) && errno != EOF) {
 		do {
 			/* Watch daemon read FIFO for input. */
 			FD_ZERO(&fds);
 			FD_SET(fifos->server, &fds);
+		/* FIXME Check for errors e.g. EBADF */
 		} while (select(fifos->server+1, &fds, NULL, NULL, NULL) != 1);
 
 		ret = read(fifos->server, msg, sizeof(*msg) - bytes);
@@ -100,11 +103,13 @@ static int daemon_write(struct fifos *fifos, struct daemon_message *msg)
 
 // log_print("%s: \"%s\"\n", __func__, msg->msg);
 	errno = 0;
+	/* FIXME Fix error handling. Check 'ret' before errno. EINTR? EAGAIN? */
 	while (bytes < sizeof(*msg) && errno != EIO) {
 		do {
 			/* Watch daemon write FIFO to be ready for output. */
 			FD_ZERO(&fds);
 			FD_SET(fifos->client, &fds);
+		/* FIXME Check for errors e.g. EBADF */
 		} while (select(fifos->client +1, NULL, &fds, NULL, NULL) != 1);
 
 		ret = write(fifos->client, msg, sizeof(*msg) - bytes);
@@ -125,6 +130,7 @@ static int daemon_talk(struct fifos *fifos, struct daemon_message *msg,
 	 * into ASCII message string.
 	 */
 	msg->opcode.cmd = cmd;
+	/* FIXME Check return value */
 	snprintf(msg->msg, sizeof(msg->msg), "%s %s %u %"PRIu32,
 		 dso_name ? dso_name : "", device ? device : "",
 		 events, timeout);
@@ -166,9 +172,16 @@ static void daemon_running_signal_handler(int sig)
 static int start_daemon(void)
 {
 	int pid, ret=0;
+	int slept=0;
+	int old_mask;
 	void *old_hand;
 
+	/* Must be able to acquire signal */
+	/* FIXME Check return code for errors! */
 	old_hand = signal(SIGUSR1, &daemon_running_signal_handler);
+	old_mask = siggetmask();
+	old_mask &= ~sigmask(SIGUSR1);
+	old_mask = sigsetmask(old_mask);
 	
 	pid = fork();
 
@@ -177,7 +190,9 @@ static int start_daemon(void)
 	else if (pid) { /* parent waits for child to get ready for requests */
 		int status;
 
-		while (!waitpid(pid, &status, WNOHANG) && !daemon_running);
+		/* FIXME Better way to do this? */
+		while (!waitpid(pid, &status, WNOHANG) && !daemon_running)
+			sleep(1);
 
 		if (daemon_running) {
 			log_print("dmeventd started.\n");
@@ -199,6 +214,7 @@ static int start_daemon(void)
 			}
 		}
 	} else {
+		/* FIXME Clean up signal handler */
 		/* dmeventd function is responsible for properly setting **
 		** itself up.  It must never return - only exit.  This is**
 		** why it is followed by an EXIT_FAILURE                 */
@@ -206,7 +222,9 @@ static int start_daemon(void)
 		exit(EXIT_FAILURE);
 	}
 
+	/* FIXME Check return code for errors - what if old_hand is SIG_ERR? */
 	signal(SIGUSR1, old_hand);
+	sigsetmask(old_mask);
 
         return ret;
 }
@@ -214,11 +232,15 @@ static int start_daemon(void)
 /* Initialize client. */
 static int init_client(struct fifos *fifos)
 {
+	/* FIXME Is fifo the most suitable method? */
+	/* FIXME Why not share comms/daemon code with something else e.g. multipath? */
+
 	/* init fifos */
 	memset(fifos, 0, sizeof(*fifos));
         fifos->client_path = FIFO_CLIENT;
         fifos->server_path = FIFO_SERVER;
 
+	/* FIXME The server should be responsible for these, not the client. */
 	/* Create fifos */
 	if (((mkfifo(fifos->client_path, 0600) == -1) && errno != EEXIST) ||
 	    ((mkfifo(fifos->server_path, 0600) == -1) && errno != EEXIST)) {
@@ -226,6 +248,8 @@ static int init_client(struct fifos *fifos)
                 return 0;
 	}
 
+	/* FIXME Warn/abort if wrong - not something to fix silently. */
+	/* FIXME check return code */
 	/* If they were already there, make sure permissions are ok. */
 	chmod(fifos->client_path, 0600);
 	chmod(fifos->server_path, 0600);
@@ -242,6 +266,7 @@ static int init_client(struct fifos *fifos)
 	}
 
 	/* Lock out anyone else trying to do communication with the daemon. */
+	/* FIXME Why failure not retry?  How do multiple processes communicate? */
 	if (flock(fifos->server, LOCK_EX) < 0){
 		log_err("%s: flock %s\n", __func__, fifos->server_path);
 		close(fifos->server);
@@ -259,11 +284,13 @@ static int init_client(struct fifos *fifos)
 			return 0;
 		}
 		
+		/* FIXME Unnecessary if daemon was started before calling this */
 		if (!start_daemon()) {
 			stack;
 			return 0;
 		}
 
+		/* FIXME Unnecessary if daemon was started before calling this */
 		/* Daemon is started, retry the open */
 		fifos->client = open(fifos->client_path, O_WRONLY | O_NONBLOCK);
 		if (fifos->client < 0) {
@@ -303,6 +330,8 @@ static int do_event(int cmd, struct daemon_message *msg,
 	int ret;
 	struct fifos fifos;
 
+	/* FIXME Start the daemon here if it's not running e.g. exclusive lock file */
+
 	if (!init_client(&fifos)) {
 		stack;
 		return -ESRCH;
@@ -321,26 +350,44 @@ int dm_register_for_event(char *dso_name, char *device_path,
 			  enum event_type events)
 {
 	struct daemon_message msg;
-	struct log_data *ldata;
+	char path2[PATH_MAX];
 
-	if (!device_exists(device_path))
-		return -ENODEV;
-
-	return do_event(CMD_REGISTER_FOR_EVENT, &msg,
-			dso_name, device_path, events, 0);
+	/* FIXME Test for relative or fixed path */
+	/* FIXME Move this into a function */
+	if (!device_exists(device_path)) {
+		/* FIXME Check return value */
+		snprintf(path2, PATH_MAX, "%s/%s",
+			 dm_dir(), device_path);
+		if (!device_exists(path2))
+			return -ENODEV;
+		/* FIXME Avoid duplicating next line */
+		return do_event(CMD_REGISTER_FOR_EVENT, &msg,
+				dso_name, path2, events, 0);
+	} else
+		return do_event(CMD_REGISTER_FOR_EVENT, &msg,
+				dso_name, device_path, events, 0);
 }
 
 int dm_unregister_for_event(char *dso_name, char *device_path,
 			    enum event_type events)
 {
 	struct daemon_message msg;
-	struct log_data *ldata;
+	char path2[PATH_MAX];
 
-	if (!device_exists(device_path))
-		return -ENODEV;
-
-	return do_event(CMD_UNREGISTER_FOR_EVENT, &msg,
-			dso_name, device_path, events, 0);
+	/* FIXME Test for relative or fixed path */
+	/* FIXME Move this into a function */
+	if (!device_exists(device_path)) {
+		/* FIXME Check return value */
+		snprintf(path2, PATH_MAX, "%s/%s",
+			 dm_dir(), device_path);
+		if (!device_exists(path2))
+			return -ENODEV;
+		/* FIXME Avoid duplicating next line */
+		return do_event(CMD_UNREGISTER_FOR_EVENT, &msg,
+				dso_name, path2, events, 0);
+	} else
+		return do_event(CMD_UNREGISTER_FOR_EVENT, &msg,
+				dso_name, device_path, events, 0);
 }
 
 int dm_get_registered_device(char **dso_name, char **device_path,
@@ -349,7 +396,6 @@ int dm_get_registered_device(char **dso_name, char **device_path,
 	int ret;
 	char *dso_name_arg = NULL, *device_path_arg = NULL;
 	struct daemon_message msg;
-	struct log_data *ldata;
 
 	if (!(ret = do_event(next ? CMD_GET_NEXT_REGISTERED_DEVICE :
 				    CMD_GET_REGISTERED_DEVICE,
@@ -378,6 +424,7 @@ int dm_set_event_timeout(char *device_path, uint32_t timeout)
 {
 	struct daemon_message msg;
 
+	/* FIXME dm_dir() processing missing? */
 	if (!device_exists(device_path))
 		return -ENODEV;
 	return do_event(CMD_SET_TIMEOUT, &msg,
@@ -389,6 +436,7 @@ int dm_get_event_timeout(char *device_path, uint32_t *timeout)
 	int ret;
 	struct daemon_message msg;
 
+	/* FIXME dm_dir() processing missing? */
 	if (!device_exists(device_path))
 		return -ENODEV;
 	if (!(ret = do_event(CMD_GET_TIMEOUT, &msg, NULL, device_path, 0, 0)))
