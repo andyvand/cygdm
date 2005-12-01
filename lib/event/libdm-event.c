@@ -130,10 +130,15 @@ static int daemon_talk(struct fifos *fifos, struct daemon_message *msg,
 	 * into ASCII message string.
 	 */
 	msg->opcode.cmd = cmd;
-	/* FIXME Check return value */
-	snprintf(msg->msg, sizeof(msg->msg), "%s %s %u %"PRIu32,
-		 dso_name ? dso_name : "", device ? device : "",
-		 events, timeout);
+
+	if (sizeof(msg->msg) <= snprintf(msg->msg, sizeof(msg->msg),
+					 "%s %s %u %"PRIu32,
+					 dso_name ? dso_name : "",
+					 device ? device : "",
+					 events, timeout)) {
+		stack;
+		return -ENAMETOOLONG;
+	}
 
 	/*
 	 * Write command and message to and
@@ -177,8 +182,12 @@ static int start_daemon(void)
 	void *old_hand;
 
 	/* Must be able to acquire signal */
-	/* FIXME Check return code for errors! */
 	old_hand = signal(SIGUSR1, &daemon_running_signal_handler);
+	if (old_hand == SIG_ERR) {
+		log_err("Unable to setup signal handler.");
+		return 0;
+	}
+
 	old_mask = siggetmask();
 	old_mask &= ~sigmask(SIGUSR1);
 	old_mask = sigsetmask(old_mask);
@@ -214,7 +223,8 @@ static int start_daemon(void)
 			}
 		}
 	} else {
-		/* FIXME Clean up signal handler */
+		signal(SIGUSR1, SIG_IGN); /* don't care about error */
+
 		/* dmeventd function is responsible for properly setting **
 		** itself up.  It must never return - only exit.  This is**
 		** why it is followed by an EXIT_FAILURE                 */
@@ -222,8 +232,9 @@ static int start_daemon(void)
 		exit(EXIT_FAILURE);
 	}
 
-	/* FIXME Check return code for errors - what if old_hand is SIG_ERR? */
-	signal(SIGUSR1, old_hand);
+	/* FIXME What if old_hand is SIG_ERR? */
+	if (signal(SIGUSR1, old_hand) == SIG_ERR)
+		log_err("Unable to reset signal handler.");
 	sigsetmask(old_mask);
 
         return ret;
@@ -248,11 +259,19 @@ static int init_client(struct fifos *fifos)
                 return 0;
 	}
 
-	/* FIXME Warn/abort if wrong - not something to fix silently. */
-	/* FIXME check return code */
+	/* FIXME Warn/abort if perms are wrong - not something to fix silently. */
 	/* If they were already there, make sure permissions are ok. */
-	chmod(fifos->client_path, 0600);
-	chmod(fifos->server_path, 0600);
+	if (chmod(fifos->client_path, 0600)) {
+		log_err("Unable to set correct file permissions on %s",
+			fifos->client_path);
+		return 0;
+	}
+
+	if (chmod(fifos->server_path, 0600)) {
+		log_err("Unable to set correct file permissions on %s",
+			fifos->server_path);
+		return 0;
+	}
 
 	/*
 	 * Open the fifo used to read from the daemon.
@@ -318,8 +337,18 @@ static void dtr_client(struct fifos *fifos)
 static int device_exists(char *device)
 {
 	struct stat st_buf;
+	char path2[PATH_MAX];
 
-	return !stat(device, &st_buf) && S_ISBLK(st_buf.st_mode);
+	if (!device)
+		return 0;
+
+	if (device[0] == '/') /* absolute path */
+		return !stat(device, &st_buf) && S_ISBLK(st_buf.st_mode);
+
+	if (PATH_MAX <= snprintf(path2, PATH_MAX, "%s/%s", dm_dir(), device))
+		return 0;
+
+	return !stat(path2, &st_buf) && S_ISBLK(st_buf.st_mode);
 }
 
 /* Handle the event (de)registration call and return negative error codes. */
@@ -350,44 +379,24 @@ int dm_register_for_event(char *dso_name, char *device_path,
 			  enum event_type events)
 {
 	struct daemon_message msg;
-	char path2[PATH_MAX];
 
-	/* FIXME Test for relative or fixed path */
-	/* FIXME Move this into a function */
-	if (!device_exists(device_path)) {
-		/* FIXME Check return value */
-		snprintf(path2, PATH_MAX, "%s/%s",
-			 dm_dir(), device_path);
-		if (!device_exists(path2))
-			return -ENODEV;
-		/* FIXME Avoid duplicating next line */
-		return do_event(CMD_REGISTER_FOR_EVENT, &msg,
-				dso_name, path2, events, 0);
-	} else
-		return do_event(CMD_REGISTER_FOR_EVENT, &msg,
-				dso_name, device_path, events, 0);
+	if (!device_exists(device_path))
+		return -ENODEV;
+
+	return do_event(CMD_REGISTER_FOR_EVENT, &msg,
+			dso_name, device_path, events, 0);
 }
 
 int dm_unregister_for_event(char *dso_name, char *device_path,
 			    enum event_type events)
 {
 	struct daemon_message msg;
-	char path2[PATH_MAX];
 
-	/* FIXME Test for relative or fixed path */
-	/* FIXME Move this into a function */
-	if (!device_exists(device_path)) {
-		/* FIXME Check return value */
-		snprintf(path2, PATH_MAX, "%s/%s",
-			 dm_dir(), device_path);
-		if (!device_exists(path2))
-			return -ENODEV;
-		/* FIXME Avoid duplicating next line */
-		return do_event(CMD_UNREGISTER_FOR_EVENT, &msg,
-				dso_name, path2, events, 0);
-	} else
-		return do_event(CMD_UNREGISTER_FOR_EVENT, &msg,
-				dso_name, device_path, events, 0);
+	if (!device_exists(device_path))
+		return -ENODEV;
+
+	return do_event(CMD_UNREGISTER_FOR_EVENT, &msg,
+			dso_name, device_path, events, 0);
 }
 
 int dm_get_registered_device(char **dso_name, char **device_path,
@@ -424,7 +433,6 @@ int dm_set_event_timeout(char *device_path, uint32_t timeout)
 {
 	struct daemon_message msg;
 
-	/* FIXME dm_dir() processing missing? */
 	if (!device_exists(device_path))
 		return -ENODEV;
 	return do_event(CMD_SET_TIMEOUT, &msg,
@@ -436,7 +444,6 @@ int dm_get_event_timeout(char *device_path, uint32_t *timeout)
 	int ret;
 	struct daemon_message msg;
 
-	/* FIXME dm_dir() processing missing? */
 	if (!device_exists(device_path))
 		return -ENODEV;
 	if (!(ret = do_event(CMD_GET_TIMEOUT, &msg, NULL, device_path, 0, 0)))
