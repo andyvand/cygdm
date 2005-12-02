@@ -850,7 +850,7 @@ Optional Features:
   --enable-debug          Enable debugging
   --enable-compat         Enable support for old device-mapper versions
   --disable-driver        Disable calls to device-mapper in the kernel
-  --enable-eventd         Build the new event daemon
+  --enable-dmeventd       Build the new event daemon
   --enable-static_link    Use this to link the tools to their libraries
                           statically.  Default is dynamic linking
   --disable-selinux       Disable selinux support
@@ -5329,9 +5329,9 @@ if test "${enable_ioctl+set}" = set; then
 fi;
 
 ################################################################################
-# Check whether --enable-eventd or --disable-eventd was given.
-if test "${enable_eventd+set}" = set; then
-  enableval="$enable_eventd"
+# Check whether --enable-dmeventd or --disable-dmeventd was given.
+if test "${enable_dmeventd+set}" = set; then
+  enableval="$enable_dmeventd"
   DMEVENTD=$enableval
 else
   DMEVENTD=no
@@ -5810,7 +5810,7 @@ fi
 
 
 ################################################################################
-                                                                                                                                                      ac_config_files="$ac_config_files Makefile make.tmpl include/Makefile dmeventd/Makefile dmsetup/Makefile lib/Makefile lib/event/Makefile lib/libdm-common.h kernel/Makefile man/Makefile multilog/Makefile multilog/async/Makefile multilog/pthread_lock/Makefile multilog/tests/Makefile po/Makefile"
+                                                                                                    ac_config_files="$ac_config_files Makefile make.tmpl include/Makefile dmsetup/Makefile lib/Makefile lib/libdm-common.h dmeventd/Makefile kernel/Makefile man/Makefile po/Makefile"
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
 # tests run on this system so they can be shared between configure
@@ -6365,17 +6365,12 @@ do
   "Makefile" ) CONFIG_FILES="$CONFIG_FILES Makefile" ;;
   "make.tmpl" ) CONFIG_FILES="$CONFIG_FILES make.tmpl" ;;
   "include/Makefile" ) CONFIG_FILES="$CONFIG_FILES include/Makefile" ;;
-  "dmeventd/Makefile" ) CONFIG_FILES="$CONFIG_FILES dmeventd/Makefile" ;;
   "dmsetup/Makefile" ) CONFIG_FILES="$CONFIG_FILES dmsetup/Makefile" ;;
   "lib/Makefile" ) CONFIG_FILES="$CONFIG_FILES lib/Makefile" ;;
-  "lib/event/Makefile" ) CONFIG_FILES="$CONFIG_FILES lib/event/Makefile" ;;
   "lib/libdm-common.h" ) CONFIG_FILES="$CONFIG_FILES lib/libdm-common.h" ;;
+  "dmeventd/Makefile" ) CONFIG_FILES="$CONFIG_FILES dmeventd/Makefile" ;;
   "kernel/Makefile" ) CONFIG_FILES="$CONFIG_FILES kernel/Makefile" ;;
   "man/Makefile" ) CONFIG_FILES="$CONFIG_FILES man/Makefile" ;;
-  "multilog/Makefile" ) CONFIG_FILES="$CONFIG_FILES multilog/Makefile" ;;
-  "multilog/async/Makefile" ) CONFIG_FILES="$CONFIG_FILES multilog/async/Makefile" ;;
-  "multilog/pthread_lock/Makefile" ) CONFIG_FILES="$CONFIG_FILES multilog/pthread_lock/Makefile" ;;
-  "multilog/tests/Makefile" ) CONFIG_FILES="$CONFIG_FILES multilog/tests/Makefile" ;;
   "po/Makefile" ) CONFIG_FILES="$CONFIG_FILES po/Makefile" ;;
   *) { { echo "$as_me:$LINENO: error: invalid argument: $ac_config_target" >&5
 echo "$as_me: error: invalid argument: $ac_config_target" >&2;}

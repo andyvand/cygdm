@@ -25,7 +25,7 @@ ifeq ("@INTL@", "yes")
 endif
 
 ifeq ("@DMEVENTD@", "yes")
-  SUBDIRS += multilog dmeventd
+  SUBDIRS += dmeventd
 endif
 
 SUBDIRS += lib dmsetup
@@ -42,7 +42,8 @@ include make.tmpl
 
 lib: include
 dmsetup: lib
-dmeventd: lib multilog
+# dmeventd: lib multilog
+dmeventd: lib
 po: dmsetup dmeventd
 
 ifeq ("@INTL@", "yes")
