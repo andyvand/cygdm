@@ -73,6 +73,7 @@ ifeq ("@INTL@", "yes")
 endif
 
 LDFLAGS += -L$(interfacedir)
+CLDFLAGS += -L$(interfacedir)
 
 ifeq ("@COMPAT@", "yes")
   CFLAGS += -DDM_COMPAT
