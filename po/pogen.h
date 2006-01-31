@@ -20,5 +20,5 @@
  * different architectures.
  */
 
-#define _log(level, file, line, format, args...) _log(format, args)
+#define dm_log(level, file, line, format, args...) dm_log(format, args)
 

@@ -25,9 +25,9 @@
 #define _LOG_ERR 3
 #define _LOG_FATAL 2
 
-extern dm_log_fn _log;
+extern dm_log_fn dm_log;
 
-#define plog(l, x...) _log(l, __FILE__, __LINE__, ## x)
+#define plog(l, x...) dm_log(l, __FILE__, __LINE__, ## x)
 
 #define log_error(x...) plog(_LOG_ERR, x)
 #define log_print(x...) plog(_LOG_WARN, x)
