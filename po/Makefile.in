@@ -37,7 +37,7 @@ pofile: device-mapper.po
 
 device-mapper.po: Makefile $(POSOURCES)
 	@echo Compiling string table
-	@xgettext -C -F --keyword=_log --keyword=log_debug \
+	@xgettext -C -F --keyword=dm_log --keyword=log_debug \
 		--keyword=log_info --keyword=_ --keyword=N_ \
 		--keyword=log_notice --keyword=log_warn --keyword=log_err \
 		--keyword=log_fatal --keyword=log_debug --keyword=log_error \
