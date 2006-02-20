@@ -82,6 +82,17 @@
  *
  * DM_TARGET_MSG:
  * Pass a message string to the target at a specific offset of a device.
+ *
+ * DM_DEV_SET_GEOMETRY:
+ * Set the geometry of a device by passing in a string.  The
+ * string should have this format:
+ *
+ * "cylinders heads sectors_per_track start_sector"
+ * 
+ * Beware that CHS geometry is nearly obsolete and only provided
+ * for compatibility with dm devices that can be booted by a PC
+ * BIOS.  See struct hd_geometry for range limits.  Also note that
+ * the geometry is erased if the device size changes.
  */
 
 /*
@@ -220,6 +231,7 @@ enum {
 	/* Added later */
 	DM_LIST_VERSIONS_CMD,
 	DM_TARGET_MSG_CMD,
+	DM_DEV_SET_GEOMETRY_CMD
 };
 
 /*
@@ -232,51 +244,53 @@ enum {
  */
 #ifdef CONFIG_COMPAT
 typedef char ioctl_struct[308];
-#define DM_VERSION_32       _IOWR(DM_IOCTL, DM_VERSION_CMD, ioctl_struct)
-#define DM_REMOVE_ALL_32    _IOWR(DM_IOCTL, DM_REMOVE_ALL_CMD, ioctl_struct)
-#define DM_LIST_DEVICES_32  _IOWR(DM_IOCTL, DM_LIST_DEVICES_CMD, ioctl_struct)
+#define DM_VERSION_32		_IOWR(DM_IOCTL, DM_VERSION_CMD, ioctl_struct)
+#define DM_REMOVE_ALL_32	_IOWR(DM_IOCTL, DM_REMOVE_ALL_CMD, ioctl_struct)
+#define DM_LIST_DEVICES_32	_IOWR(DM_IOCTL, DM_LIST_DEVICES_CMD, ioctl_struct)
 
-#define DM_DEV_CREATE_32    _IOWR(DM_IOCTL, DM_DEV_CREATE_CMD, ioctl_struct)
-#define DM_DEV_REMOVE_32    _IOWR(DM_IOCTL, DM_DEV_REMOVE_CMD, ioctl_struct)
-#define DM_DEV_RENAME_32    _IOWR(DM_IOCTL, DM_DEV_RENAME_CMD, ioctl_struct)
-#define DM_DEV_SUSPEND_32   _IOWR(DM_IOCTL, DM_DEV_SUSPEND_CMD, ioctl_struct)
-#define DM_DEV_STATUS_32    _IOWR(DM_IOCTL, DM_DEV_STATUS_CMD, ioctl_struct)
-#define DM_DEV_WAIT_32      _IOWR(DM_IOCTL, DM_DEV_WAIT_CMD, ioctl_struct)
+#define DM_DEV_CREATE_32	_IOWR(DM_IOCTL, DM_DEV_CREATE_CMD, ioctl_struct)
+#define DM_DEV_REMOVE_32	_IOWR(DM_IOCTL, DM_DEV_REMOVE_CMD, ioctl_struct)
+#define DM_DEV_RENAME_32	_IOWR(DM_IOCTL, DM_DEV_RENAME_CMD, ioctl_struct)
+#define DM_DEV_SUSPEND_32	_IOWR(DM_IOCTL, DM_DEV_SUSPEND_CMD, ioctl_struct)
+#define DM_DEV_STATUS_32	_IOWR(DM_IOCTL, DM_DEV_STATUS_CMD, ioctl_struct)
+#define DM_DEV_WAIT_32		_IOWR(DM_IOCTL, DM_DEV_WAIT_CMD, ioctl_struct)
 
-#define DM_TABLE_LOAD_32    _IOWR(DM_IOCTL, DM_TABLE_LOAD_CMD, ioctl_struct)
-#define DM_TABLE_CLEAR_32   _IOWR(DM_IOCTL, DM_TABLE_CLEAR_CMD, ioctl_struct)
-#define DM_TABLE_DEPS_32    _IOWR(DM_IOCTL, DM_TABLE_DEPS_CMD, ioctl_struct)
-#define DM_TABLE_STATUS_32  _IOWR(DM_IOCTL, DM_TABLE_STATUS_CMD, ioctl_struct)
-#define DM_LIST_VERSIONS_32 _IOWR(DM_IOCTL, DM_LIST_VERSIONS_CMD, ioctl_struct)
-#define DM_TARGET_MSG_32    _IOWR(DM_IOCTL, DM_TARGET_MSG_CMD, ioctl_struct)
+#define DM_TABLE_LOAD_32	_IOWR(DM_IOCTL, DM_TABLE_LOAD_CMD, ioctl_struct)
+#define DM_TABLE_CLEAR_32	_IOWR(DM_IOCTL, DM_TABLE_CLEAR_CMD, ioctl_struct)
+#define DM_TABLE_DEPS_32	_IOWR(DM_IOCTL, DM_TABLE_DEPS_CMD, ioctl_struct)
+#define DM_TABLE_STATUS_32	_IOWR(DM_IOCTL, DM_TABLE_STATUS_CMD, ioctl_struct)
+#define DM_LIST_VERSIONS_32	_IOWR(DM_IOCTL, DM_LIST_VERSIONS_CMD, ioctl_struct)
+#define DM_TARGET_MSG_32	_IOWR(DM_IOCTL, DM_TARGET_MSG_CMD, ioctl_struct)
+#define DM_DEV_SET_GEOMETRY_32	_IOWR(DM_IOCTL, DM_DEV_SET_GEOMETRY_CMD, ioctl_struct)
 #endif
 
 #define DM_IOCTL 0xfd
 
-#define DM_VERSION       _IOWR(DM_IOCTL, DM_VERSION_CMD, struct dm_ioctl)
-#define DM_REMOVE_ALL    _IOWR(DM_IOCTL, DM_REMOVE_ALL_CMD, struct dm_ioctl)
-#define DM_LIST_DEVICES  _IOWR(DM_IOCTL, DM_LIST_DEVICES_CMD, struct dm_ioctl)
+#define DM_VERSION		_IOWR(DM_IOCTL, DM_VERSION_CMD, struct dm_ioctl)
+#define DM_REMOVE_ALL		_IOWR(DM_IOCTL, DM_REMOVE_ALL_CMD, struct dm_ioctl)
+#define DM_LIST_DEVICES		_IOWR(DM_IOCTL, DM_LIST_DEVICES_CMD, struct dm_ioctl)
 
-#define DM_DEV_CREATE    _IOWR(DM_IOCTL, DM_DEV_CREATE_CMD, struct dm_ioctl)
-#define DM_DEV_REMOVE    _IOWR(DM_IOCTL, DM_DEV_REMOVE_CMD, struct dm_ioctl)
-#define DM_DEV_RENAME    _IOWR(DM_IOCTL, DM_DEV_RENAME_CMD, struct dm_ioctl)
-#define DM_DEV_SUSPEND   _IOWR(DM_IOCTL, DM_DEV_SUSPEND_CMD, struct dm_ioctl)
-#define DM_DEV_STATUS    _IOWR(DM_IOCTL, DM_DEV_STATUS_CMD, struct dm_ioctl)
-#define DM_DEV_WAIT      _IOWR(DM_IOCTL, DM_DEV_WAIT_CMD, struct dm_ioctl)
+#define DM_DEV_CREATE		_IOWR(DM_IOCTL, DM_DEV_CREATE_CMD, struct dm_ioctl)
+#define DM_DEV_REMOVE		_IOWR(DM_IOCTL, DM_DEV_REMOVE_CMD, struct dm_ioctl)
+#define DM_DEV_RENAME		_IOWR(DM_IOCTL, DM_DEV_RENAME_CMD, struct dm_ioctl)
+#define DM_DEV_SUSPEND		_IOWR(DM_IOCTL, DM_DEV_SUSPEND_CMD, struct dm_ioctl)
+#define DM_DEV_STATUS		_IOWR(DM_IOCTL, DM_DEV_STATUS_CMD, struct dm_ioctl)
+#define DM_DEV_WAIT		_IOWR(DM_IOCTL, DM_DEV_WAIT_CMD, struct dm_ioctl)
 
-#define DM_TABLE_LOAD    _IOWR(DM_IOCTL, DM_TABLE_LOAD_CMD, struct dm_ioctl)
-#define DM_TABLE_CLEAR   _IOWR(DM_IOCTL, DM_TABLE_CLEAR_CMD, struct dm_ioctl)
-#define DM_TABLE_DEPS    _IOWR(DM_IOCTL, DM_TABLE_DEPS_CMD, struct dm_ioctl)
-#define DM_TABLE_STATUS  _IOWR(DM_IOCTL, DM_TABLE_STATUS_CMD, struct dm_ioctl)
+#define DM_TABLE_LOAD		_IOWR(DM_IOCTL, DM_TABLE_LOAD_CMD, struct dm_ioctl)
+#define DM_TABLE_CLEAR		_IOWR(DM_IOCTL, DM_TABLE_CLEAR_CMD, struct dm_ioctl)
+#define DM_TABLE_DEPS		_IOWR(DM_IOCTL, DM_TABLE_DEPS_CMD, struct dm_ioctl)
+#define DM_TABLE_STATUS		_IOWR(DM_IOCTL, DM_TABLE_STATUS_CMD, struct dm_ioctl)
 
-#define DM_LIST_VERSIONS _IOWR(DM_IOCTL, DM_LIST_VERSIONS_CMD, struct dm_ioctl)
+#define DM_LIST_VERSIONS	_IOWR(DM_IOCTL, DM_LIST_VERSIONS_CMD, struct dm_ioctl)
 
-#define DM_TARGET_MSG	 _IOWR(DM_IOCTL, DM_TARGET_MSG_CMD, struct dm_ioctl)
+#define DM_TARGET_MSG		_IOWR(DM_IOCTL, DM_TARGET_MSG_CMD, struct dm_ioctl)
+#define DM_DEV_SET_GEOMETRY	_IOWR(DM_IOCTL, DM_DEV_SET_GEOMETRY_CMD, struct dm_ioctl)
 
 #define DM_VERSION_MAJOR	4
-#define DM_VERSION_MINOR	5
+#define DM_VERSION_MINOR	6
 #define DM_VERSION_PATCHLEVEL	0
-#define DM_VERSION_EXTRA	"-ioctl (2005-10-04)"
+#define DM_VERSION_EXTRA	"-ioctl (2006-02-17)"
 
 /* Status bits */
 #define DM_READONLY_FLAG	(1 << 0) /* In/Out */
