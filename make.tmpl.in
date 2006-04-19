@@ -24,7 +24,7 @@ INSTALL = @INSTALL@
 MSGFMT = @MSGFMT@
 LN_S = @LN_S@
 LIBS = @LIBS@
-CFLAGS += @DEFS@
+DEFS += @DEFS@ @LVM_DEFS@
 CFLAGS += @CFLAGS@
 CLDFLAGS += @CLDFLAGS@
 LDDEPS += @LDDEPS@
@@ -37,6 +37,7 @@ exec_prefix = @exec_prefix@
 bindir = $(DESTDIR)@bindir@
 includedir = $(DESTDIR)@includedir@
 libdir = $(DESTDIR)@libdir@
+usrlibdir = $(DESTDIR)@usrlibdir@
 sbindir = $(DESTDIR)@sbindir@
 infodir = $(DESTDIR)@infodir@
 mandir = $(DESTDIR)@mandir@
@@ -64,27 +65,28 @@ CFLAGS += -fPIC -Wall -Wundef -Wshadow -Wcast-align -Wwrite-strings -Wmissing-pr
 CFLAGS += @COPTIMISE_FLAG@
 
 ifeq ("@DEBUG@", "yes")
-  CFLAGS += -g -fno-omit-frame-pointer -DDEBUG
-  CFLAGS += -DDEBUG_MEM
+  CFLAGS += -g -fno-omit-frame-pointer
+  DEFS += -DDEBUG
+  DEFS += -DDEBUG_MEM
 endif
 
 ifeq ("@INTL@", "yes")
-  CFLAGS += -DINTL_PACKAGE=\"@INTL_PACKAGE@\" -DLOCALEDIR=\"@LOCALEDIR@\"
+  DEFS += -DINTL_PACKAGE=\"@INTL_PACKAGE@\" -DLOCALEDIR=\"@LOCALEDIR@\"
 endif
 
 LDFLAGS += -L$(interfacedir)
 CLDFLAGS += -L$(interfacedir)
 
 ifeq ("@COMPAT@", "yes")
-  CFLAGS += -DDM_COMPAT
+  DEFS += -DDM_COMPAT
 endif
 
 ifeq ("@DMIOCTLS@", "yes")
-  CFLAGS += -DDM_IOCTLS
+  DEFS += -DDM_IOCTLS
 endif
 
-#CFLAGS += -DDEBUG_POOL
-#CFLAGS += -DBOUNDS_CHECK
+#DEFS += -DDEBUG_POOL
+#DEFS += -DBOUNDS_CHECK
 
 #CFLAGS += -pg
 #LDFLAGS += -pg
@@ -149,14 +151,14 @@ endif
 $(TARGETS): $(OBJECTS)
 
 %.o: %.c
-	$(CC) -c $(INCLUDES) $(CFLAGS) $< -o $@
+	$(CC) -c $(INCLUDES) $(DEFS) $(CFLAGS) $< -o $@
 
 %.pot: %.c Makefile
 	$(CC) -E $(INCLUDES) -include $(top_srcdir)/include/pogen.h \
-		$(CFLAGS) $< > $@
+		$(DEFS) $(CFLAGS) $< > $@
 
 %.so: %.o
-	$(CC) -c $(INCLUDES) $(CFLAGS) $< -o $@
+	$(CC) -c $(INCLUDES) $(DEFS) $(CFLAGS) $< -o $@
 
 ifeq ("@LIB_SUFFIX@","so")
 $(LIB_SHARED): $(OBJECTS) $(LDDEPS)
@@ -178,7 +180,7 @@ $(LIB_STATIC): $(OBJECTS)
 	set -e; \
 	FILE=`echo $@ | sed 's/\\//\\\\\\//g;s/\\.d//g'`; \
 	DEPS=`echo $(DEPS) | sed -e 's/\\//\\\\\\//g'`; \
-	$(CC) -MM $(INCLUDES) $(CFLAGS) $< | \
+	$(CC) -MM $(INCLUDES) $(DEFS) $(CFLAGS) $< | \
 	sed "s/\(.*\)\.o[ :]*/$$FILE.o $$FILE.d $$FILE.pot: $$DEPS /g" > $@; \
 	[ -s $@ ] || $(RM) $@
 

@@ -310,7 +310,7 @@ ac_includes_default="\
 #endif"
 
 ac_default_prefix=/usr
-ac_subst_vars='SHELL PATH_SEPARATOR PACKAGE_NAME PACKAGE_TARNAME PACKAGE_VERSION PACKAGE_STRING PACKAGE_BUGREPORT exec_prefix prefix program_transform_name bindir sbindir libexecdir datadir sysconfdir sharedstatedir localstatedir libdir includedir oldincludedir infodir mandir build_alias host_alias target_alias DEFS ECHO_C ECHO_N ECHO_T LIBS build build_cpu build_vendor build_os host host_cpu host_vendor host_os target target_cpu target_vendor target_os AWK CC CFLAGS LDFLAGS CPPFLAGS ac_ct_CC EXEEXT OBJEXT CPP EGREP INSTALL_PROGRAM INSTALL_SCRIPT INSTALL_DATA LN_S SET_MAKE RANLIB ac_ct_RANLIB LIBOBJS MSGFMT JOBS STATIC_LINK OWNER GROUP interface kerneldir missingkernel kernelvsn tmpdir COPTIMISE_FLAG CLDFLAGS LDDEPS LIB_SUFFIX DEBUG DM_LIB_VERSION COMPAT DMIOCTLS LOCALEDIR INTL_PACKAGE INTL DEVICE_UID DEVICE_GID DEVICE_MODE DMEVENTD LTLIBOBJS'
+ac_subst_vars='SHELL PATH_SEPARATOR PACKAGE_NAME PACKAGE_TARNAME PACKAGE_VERSION PACKAGE_STRING PACKAGE_BUGREPORT exec_prefix prefix program_transform_name bindir sbindir libexecdir datadir sysconfdir sharedstatedir localstatedir libdir includedir oldincludedir infodir mandir build_alias host_alias target_alias DEFS ECHO_C ECHO_N ECHO_T LIBS build build_cpu build_vendor build_os host host_cpu host_vendor host_os target target_cpu target_vendor target_os AWK CC CFLAGS LDFLAGS CPPFLAGS ac_ct_CC EXEEXT OBJEXT CPP EGREP INSTALL_PROGRAM INSTALL_SCRIPT INSTALL_DATA LN_S SET_MAKE RANLIB ac_ct_RANLIB LIBOBJS MSGFMT usrlibdir JOBS STATIC_LINK OWNER GROUP interface kerneldir missingkernel kernelvsn tmpdir LVM_DEFS COPTIMISE_FLAG CLDFLAGS LDDEPS LIB_SUFFIX DEBUG DM_LIB_VERSION COMPAT DMIOCTLS LOCALEDIR INTL_PACKAGE INTL DEVICE_UID DEVICE_GID DEVICE_MODE DMEVENTD LTLIBOBJS'
 ac_subst_files=''
 
 # Initialize some variables set by options.
@@ -1448,6 +1448,9 @@ case "$host_os" in
 		DMIOCTLS="no"
 		SELINUX="no" ;;
 esac
+
+################################################################################
+usrlibdir='${prefix}/lib'
 
 ################################################################################
 for ac_prog in gawk mawk nawk awk
@@ -5351,7 +5354,7 @@ if [ "x$exec_prefix" = xNONE -a "x$prefix" = xNONE ];
  then  exec_prefix="";
 fi;
 
-################################################################################dnl -- Disable selinux
+################################################################################
 echo "$as_me:$LINENO: checking whether to enable selinux support" >&5
 echo $ECHO_N "checking whether to enable selinux support... $ECHO_C" >&6
 # Check whether --enable-selinux or --disable-selinux was given.
@@ -5364,6 +5367,87 @@ echo "${ECHO_T}$SELINUX" >&6
 
 ################################################################################
 if test x$SELINUX = xyes; then
+	echo "$as_me:$LINENO: checking for sepol_check_context function" >&5
+echo $ECHO_N "checking for sepol_check_context function... $ECHO_C" >&6
+	echo "$as_me:$LINENO: checking for sepol_check_context in -lsepol" >&5
+echo $ECHO_N "checking for sepol_check_context in -lsepol... $ECHO_C" >&6
+if test "${ac_cv_lib_sepol_sepol_check_context+set}" = set; then
+  echo $ECHO_N "(cached) $ECHO_C" >&6
+else
+  ac_check_lib_save_LIBS=$LIBS
+LIBS="-lsepol  $LIBS"
+cat >conftest.$ac_ext <<_ACEOF
+/* confdefs.h.  */
+_ACEOF
+cat confdefs.h >>conftest.$ac_ext
+cat >>conftest.$ac_ext <<_ACEOF
+/* end confdefs.h.  */
+
+/* Override any gcc2 internal prototype to avoid an error.  */
+#ifdef __cplusplus
+extern "C"
+#endif
+/* We use char because int might match the return type of a gcc2
+   builtin and then its argument prototype would still apply.  */
+char sepol_check_context ();
+int
+main ()
+{
+sepol_check_context ();
+  ;
+  return 0;
+}
+_ACEOF
+rm -f conftest.$ac_objext conftest$ac_exeext
+if { (eval echo "$as_me:$LINENO: \"$ac_link\"") >&5
+  (eval $ac_link) 2>conftest.er1
+  ac_status=$?
+  grep -v '^ *+' conftest.er1 >conftest.err
+  rm -f conftest.er1
+  cat conftest.err >&5
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); } &&
+	 { ac_try='test -z "$ac_c_werror_flag"
+			 || test ! -s conftest.err'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; } &&
+	 { ac_try='test -s conftest$ac_exeext'
+  { (eval echo "$as_me:$LINENO: \"$ac_try\"") >&5
+  (eval $ac_try) 2>&5
+  ac_status=$?
+  echo "$as_me:$LINENO: \$? = $ac_status" >&5
+  (exit $ac_status); }; }; then
+  ac_cv_lib_sepol_sepol_check_context=yes
+else
+  echo "$as_me: failed program was:" >&5
+sed 's/^/| /' conftest.$ac_ext >&5
+
+ac_cv_lib_sepol_sepol_check_context=no
+fi
+rm -f conftest.err conftest.$ac_objext \
+      conftest$ac_exeext conftest.$ac_ext
+LIBS=$ac_check_lib_save_LIBS
+fi
+echo "$as_me:$LINENO: result: $ac_cv_lib_sepol_sepol_check_context" >&5
+echo "${ECHO_T}$ac_cv_lib_sepol_sepol_check_context" >&6
+if test $ac_cv_lib_sepol_sepol_check_context = yes; then
+  HAVE_SEPOL=yes
+else
+  HAVE_SEPOL=no
+fi
+
+	echo "$as_me:$LINENO: result: $HAVE_SEPOL" >&5
+echo "${ECHO_T}$HAVE_SEPOL" >&6
+
+	if test x$HAVE_SEPOL = xyes; then
+		LIBS="-lsepol $LIBS"
+	fi
+
+	echo "$as_me:$LINENO: checking for is_selinux_enabled function" >&5
+echo $ECHO_N "checking for is_selinux_enabled function... $ECHO_C" >&6
 	echo "$as_me:$LINENO: checking for is_selinux_enabled in -lselinux" >&5
 echo $ECHO_N "checking for is_selinux_enabled in -lselinux... $ECHO_C" >&6
 if test "${ac_cv_lib_selinux_is_selinux_enabled+set}" = set; then
@@ -5434,9 +5518,11 @@ else
   HAVE_SELINUX=no
 fi
 
+	echo "$as_me:$LINENO: result: $HAVE_SELINUX" >&5
+echo "${ECHO_T}$HAVE_SELINUX" >&6
 
 	if test x$HAVE_SELINUX = xyes; then
-		CFLAGS="$CFLAGS -DHAVE_SELINUX"
+		LVM_DEFS="$LVM_DEFS -DHAVE_SELINUX"
 		LIBS="-lselinux $LIBS"
 	else
 		{ echo "$as_me:$LINENO: WARNING: Disabling selinux" >&5
@@ -5590,7 +5676,7 @@ if test `eval echo '${'$as_ac_Header'}'` = yes; then
   cat >>confdefs.h <<_ACEOF
 #define `echo "HAVE_$ac_header" | $as_tr_cpp` 1
 _ACEOF
- CFLAGS="$CFLAGS -DHAVE_GETOPTLONG"
+ LVM_DEFS="$LVM_DEFS -DHAVE_GETOPTLONG"
 fi
 
 done
@@ -5809,8 +5895,9 @@ fi
 
 
 
+
 ################################################################################
-                                                                                                    ac_config_files="$ac_config_files Makefile make.tmpl include/Makefile dmsetup/Makefile lib/Makefile lib/libdm-common.h dmeventd/Makefile kernel/Makefile man/Makefile po/Makefile"
+                                                                                                                        ac_config_files="$ac_config_files Makefile make.tmpl include/Makefile dmsetup/Makefile lib/Makefile lib/libdevmapper.pc lib/libdm-common.h dmeventd/Makefile dmeventd/libdevmapper-event.pc kernel/Makefile man/Makefile po/Makefile"
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
 # tests run on this system so they can be shared between configure
@@ -6367,8 +6454,10 @@ do
   "include/Makefile" ) CONFIG_FILES="$CONFIG_FILES include/Makefile" ;;
   "dmsetup/Makefile" ) CONFIG_FILES="$CONFIG_FILES dmsetup/Makefile" ;;
   "lib/Makefile" ) CONFIG_FILES="$CONFIG_FILES lib/Makefile" ;;
+  "lib/libdevmapper.pc" ) CONFIG_FILES="$CONFIG_FILES lib/libdevmapper.pc" ;;
   "lib/libdm-common.h" ) CONFIG_FILES="$CONFIG_FILES lib/libdm-common.h" ;;
   "dmeventd/Makefile" ) CONFIG_FILES="$CONFIG_FILES dmeventd/Makefile" ;;
+  "dmeventd/libdevmapper-event.pc" ) CONFIG_FILES="$CONFIG_FILES dmeventd/libdevmapper-event.pc" ;;
   "kernel/Makefile" ) CONFIG_FILES="$CONFIG_FILES kernel/Makefile" ;;
   "man/Makefile" ) CONFIG_FILES="$CONFIG_FILES man/Makefile" ;;
   "po/Makefile" ) CONFIG_FILES="$CONFIG_FILES po/Makefile" ;;
@@ -6486,6 +6575,7 @@ s,@RANLIB@,$RANLIB,;t t
 s,@ac_ct_RANLIB@,$ac_ct_RANLIB,;t t
 s,@LIBOBJS@,$LIBOBJS,;t t
 s,@MSGFMT@,$MSGFMT,;t t
+s,@usrlibdir@,$usrlibdir,;t t
 s,@JOBS@,$JOBS,;t t
 s,@STATIC_LINK@,$STATIC_LINK,;t t
 s,@OWNER@,$OWNER,;t t
@@ -6495,6 +6585,7 @@ s,@kerneldir@,$kerneldir,;t t
 s,@missingkernel@,$missingkernel,;t t
 s,@kernelvsn@,$kernelvsn,;t t
 s,@tmpdir@,$tmpdir,;t t
+s,@LVM_DEFS@,$LVM_DEFS,;t t
 s,@COPTIMISE_FLAG@,$COPTIMISE_FLAG,;t t
 s,@CLDFLAGS@,$CLDFLAGS,;t t
 s,@LDDEPS@,$LDDEPS,;t t
