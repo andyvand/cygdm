@@ -185,6 +185,11 @@ AC_ARG_ENABLE(dmeventd,   [  --enable-dmeventd       Build the new event daemon]
 DMEVENTD=$enableval, DMEVENTD=no)
 
 ################################################################################
+dnl -- Enable pkg-config
+AC_ARG_ENABLE(pkgconfig,   [  --enable-pkgconfig      Install pkgconfig support],
+PKGCONFIG=$enableval, PKGCONFIG=no)
+
+################################################################################
 dnl -- Enables staticly-linked tools
 AC_ARG_ENABLE(static_link, [  --enable-static_link    Use this to link the tools to their libraries
                           statically.  Default is dynamic linking],  STATIC_LINK=$enableval, STATIC_LINK=no)
@@ -372,6 +377,7 @@ AC_SUBST(DEVICE_UID)
 AC_SUBST(DEVICE_GID)
 AC_SUBST(DEVICE_MODE)
 AC_SUBST(DMEVENTD)
+AC_SUBST(PKGCONFIG)
 
 ################################################################################
 dnl -- First and last lines should not contain files to generate in order to 
