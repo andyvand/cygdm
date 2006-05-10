@@ -20,6 +20,9 @@ dnl -- Process this file with autoconf to produce a configure script.
 AC_INIT(lib/libdevmapper.h)
 
 ################################################################################
+AC_CONFIG_HEADERS(include/configure.h)
+
+################################################################################
 dnl -- Setup the directory where autoconf has auxilary files
 AC_CONFIG_AUX_DIR(autoconf) 
 
@@ -200,6 +203,12 @@ if [[ "x$exec_prefix" = xNONE -a "x$prefix" = xNONE ]];
  then  exec_prefix="";
 fi;
 
+
+################################################################################
+dnl -- getline included in recent libc
+
+AC_CHECK_LIB(c, getline, AC_DEFINE([HAVE_GETLINE], 1, [Define to 1 if getline is available.]))
+
 ################################################################################
 dnl -- Disable selinux
 AC_MSG_CHECKING(whether to enable selinux support)
@@ -210,20 +219,17 @@ AC_MSG_RESULT($SELINUX)
 ################################################################################
 dnl -- Check for selinux
 if test x$SELINUX = xyes; then
-	AC_MSG_CHECKING(for sepol_check_context function)
 	AC_CHECK_LIB(sepol, sepol_check_context, HAVE_SEPOL=yes, HAVE_SEPOL=no)
-	AC_MSG_RESULT($HAVE_SEPOL)
 
 	if test x$HAVE_SEPOL = xyes; then
+		AC_DEFINE([HAVE_SEPOL], 1, [Define to 1 if sepol_check_context is available.])
 		LIBS="-lsepol $LIBS"
 	fi
 
-	AC_MSG_CHECKING(for is_selinux_enabled function)
 	AC_CHECK_LIB(selinux, is_selinux_enabled, HAVE_SELINUX=yes, HAVE_SELINUX=no)
-	AC_MSG_RESULT($HAVE_SELINUX)
 
 	if test x$HAVE_SELINUX = xyes; then
-		LVM_DEFS="$LVM_DEFS -DHAVE_SELINUX"
+		AC_DEFINE([HAVE_SELINUX], 1, [Define to 1 if selinux is available.])
 		LIBS="-lselinux $LIBS"
 	else
 		AC_MSG_WARN(Disabling selinux)
@@ -232,7 +238,7 @@ fi
 
 ################################################################################
 dnl -- Check for getopt
-AC_CHECK_HEADERS(getopt.h, LVM_DEFS="$LVM_DEFS -DHAVE_GETOPTLONG")
+AC_CHECK_HEADERS(getopt.h, AC_DEFINE([HAVE_GETOPTLONG], 1, [Define to 1 if getopt_long is available.]))
 
 ################################################################################
 dnl -- Internationalisation stuff
@@ -359,7 +365,6 @@ AC_SUBST(kerneldir)
 AC_SUBST(missingkernel)
 AC_SUBST(kernelvsn)
 AC_SUBST(tmpdir)
-AC_SUBST(LVM_DEFS)
 AC_SUBST(CFLAGS)
 AC_SUBST(COPTIMISE_FLAG)
 AC_SUBST(CLDFLAGS)

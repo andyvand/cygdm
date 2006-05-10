@@ -34,7 +34,7 @@ endif
 
 distclean:
 	find . -maxdepth 2 -type l -exec $(RM) \{\} \;
-	$(RM) Makefile .include_symlinks .symlinks_created
+	$(RM) Makefile .include_symlinks .symlinks_created configure.h
 
 pofile: all
 
