@@ -26,16 +26,16 @@ endif
 
 ifeq ("@DMEVENTD@", "yes")
   SUBDIRS += dmeventd
+else
+  ifeq ($(MAKECMDGOALS),distclean)
+    SUBDIRS += dmeventd
+  endif
 endif
 
 SUBDIRS += lib dmsetup
 
 ifeq ($(MAKECMDGOALS),distclean)
   SUBDIRS += kernel po
-endif
-
-ifeq ($(MAKECMDGOALS),distclean)
-  SUBDIRS += dmeventd
 endif
 
 include make.tmpl
