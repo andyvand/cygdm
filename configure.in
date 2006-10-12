@@ -71,7 +71,7 @@ AC_HEADER_TIME
 
 AC_CHECK_HEADERS(ctype.h dirent.h errno.h fcntl.h getopt.h inttypes.h limits.h stdarg.h stdio.h stdlib.h string.h sys/ioctl.h sys/param.h sys/stat.h sys/types.h unistd.h,,AC_MSG_ERROR(bailing out))
 
-AC_CHECK_HEADERS(termios.h)
+AC_CHECK_HEADERS(termios.h sys/statvfs.h)
 ################################################################################
 dnl -- Checks for typedefs, structures, and compiler characteristics.
 AC_C_CONST
@@ -208,6 +208,11 @@ fi;
 dnl -- getline included in recent libc
 
 AC_CHECK_LIB(c, getline, AC_DEFINE([HAVE_GETLINE], 1, [Define to 1 if getline is available.]))
+
+################################################################################
+dnl -- canonicalize_file_name included in recent libc
+
+AC_CHECK_LIB(c, canonicalize_file_name, AC_DEFINE([HAVE_CANONICALIZE_FILE_NAME], 1, [Define to 1 if canonicalize_file_name is available.]))
 
 ################################################################################
 dnl -- Disable selinux
