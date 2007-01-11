@@ -30,11 +30,11 @@ CLEAN_TARGETS = dmsetup dmsetup.static
 include ../make.tmpl
 
 dmsetup: $(OBJECTS) $(interfacedir)/libdevmapper.$(LIB_SUFFIX)
-	$(CC) -o $@ $(OBJECTS) $(LDFLAGS) \
+	$(CC) -o $@ $(OBJECTS) $(CFLAGS) $(LDFLAGS) \
 	      -L$(interfacedir) -L$(DESTDIR)/lib -ldevmapper $(LIBS)
 
 dmsetup.static: $(OBJECTS) $(interfacedir)/libdevmapper.a
-	$(CC) -o $@ $(OBJECTS) $(LDFLAGS) -static \
+	$(CC) -o $@ $(OBJECTS) $(CFLAGS) $(LDFLAGS) -static \
 	      -L$(interfacedir) -L$(DESTDIR)/lib -ldevmapper $(LIBS)
 
 install: $(INSTALL_TYPE)
