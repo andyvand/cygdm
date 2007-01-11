@@ -168,7 +168,7 @@ fi
 dnl -- Override optimisation
 AC_MSG_CHECKING(for C optimisation flag)
 AC_ARG_WITH(optimisation,
-  [  --with-optimisation=OPT C optimisation flag [OPT=-O2] ],
+  [  --with-optimisation=OPT C optimisation flag [[OPT=-O2]] ],
   [ COPTIMISE_FLAG="$withval" ])
 AC_MSG_RESULT($COPTIMISE_FLAG)
 
@@ -262,7 +262,7 @@ if test x$INTL = xyes; then
 	fi;
 
 	AC_ARG_WITH(localedir,
-  		    [  --with-localedir=DIR    Translation files in DIR [PREFIX/share/locale]],
+  		    [  --with-localedir=DIR    Translation files in DIR [[PREFIX/share/locale]] ],
   		    [ LOCALEDIR="$withval" ],
   		    [ LOCALEDIR='${prefix}/share/locale' ])
 fi
@@ -328,7 +328,7 @@ AC_MSG_RESULT($kernelvsn)
 ################################################################################
 dnl -- Temporary directory for kernel diffs
 AC_ARG_WITH(tmp-dir,
-  [  --with-tmp-dir=DIR      temp directory to make kernel patches [/tmp/kerndiff]],
+  [  --with-tmp-dir=DIR      temp dir to make kernel patches [[/tmp/kerndiff]] ],
   [ tmpdir="$withval" ],
   [ tmpdir=/tmp/kerndiff ])
 if test "${with_tmp_dir+set}" = set; then
@@ -342,7 +342,7 @@ fi
 dnl -- which kernel interface to use (ioctl or fs)
 AC_MSG_CHECKING(for kernel interface choice)
 AC_ARG_WITH(interface,
-  [  --with-interface=IFACE  Choose kernel interface (ioctl or fs) [ioctl]],
+  [  --with-interface=IFACE  Choose kernel interface (ioctl or fs) [[ioctl]] ],
   [ interface="$withval" ],
   [ interface=ioctl ])
 if [[ "x$interface" != xfs -a "x$interface" != xioctl ]];
@@ -358,6 +358,15 @@ else
 fi
 
 
+################################################################################
+dnl -- dmeventd pidfile path
+AH_TEMPLATE(DMEVENTD_PIDFILE, [Path to dmeventd pidfile.])
+if test "$DMEVENTD" = yes; then
+	AC_ARG_WITH(dmeventd-pidfile,
+  		    [  --with-dmeventd-pidfile=PATH    dmeventd pidfile [[/var/run/dmeventd.pid]] ],
+  		    [ AC_DEFINE_UNQUOTED(DMEVENTD_PIDFILE,"$withval") ],
+  		    [ AC_DEFINE_UNQUOTED(DMEVENTD_PIDFILE,"/var/run/dmeventd.pid") ])
+fi
 ################################################################################
 AC_SUBST(usrlibdir)
 AC_SUBST(JOBS)

@@ -865,12 +865,13 @@ Optional Packages:
   --with-device-uid=UID   Set the owner used for new device nodes [UID=0]
   --with-device-gid=UID   Set the group used for new device nodes [GID=0]
   --with-device-mode=MODE Set the mode used for new device nodes [MODE=0600]
-  --with-optimisation=OPT C optimisation flag OPT=-O2
-  --with-localedir=DIR    Translation files in DIR PREFIX/share/locale
+  --with-optimisation=OPT C optimisation flag [OPT=-O2]
+  --with-localedir=DIR    Translation files in DIR [PREFIX/share/locale]
   --with-kernel-dir=DIR   linux kernel source in DIR
   --with-kernel-version=VERSION   linux kernel version
-  --with-tmp-dir=DIR      temp directory to make kernel patches /tmp/kerndiff
-  --with-interface=IFACE  Choose kernel interface (ioctl or fs) ioctl
+  --with-tmp-dir=DIR      temp dir to make kernel patches [/tmp/kerndiff]
+  --with-interface=IFACE  Choose kernel interface (ioctl or fs) [ioctl]
+  --with-dmeventd-pidfile=PATH    dmeventd pidfile [/var/run/dmeventd.pid]
 
 Some influential environment variables:
   CC          C compiler command
@@ -6036,6 +6037,25 @@ else
 fi
 
 
+################################################################################
+
+
+if test "$DMEVENTD" = yes; then
+
+# Check whether --with-dmeventd-pidfile or --without-dmeventd-pidfile was given.
+if test "${with_dmeventd_pidfile+set}" = set; then
+  withval="$with_dmeventd_pidfile"
+   cat >>confdefs.h <<_ACEOF
+#define DMEVENTD_PIDFILE "$withval"
+_ACEOF
+
+else
+   cat >>confdefs.h <<_ACEOF
+#define DMEVENTD_PIDFILE "/var/run/dmeventd.pid"
+_ACEOF
+
+fi;
+fi
 ################################################################################
 
 
