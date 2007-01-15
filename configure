@@ -872,6 +872,7 @@ Optional Packages:
   --with-tmp-dir=DIR      temp dir to make kernel patches [/tmp/kerndiff]
   --with-interface=IFACE  Choose kernel interface (ioctl or fs) [ioctl]
   --with-dmeventd-pidfile=PATH    dmeventd pidfile [/var/run/dmeventd.pid]
+  --with-dmeventd-path=PATH       dmeventd path [${exec_prefix}/sbin/dmeventd]
 
 Some influential environment variables:
   CC          C compiler command
@@ -6052,6 +6053,32 @@ _ACEOF
 else
    cat >>confdefs.h <<_ACEOF
 #define DMEVENTD_PIDFILE "/var/run/dmeventd.pid"
+_ACEOF
+
+fi;
+fi
+
+
+
+if test "$DMEVENTD" = yes; then
+        dmeventd_prefix="$exec_prefix"
+        if test "x$dmeventd_prefix" = "xNONE"; then
+                dmeventd_prefix="$prefix"
+        fi
+        if test "x$dmeventd_prefix" = "xNONE"; then
+                dmeventd_prefix=""
+        fi
+
+# Check whether --with-dmeventd-path or --without-dmeventd-path was given.
+if test "${with_dmeventd_path+set}" = set; then
+  withval="$with_dmeventd_path"
+   cat >>confdefs.h <<_ACEOF
+#define DMEVENTD_PATH "$withval"
+_ACEOF
+
+else
+   cat >>confdefs.h <<_ACEOF
+#define DMEVENTD_PATH "$dmeventd_pref/sbin/dmeventd"
 _ACEOF
 
 fi;
