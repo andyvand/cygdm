@@ -359,13 +359,28 @@ fi
 
 
 ################################################################################
-dnl -- dmeventd pidfile path
+dnl -- dmeventd pidfile and executable path
 AH_TEMPLATE(DMEVENTD_PIDFILE, [Path to dmeventd pidfile.])
 if test "$DMEVENTD" = yes; then
 	AC_ARG_WITH(dmeventd-pidfile,
   		    [  --with-dmeventd-pidfile=PATH    dmeventd pidfile [[/var/run/dmeventd.pid]] ],
   		    [ AC_DEFINE_UNQUOTED(DMEVENTD_PIDFILE,"$withval") ],
   		    [ AC_DEFINE_UNQUOTED(DMEVENTD_PIDFILE,"/var/run/dmeventd.pid") ])
+fi
+
+AH_TEMPLATE(DMEVENTD_PATH, [Path to dmeventd binary.])
+if test "$DMEVENTD" = yes; then
+        dmeventd_prefix="$exec_prefix"
+        if test "x$dmeventd_prefix" = "xNONE"; then
+                dmeventd_prefix="$prefix"
+        fi
+        if test "x$dmeventd_prefix" = "xNONE"; then
+                dmeventd_prefix=""
+        fi
+	AC_ARG_WITH(dmeventd-path,
+  		    [  --with-dmeventd-path=PATH    dmeventd path [[\${exec_prefix}/sbin/dmeventd]] ],
+  		    [ AC_DEFINE_UNQUOTED(DMEVENTD_PATH,"$withval") ],
+  		    [ AC_DEFINE_UNQUOTED(DMEVENTD_PATH,"$dmeventd_pref/sbin/dmeventd") ])
 fi
 ################################################################################
 AC_SUBST(usrlibdir)
