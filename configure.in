@@ -357,6 +357,7 @@ else
   DM_LIB_VERSION="Unknown version ($interface)"
 fi
 
+AC_DEFINE_UNQUOTED(DM_LIB_VERSION, $DM_LIB_VERSION, [Library version])
 
 ################################################################################
 dnl -- dmeventd pidfile and executable path
@@ -423,7 +424,6 @@ include/Makefile                                                        \
 dmsetup/Makefile							\
 lib/Makefile							 	\
 lib/libdevmapper.pc							\
-lib/libdm-common.h						 	\
 dmeventd/Makefile						 	\
 dmeventd/libdevmapper-event.pc						\
 kernel/Makefile								\

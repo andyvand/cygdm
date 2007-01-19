@@ -6038,6 +6038,11 @@ else
 fi
 
 
+cat >>confdefs.h <<_ACEOF
+#define DM_LIB_VERSION $DM_LIB_VERSION
+_ACEOF
+
+
 ################################################################################
 
 
@@ -6115,7 +6120,7 @@ fi
 
 
 ################################################################################
-                                                                                                                        ac_config_files="$ac_config_files Makefile make.tmpl include/Makefile dmsetup/Makefile lib/Makefile lib/libdevmapper.pc lib/libdm-common.h dmeventd/Makefile dmeventd/libdevmapper-event.pc kernel/Makefile man/Makefile po/Makefile"
+                                                                                                              ac_config_files="$ac_config_files Makefile make.tmpl include/Makefile dmsetup/Makefile lib/Makefile lib/libdevmapper.pc dmeventd/Makefile dmeventd/libdevmapper-event.pc kernel/Makefile man/Makefile po/Makefile"
 cat >confcache <<\_ACEOF
 # This file is a shell script that caches the results of configure
 # tests run on this system so they can be shared between configure
@@ -6647,7 +6652,6 @@ do
   "dmsetup/Makefile" ) CONFIG_FILES="$CONFIG_FILES dmsetup/Makefile" ;;
   "lib/Makefile" ) CONFIG_FILES="$CONFIG_FILES lib/Makefile" ;;
   "lib/libdevmapper.pc" ) CONFIG_FILES="$CONFIG_FILES lib/libdevmapper.pc" ;;
-  "lib/libdm-common.h" ) CONFIG_FILES="$CONFIG_FILES lib/libdm-common.h" ;;
   "dmeventd/Makefile" ) CONFIG_FILES="$CONFIG_FILES dmeventd/Makefile" ;;
   "dmeventd/libdevmapper-event.pc" ) CONFIG_FILES="$CONFIG_FILES dmeventd/libdevmapper-event.pc" ;;
   "kernel/Makefile" ) CONFIG_FILES="$CONFIG_FILES kernel/Makefile" ;;
