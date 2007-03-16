@@ -294,9 +294,10 @@ int multilog_add_type(enum log_type type, void *data)
 	/*
 	 * Preallocate because we don't want to sleep holding a lock.
 	 */
-	if (!(logl = malloc(sizeof(*logl))) ||
-	    !(memset(logl, 0, sizeof(*logl))))
+	if (!(logl = malloc(sizeof(*logl))))
 		return 0;
+
+	memset(logl, 0, sizeof(*logl));
 
 	/*
 	 * If the type has already been registered, it doesn't need to
@@ -315,11 +316,7 @@ int multilog_add_type(enum log_type type, void *data)
 
 	logl->type = type;
 
-	if(!memset(&logl->data, 0, sizeof(logl->data))) {
-		/* Should never get here */
-		free(logl);
-		return 0;
-	}
+	memset(&logl->data, 0, sizeof(logl->data));
 
 	logl->data.verbose_level = DEFAULT_VERBOSITY;
 	logl->log = nop_log;

@@ -28,8 +28,8 @@ void *init_locking(void)
 	pthread_mutex_t *mutex;
 	if(!(mutex = malloc(sizeof(*mutex))))
 		return NULL;
-	if(!memset(mutex, 0, sizeof(*mutex)))
-		return NULL;
+	memset(mutex, 0, sizeof(*mutex));
+
 	/*
 	 * Hack to ensure DSO loading fails if not linked with
 	 * libpthread
