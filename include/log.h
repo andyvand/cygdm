@@ -13,8 +13,8 @@
  * Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef LIB_DMLOG_H
-#define LIB_DMLOG_H
+#ifndef _DM_LOG_H
+#define _DM_LOG_H
 
 #include "libdevmapper.h"
 

@@ -12,8 +12,8 @@
  * Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _LVM_KDEV_H
-#define _LVM_KDEV_H
+#ifndef _DM_KDEV_H
+#define _DM_KDEV_H
 
 #define MAJOR(dev)      ((dev & 0xfff00) >> 8)
 #define MINOR(dev)      ((dev & 0xff) | ((dev >> 12) & 0xfff00))

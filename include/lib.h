@@ -16,8 +16,8 @@
 /*
  * This file must be included first by every library source file.
  */
-#ifndef _LVM_LIB_H
-#define _LVM_LIB_H
+#ifndef _DM_LIB_H
+#define _DM_LIB_H
 
 #define _REENTRANT
 #define _GNU_SOURCE

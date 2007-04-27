@@ -13,8 +13,8 @@
  * Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-#ifndef _LVM_INTL_H
-#define _LVM_INTL_H
+#ifndef _DM_INTL_H
+#define _DM_INTL_H
 
 #ifdef INTL_PACKAGE
 #  include <libintl.h>
