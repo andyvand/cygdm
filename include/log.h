@@ -18,6 +18,8 @@
 
 #include "libdevmapper.h"
 
+#define _LOG_STDERR 128 /* force things to go to stderr, even if loglevel
+			   would make them go to stdout */
 #define _LOG_DEBUG 7
 #define _LOG_INFO 6
 #define _LOG_NOTICE 5
@@ -31,6 +33,7 @@ extern dm_log_fn dm_log;
 
 #define log_error(x...) plog(_LOG_ERR, x)
 #define log_print(x...) plog(_LOG_WARN, x)
+#define log_warn(x...) plog(_LOG_WARN | _LOG_STDERR, x)
 #define log_verbose(x...) plog(_LOG_NOTICE, x)
 #define log_very_verbose(x...) plog(_LOG_INFO, x)
 #define log_debug(x...) plog(_LOG_DEBUG, x)
