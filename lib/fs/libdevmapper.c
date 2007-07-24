@@ -150,7 +150,8 @@ static int do_suspend(char *mnt, char *name, int on)
 			ret = 1;
 		else
 			log_error("%s: fputc failed: %s", path, strerror(errno));
-		fclose(fp);
+		if (fclose(fp))
+			log_error("%s: write failed: %s", path, strerror(errno));
 	} else
 		log_error("%s: fopen failed: %s", path, strerror(errno));
 
