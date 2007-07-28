@@ -149,11 +149,11 @@ static int do_suspend(char *mnt, char *name, int on)
 		if (fputc(c, fp) == (int)c)
 			ret = 1;
 		else
-			log_error("%s: fputc failed: %s", path, strerror(errno));
+			log_sys_error("fputc", path);
 		if (fclose(fp))
-			log_error("%s: write failed: %s", path, strerror(errno));
+			log_sys_error("write", path);
 	} else
-		log_error("%s: fopen failed: %s", path, strerror(errno));
+		log_sys_error("fopen", path);
 
 	free(path);
 
@@ -174,10 +174,10 @@ static int do_newold(char *mnt, char *name, do_newold_t create)
 			if (errno == EEXIST && !stat(path, &st) &&
 			    S_ISDIR(st.st_mode)) 
 				ret = 1;
-			log_error("%s: mkdir failed: %s", path, strerror(errno));
+			log_sys_error("mkdir", path);
 		}
 	} else if ((ret = rmdir(path)) < 0)
-		log_error("%s: rmdir failed: %s", path, strerror(errno));
+		log_sys_error("rmdir", path);
 
 	free(path);
 
@@ -216,10 +216,10 @@ static int do_suspend_state(char *mnt, char *name, struct dm_info *info)
 		if (fscanf(fp, "%d", &info->suspended) == 1)
 			ret = 1;
 		else
-			log_error("%s fscanf failed: %s", path, strerror(errno));
+			log_sys_error("fscanf", path);
 		fclose(fp);
 	} else
-		log_error("%s: fopen failed: %s", path, strerror(errno));
+		log_sys_error("fopen", path);
 
 	free(path);
 
@@ -288,7 +288,7 @@ static int do_load(char *mnt, char *name, struct dm_task *dmt)
 
 	if ((fd = open(path, O_RDWR)) != -1) {
 		if (!(ret = write_data(fd, dmt)))
-			log_error("%s: write failed: %s", path, strerror(errno));
+			log_sys_error("write", path);
 		close(fd);
 	}
 
@@ -315,7 +315,7 @@ static int do_error_check(char *mnt, char *name)
 		return 0;
 
 	if (!(fp = fopen(path, "r"))) {
-		log_error("%s: fopen failed: %s", path, strerror(errno));
+		log_sys_error("fopen", path);
 		free(path);
 		return 0;
 	}
@@ -338,7 +338,7 @@ static char *find_mount_point(void)
 	char fstype[30];
 
 	if (!(fp = fopen("/proc/mounts", "r"))) {
-		log_error("/proc/mounts: fopen failed: %s", strerror(errno));
+		log_sys_error("fopen", "/proc/mounts");
 		return NULL;
 	}
 

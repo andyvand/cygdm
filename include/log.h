@@ -38,6 +38,14 @@ extern dm_log_fn dm_log;
 #define log_very_verbose(x...) plog(_LOG_INFO, x)
 #define log_debug(x...) plog(_LOG_DEBUG, x)
 
+/* System call equivalents */
+#define log_sys_error(x, y) \
+		log_error("%s: %s failed: %s", y, x, strerror(errno))
+#define log_sys_very_verbose(x, y) \
+		log_info("%s: %s failed: %s", y, x, strerror(errno))
+#define log_sys_debug(x, y) \
+		log_debug("%s: %s failed: %s", y, x, strerror(errno))
+
 #define stack log_debug("<backtrace>")  /* Backtrace on error */
 
 #define return_0	do { stack; return 0; } while (0)
