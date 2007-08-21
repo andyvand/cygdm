@@ -240,6 +240,18 @@ if test x$SELINUX = xyes; then
 	else
 		AC_MSG_WARN(Disabling selinux)
 	fi
+
+	# With --enable-static_link and selinux enabled, linking dmsetup
+	# fails on at least Debian unstable due to unsatisfied references
+	# to pthread_mutex_lock and _unlock.  See if we need -lpthread.
+	if test "$STATIC_LINK-$HAVE_SELINUX" = yes-yes; then
+		dm_saved_libs=$LIBS
+		LIBS="$LIBS -static"
+		AC_SEARCH_LIBS([pthread_mutex_lock], [pthread],
+		  [test "$ac_cv_search_pthread_mutex_lock" = "none required" ||
+				LIB_PTHREAD=-lpthread])
+		LIBS=$dm_saved_libs
+	fi
 fi
 
 ################################################################################
@@ -414,6 +426,7 @@ AC_SUBST(DEVICE_GID)
 AC_SUBST(DEVICE_MODE)
 AC_SUBST(DMEVENTD)
 AC_SUBST(PKGCONFIG)
+AC_SUBST([LIB_PTHREAD])
 
 ################################################################################
 dnl -- First and last lines should not contain files to generate in order to 

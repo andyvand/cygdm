@@ -18,6 +18,7 @@ VPATH = @srcdir@
 
 TARGETS = dmsetup
 INSTALL_TYPE = install_dynamic
+LIB_PTHREAD = @LIB_PTHREAD@
 
 ifeq ("@STATIC_LINK@", "yes")
   TARGETS += dmsetup.static
@@ -35,7 +36,8 @@ dmsetup: $(OBJECTS) $(interfacedir)/libdevmapper.$(LIB_SUFFIX)
 
 dmsetup.static: $(OBJECTS) $(interfacedir)/libdevmapper.a
 	$(CC) -o $@ $(OBJECTS) $(CFLAGS) $(LDFLAGS) -static \
-	      -L$(interfacedir) -L$(DESTDIR)/lib -ldevmapper $(LIBS)
+	      -L$(interfacedir) -L$(DESTDIR)/lib -ldevmapper $(LIBS) \
+	      $(LIB_PTHREAD)
 
 install: $(INSTALL_TYPE)
 
