@@ -1316,7 +1316,7 @@ Optional Packages:
   --with-kernel-dir=DIR   linux kernel source in DIR
   --with-kernel-version=VERSION   linux kernel version
   --with-tmp-dir=DIR      temp dir to make kernel patches [/tmp/kerndiff]
-  --with-interface=IFACE  Choose kernel interface (ioctl or fs) [ioctl]
+  --with-interface=IFACE  Choose kernel interface (ioctl) [ioctl]
   --with-dmeventd-pidfile=PATH    dmeventd pidfile [/var/run/dmeventd.pid]
   --with-dmeventd-path=PATH       dmeventd path [${exec_prefix}/sbin/dmeventd]
 
@@ -6492,10 +6492,10 @@ else
    interface=ioctl
 fi
 
-if [ "x$interface" != xfs -a "x$interface" != xioctl ];
+if [ "x$interface" != xioctl ];
 then
-  { { echo "$as_me:$LINENO: error: --with-interface=ioctl or --with-interface=fs required" >&5
-echo "$as_me: error: --with-interface=ioctl or --with-interface=fs required" >&2;}
+  { { echo "$as_me:$LINENO: error: --with-interface=ioctl required. fs no longer supported." >&5
+echo "$as_me: error: --with-interface=ioctl required. fs no longer supported." >&2;}
    { (exit 1); exit 1; }; }
 fi
 { echo "$as_me:$LINENO: result: $interface" >&5

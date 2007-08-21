@@ -340,15 +340,15 @@ if test "${with_tmpdir+set}" = set; then
 fi
 
 ################################################################################
-dnl -- which kernel interface to use (ioctl or fs)
+dnl -- which kernel interface to use (ioctl only)
 AC_MSG_CHECKING(for kernel interface choice)
 AC_ARG_WITH(interface,
-  [  --with-interface=IFACE  Choose kernel interface (ioctl or fs) [[ioctl]] ],
+  [  --with-interface=IFACE  Choose kernel interface (ioctl) [[ioctl]] ],
   [ interface="$withval" ],
   [ interface=ioctl ])
-if [[ "x$interface" != xfs -a "x$interface" != xioctl ]];
+if [[ "x$interface" != xioctl ]];
 then
-  AC_MSG_ERROR(--with-interface=ioctl or --with-interface=fs required)
+  AC_MSG_ERROR(--with-interface=ioctl required. fs no longer supported.)
 fi
 AC_MSG_RESULT($interface)
 
