@@ -174,7 +174,7 @@ endif
 
 $(VERSIONED_SHLIB): %.$(LIB_SUFFIX).$(LIB_VERSION): %.$(LIB_SUFFIX)
 	rm -f $@
-	$(LN_S) $< $@
+	$(LN_S) $(notdir $<) $@
 
 $(LIB_STATIC): $(OBJECTS)
 	$(RM) $@
@@ -214,4 +214,3 @@ ifneq ($(MAKECMDGOALS),clean)
     endif
   endif
 endif
-
