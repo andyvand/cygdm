@@ -172,10 +172,6 @@ $(LIB_SHARED): $(OBJECTS) $(LDDEPS)
 	$(CFLAGS) $(CLDFLAGS) $(OBJECTS) $(LIBS) -o $@
 endif
 
-$(VERSIONED_SHLIB): %.$(LIB_SUFFIX).$(LIB_VERSION): %.$(LIB_SUFFIX)
-	rm -f $(notdir $@)
-	$(LN_S) $< $(notdir $@)
-
 $(LIB_STATIC): $(OBJECTS)
 	$(RM) $@
 	$(AR) rs $@ $(OBJECTS)
