@@ -173,7 +173,7 @@ $(LIB_SHARED): $(OBJECTS) $(LDDEPS)
 endif
 
 $(VERSIONED_SHLIB): %.$(LIB_SUFFIX).$(LIB_VERSION): %.$(LIB_SUFFIX)
-	rm -f $@
+	rm -f $(notdir $@)
 	$(LN_S) $< $(notdir $@)
 
 $(LIB_STATIC): $(OBJECTS)
