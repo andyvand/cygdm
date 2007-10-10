@@ -6646,7 +6646,7 @@ _ACEOF
 
 else
    cat >>confdefs.h <<_ACEOF
-#define DMEVENTD_PATH "$dmeventd_pref/sbin/dmeventd"
+#define DMEVENTD_PATH "$dmeventd_prefix/sbin/dmeventd"
 _ACEOF
 
 fi

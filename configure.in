@@ -394,7 +394,7 @@ if test "$DMEVENTD" = yes; then
 	AC_ARG_WITH(dmeventd-path,
   		    [  --with-dmeventd-path=PATH       dmeventd path [[${exec_prefix}/sbin/dmeventd]] ],
   		    [ AC_DEFINE_UNQUOTED(DMEVENTD_PATH,"$withval") ],
-  		    [ AC_DEFINE_UNQUOTED(DMEVENTD_PATH,"$dmeventd_pref/sbin/dmeventd") ])
+  		    [ AC_DEFINE_UNQUOTED(DMEVENTD_PATH,"$dmeventd_prefix/sbin/dmeventd") ])
 fi
 ################################################################################
 AC_SUBST(usrlibdir)
