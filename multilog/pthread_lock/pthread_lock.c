@@ -62,7 +62,6 @@ int unlock_fn(void *handle)
 void destroy_locking(void *handle)
 {
         pthread_mutex_t *mutex = (pthread_mutex_t *)handle;
-	if(mutex)
-		free(mutex);
+	free(mutex);
 }
 

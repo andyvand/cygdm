@@ -220,10 +220,8 @@ int main(int argc, char **argv)
    out:
 	multilog_del_type(standard);
 
-	if (device)
-		free(device);
-	if (dso_name)
-		free(dso_name);
+	free(device);
+	free(dso_name);
 
 	exit(ret);
 }
