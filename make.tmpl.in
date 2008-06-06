@@ -77,11 +77,11 @@ endif
 LDFLAGS += -L$(interfacedir)
 CLDFLAGS += -L$(interfacedir)
 
-ifeq ("@COMPAT@", "yes")
+ifeq ("@DM_COMPAT@", "yes")
   DEFS += -DDM_COMPAT
 endif
 
-ifeq ("@DMIOCTLS@", "yes")
+ifeq ("@DM_IOCTLS@", "yes")
   DEFS += -DDM_IOCTLS
 endif
 

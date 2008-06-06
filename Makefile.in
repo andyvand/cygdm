@@ -24,7 +24,7 @@ ifeq ("@INTL@", "yes")
   SUBDIRS += po
 endif
 
-ifeq ("@DMEVENTD@", "yes")
+ifeq ("@BUILD_DMEVENTD@", "yes")
   SUBDIRS += dmeventd
 else
   ifeq ($(MAKECMDGOALS),distclean)

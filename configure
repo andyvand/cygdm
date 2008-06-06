@@ -686,23 +686,22 @@ ALLOCA
 LIBOBJS
 POW_LIB
 MSGFMT
+BUILD_DMEVENTD
 CLDFLAGS
 CLDNOWHOLEARCHIVE
 CLDWHOLEARCHIVE
 CLUSTER
 CLVMD
 CMDLIB
-COMPAT
-CONFDIR
 COPTIMISE_FLAG
 DEBUG
-DEVICE_GID
-DEVICE_MODE
-DEVICE_UID
 DEVMAPPER
 DMDIR
-DMEVENTD
-DMIOCTLS
+DM_COMPAT
+DM_DEVICE_GID
+DM_DEVICE_MODE
+DM_DEVICE_UID
+DM_IOCTLS
 DM_LIB_VERSION
 FSADM
 GROUP
@@ -717,6 +716,7 @@ LIB_SUFFIX
 LOCALEDIR
 LVM1
 LVM1_FALLBACK
+LVM_CONF_DIR
 LVM_VERSION
 MIRRORS
 OWNER
@@ -1950,7 +1950,7 @@ case "$host_os" in
 		LIB_SUFFIX=so
 		DEVMAPPER=yes
 		ODIRECT=yes
-		DMIOCTLS=yes
+		DM_IOCTLS=yes
 		SELINUX=yes
 		REALTIME=yes
 		CLUSTER=internal
@@ -1965,7 +1965,7 @@ case "$host_os" in
 		LIB_SUFFIX=dylib
 		DEVMAPPER=yes
 		ODIRECT=no
-		DMIOCTLS=no
+		DM_IOCTLS=no
 		SELINUX=no
 		REALTIME=no
 		CLUSTER=none
@@ -7836,13 +7836,13 @@ echo $ECHO_N "checking device node uid... $ECHO_C" >&6; }
 
 # Check whether --with-device-uid was given.
 if test "${with_device_uid+set}" = set; then
-  withval=$with_device_uid;  DEVICE_UID="$withval"
+  withval=$with_device_uid;  DM_DEVICE_UID="$withval"
 else
-   DEVICE_UID="0"
+   DM_DEVICE_UID="0"
 fi
 
-{ echo "$as_me:$LINENO: result: $DEVICE_UID" >&5
-echo "${ECHO_T}$DEVICE_UID" >&6; }
+{ echo "$as_me:$LINENO: result: $DM_DEVICE_UID" >&5
+echo "${ECHO_T}$DM_DEVICE_UID" >&6; }
 
 ################################################################################
 { echo "$as_me:$LINENO: checking device node gid" >&5
@@ -7851,13 +7851,13 @@ echo $ECHO_N "checking device node gid... $ECHO_C" >&6; }
 
 # Check whether --with-device-gid was given.
 if test "${with_device_gid+set}" = set; then
-  withval=$with_device_gid;  DEVICE_GID="$withval"
+  withval=$with_device_gid;  DM_DEVICE_GID="$withval"
 else
-   DEVICE_GID="0"
+   DM_DEVICE_GID="0"
 fi
 
-{ echo "$as_me:$LINENO: result: $DEVICE_GID" >&5
-echo "${ECHO_T}$DEVICE_GID" >&6; }
+{ echo "$as_me:$LINENO: result: $DM_DEVICE_GID" >&5
+echo "${ECHO_T}$DM_DEVICE_GID" >&6; }
 
 ################################################################################
 { echo "$as_me:$LINENO: checking device node mode" >&5
@@ -7866,13 +7866,13 @@ echo $ECHO_N "checking device node mode... $ECHO_C" >&6; }
 
 # Check whether --with-device-mode was given.
 if test "${with_device_mode+set}" = set; then
-  withval=$with_device_mode;  DEVICE_MODE="$withval"
+  withval=$with_device_mode;  DM_DEVICE_MODE="$withval"
 else
-   DEVICE_MODE="0600"
+   DM_DEVICE_MODE="0600"
 fi
 
-{ echo "$as_me:$LINENO: result: $DEVICE_MODE" >&5
-echo "${ECHO_T}$DEVICE_MODE" >&6; }
+{ echo "$as_me:$LINENO: result: $DM_DEVICE_MODE" >&5
+echo "${ECHO_T}$DM_DEVICE_MODE" >&6; }
 
 ################################################################################
 { echo "$as_me:$LINENO: checking whether to enable debugging" >&5
@@ -7908,25 +7908,25 @@ echo "${ECHO_T}$COPTIMISE_FLAG" >&6; }
 ################################################################################
 # Check whether --enable-compat was given.
 if test "${enable_compat+set}" = set; then
-  enableval=$enable_compat; COMPAT=$enableval
+  enableval=$enable_compat; DM_COMPAT=$enableval
 else
-  COMPAT=no
+  DM_COMPAT=no
 fi
 
 
 ################################################################################
 # Check whether --enable-ioctl was given.
 if test "${enable_ioctl+set}" = set; then
-  enableval=$enable_ioctl; DMIOCTLS=$enableval
+  enableval=$enable_ioctl; DM_IOCTLS=$enableval
 fi
 
 
 ################################################################################
 # Check whether --enable-dmeventd was given.
 if test "${enable_dmeventd+set}" = set; then
-  enableval=$enable_dmeventd; DMEVENTD=$enableval
+  enableval=$enable_dmeventd; BUILD_DMEVENTD=$enableval
 else
-  DMEVENTD=no
+  BUILD_DMEVENTD=no
 fi
 
 
@@ -8879,7 +8879,7 @@ _ACEOF
 ################################################################################
 
 
-if test "$DMEVENTD" = yes; then
+if test "$BUILD_DMEVENTD" = yes; then
 
 # Check whether --with-dmeventd-pidfile was given.
 if test "${with_dmeventd_pidfile+set}" = set; then
@@ -8898,7 +8898,7 @@ fi
 
 
 
-if test "$DMEVENTD" = yes; then
+if test "$BUILD_DMEVENTD" = yes; then
         dmeventd_prefix="$exec_prefix"
         if test "x$dmeventd_prefix" = "xNONE"; then
                 dmeventd_prefix="$prefix"
@@ -9676,23 +9676,22 @@ ALLOCA!$ALLOCA$ac_delim
 LIBOBJS!$LIBOBJS$ac_delim
 POW_LIB!$POW_LIB$ac_delim
 MSGFMT!$MSGFMT$ac_delim
+BUILD_DMEVENTD!$BUILD_DMEVENTD$ac_delim
 CLDFLAGS!$CLDFLAGS$ac_delim
 CLDNOWHOLEARCHIVE!$CLDNOWHOLEARCHIVE$ac_delim
 CLDWHOLEARCHIVE!$CLDWHOLEARCHIVE$ac_delim
 CLUSTER!$CLUSTER$ac_delim
 CLVMD!$CLVMD$ac_delim
 CMDLIB!$CMDLIB$ac_delim
-COMPAT!$COMPAT$ac_delim
-CONFDIR!$CONFDIR$ac_delim
 COPTIMISE_FLAG!$COPTIMISE_FLAG$ac_delim
 DEBUG!$DEBUG$ac_delim
-DEVICE_GID!$DEVICE_GID$ac_delim
-DEVICE_MODE!$DEVICE_MODE$ac_delim
-DEVICE_UID!$DEVICE_UID$ac_delim
 DEVMAPPER!$DEVMAPPER$ac_delim
 DMDIR!$DMDIR$ac_delim
-DMEVENTD!$DMEVENTD$ac_delim
-DMIOCTLS!$DMIOCTLS$ac_delim
+DM_COMPAT!$DM_COMPAT$ac_delim
+DM_DEVICE_GID!$DM_DEVICE_GID$ac_delim
+DM_DEVICE_MODE!$DM_DEVICE_MODE$ac_delim
+DM_DEVICE_UID!$DM_DEVICE_UID$ac_delim
+DM_IOCTLS!$DM_IOCTLS$ac_delim
 DM_LIB_VERSION!$DM_LIB_VERSION$ac_delim
 FSADM!$FSADM$ac_delim
 GROUP!$GROUP$ac_delim
@@ -9701,6 +9700,7 @@ HAVE_REALTIME!$HAVE_REALTIME$ac_delim
 HAVE_SELINUX!$HAVE_SELINUX$ac_delim
 INTL!$INTL$ac_delim
 INTL_PACKAGE!$INTL_PACKAGE$ac_delim
+JOBS!$JOBS$ac_delim
 _ACEOF
 
   if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 97; then
@@ -9742,12 +9742,12 @@ _ACEOF
 ac_delim='%!_!# '
 for ac_last_try in false false false false false :; do
   cat >conf$$subs.sed <<_ACEOF
-JOBS!$JOBS$ac_delim
 LDDEPS!$LDDEPS$ac_delim
 LIB_SUFFIX!$LIB_SUFFIX$ac_delim
 LOCALEDIR!$LOCALEDIR$ac_delim
 LVM1!$LVM1$ac_delim
 LVM1_FALLBACK!$LVM1_FALLBACK$ac_delim
+LVM_CONF_DIR!$LVM_CONF_DIR$ac_delim
 LVM_VERSION!$LVM_VERSION$ac_delim
 MIRRORS!$MIRRORS$ac_delim
 OWNER!$OWNER$ac_delim

@@ -38,7 +38,7 @@ case "$host_os" in
 		LIB_SUFFIX=so
 		DEVMAPPER=yes
 		ODIRECT=yes
-		DMIOCTLS=yes
+		DM_IOCTLS=yes
 		SELINUX=yes
 		REALTIME=yes
 		CLUSTER=internal
@@ -53,7 +53,7 @@ case "$host_os" in
 		LIB_SUFFIX=dylib
 		DEVMAPPER=yes
 		ODIRECT=no
-		DMIOCTLS=no
+		DM_IOCTLS=no
 		SELINUX=no
 		REALTIME=no
 		CLUSTER=none
@@ -158,8 +158,8 @@ AC_MSG_CHECKING(device node uid)
 
 AC_ARG_WITH(device-uid,
   [  --with-device-uid=UID   Set the owner used for new device nodes [[UID=0]] ],
-  [ DEVICE_UID="$withval" ], [ DEVICE_UID="0" ] )
-AC_MSG_RESULT($DEVICE_UID)
+  [ DM_DEVICE_UID="$withval" ], [ DM_DEVICE_UID="0" ] )
+AC_MSG_RESULT($DM_DEVICE_UID)
 
 ################################################################################
 dnl -- Setup device group ownership
@@ -167,8 +167,8 @@ AC_MSG_CHECKING(device node gid)
 
 AC_ARG_WITH(device-gid,
   [  --with-device-gid=UID   Set the group used for new device nodes [[GID=0]] ],
-  [ DEVICE_GID="$withval" ], [ DEVICE_GID="0" ] )
-AC_MSG_RESULT($DEVICE_GID)
+  [ DM_DEVICE_GID="$withval" ], [ DM_DEVICE_GID="0" ] )
+AC_MSG_RESULT($DM_DEVICE_GID)
 
 ################################################################################
 dnl -- Setup device mode
@@ -176,8 +176,8 @@ AC_MSG_CHECKING(device node mode)
 
 AC_ARG_WITH(device-mode,
   [  --with-device-mode=MODE Set the mode used for new device nodes [[MODE=0600]] ],
-  [ DEVICE_MODE="$withval" ], [ DEVICE_MODE="0600" ] )
-AC_MSG_RESULT($DEVICE_MODE)
+  [ DM_DEVICE_MODE="$withval" ], [ DM_DEVICE_MODE="0600" ] )
+AC_MSG_RESULT($DM_DEVICE_MODE)
 
 ################################################################################
 dnl -- Enable debugging
@@ -204,17 +204,17 @@ AC_MSG_RESULT($COPTIMISE_FLAG)
 ################################################################################
 dnl -- Compatibility mode
 AC_ARG_ENABLE(compat,   [  --enable-compat         Enable support for old device-mapper versions],
-  COMPAT=$enableval, COMPAT=no)
+  DM_COMPAT=$enableval, DM_COMPAT=no)
 
 ################################################################################
 dnl -- Disable ioctl
 AC_ARG_ENABLE(ioctl,   [  --disable-driver        Disable calls to device-mapper in the kernel],
-  DMIOCTLS=$enableval)
+  DM_IOCTLS=$enableval)
 
 ################################################################################
 dnl -- Enable dmeventd
 AC_ARG_ENABLE(dmeventd,   [  --enable-dmeventd       Build the new event daemon],
-  DMEVENTD=$enableval, DMEVENTD=no)
+  BUILD_DMEVENTD=$enableval, BUILD_DMEVENTD=no)
 
 ################################################################################
 dnl -- Enable pkg-config
@@ -421,7 +421,7 @@ AC_DEFINE_UNQUOTED(DM_LIB_VERSION, $DM_LIB_VERSION, [Library version])
 ################################################################################
 dnl -- dmeventd pidfile and executable path
 AH_TEMPLATE(DMEVENTD_PIDFILE, [Path to dmeventd pidfile.])
-if test "$DMEVENTD" = yes; then
+if test "$BUILD_DMEVENTD" = yes; then
 	AC_ARG_WITH(dmeventd-pidfile,
 		    [  --with-dmeventd-pidfile=PATH    dmeventd pidfile [[/var/run/dmeventd.pid]] ],
 		    [ AC_DEFINE_UNQUOTED(DMEVENTD_PIDFILE,"$withval") ],
@@ -429,7 +429,7 @@ if test "$DMEVENTD" = yes; then
 fi
 
 AH_TEMPLATE(DMEVENTD_PATH, [Path to dmeventd binary.])
-if test "$DMEVENTD" = yes; then
+if test "$BUILD_DMEVENTD" = yes; then
         dmeventd_prefix="$exec_prefix"
         if test "x$dmeventd_prefix" = "xNONE"; then
                 dmeventd_prefix="$prefix"
@@ -444,6 +444,7 @@ if test "$DMEVENTD" = yes; then
 fi
 
 ################################################################################
+AC_SUBST(BUILD_DMEVENTD)
 AC_SUBST(CFLAGS)
 AC_SUBST(CFLOW_CMD)
 AC_SUBST(CLDFLAGS)
@@ -452,18 +453,16 @@ AC_SUBST(CLDWHOLEARCHIVE)
 AC_SUBST(CLUSTER)
 AC_SUBST(CLVMD)
 AC_SUBST(CMDLIB)
-AC_SUBST(COMPAT)
-AC_SUBST(CONFDIR)
 AC_SUBST(COPTIMISE_FLAG)
 AC_SUBST(CSCOPE_CMD)
 AC_SUBST(DEBUG)
-AC_SUBST(DEVICE_GID)
-AC_SUBST(DEVICE_MODE)
-AC_SUBST(DEVICE_UID)
 AC_SUBST(DEVMAPPER)
 AC_SUBST(DMDIR)
-AC_SUBST(DMEVENTD)
-AC_SUBST(DMIOCTLS)
+AC_SUBST(DM_COMPAT)
+AC_SUBST(DM_DEVICE_GID)
+AC_SUBST(DM_DEVICE_MODE)
+AC_SUBST(DM_DEVICE_UID)
+AC_SUBST(DM_IOCTLS)
 AC_SUBST(DM_LIB_VERSION)
 AC_SUBST(FSADM)
 AC_SUBST(GROUP)
@@ -479,6 +478,7 @@ AC_SUBST(LIB_SUFFIX)
 AC_SUBST(LOCALEDIR)
 AC_SUBST(LVM1)
 AC_SUBST(LVM1_FALLBACK)
+AC_SUBST(LVM_CONF_DIR)
 AC_SUBST(LVM_VERSION)
 AC_SUBST(MIRRORS)
 AC_SUBST(MSGFMT)
