@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2001-2004 Sistina Software, Inc. All rights reserved.
- * Copyright (C) 2004-2007 Red Hat, Inc. All rights reserved.
+ * Copyright (C) 2004-2008 Red Hat, Inc. All rights reserved.
  *
  * This file is part of the device-mapper userspace tools.
  *
@@ -81,9 +81,18 @@ static inline void list_del(struct list *elem)
 }
 
 /*
+ * Remove an element from existing list and insert before 'head'.
+ */
+static inline void list_move(struct list *head, struct list *elem)
+{
+	list_del(elem);
+	list_add(head, elem);
+}
+
+/*
  * Is the list empty?
  */
-static inline int list_empty(struct list *head)
+static inline int list_empty(const struct list *head)
 {
 	return head->n == head;
 }
@@ -91,7 +100,7 @@ static inline int list_empty(struct list *head)
 /*
  * Is this the first element of the list?
  */
-static inline int list_start(struct list *head, struct list *elem)
+static inline int list_start(const struct list *head, const struct list *elem)
 {
 	return elem->p == head;
 }
@@ -99,7 +108,7 @@ static inline int list_start(struct list *head, struct list *elem)
 /*
  * Is this the last element of the list?
  */
-static inline int list_end(struct list *head, struct list *elem)
+static inline int list_end(const struct list *head, const struct list *elem)
 {
 	return elem->n == head;
 }
@@ -107,7 +116,7 @@ static inline int list_end(struct list *head, struct list *elem)
 /*
  * Return first element of the list or NULL if empty
  */
-static inline struct list *list_first(struct list *head)
+static inline struct list *list_first(const struct list *head)
 {
 	return (list_empty(head) ? NULL : head->n);
 }
@@ -115,7 +124,7 @@ static inline struct list *list_first(struct list *head)
 /*
  * Return last element of the list or NULL if empty
  */
-static inline struct list *list_last(struct list *head)
+static inline struct list *list_last(const struct list *head)
 {
 	return (list_empty(head) ? NULL : head->p);
 }
@@ -123,7 +132,7 @@ static inline struct list *list_last(struct list *head)
 /*
  * Return the previous element of the list, or NULL if we've reached the start.
  */
-static inline struct list *list_prev(struct list *head, struct list *elem)
+static inline struct list *list_prev(const struct list *head, const struct list *elem)
 {
 	return (list_start(head, elem) ? NULL : elem->p);
 }
@@ -131,7 +140,7 @@ static inline struct list *list_prev(struct list *head, struct list *elem)
 /*
  * Return the next element of the list, or NULL if we've reached the end.
  */
-static inline struct list *list_next(struct list *head, struct list *elem)
+static inline struct list *list_next(const struct list *head, const struct list *elem)
 {
 	return (list_end(head, elem) ? NULL : elem->n);
 }
@@ -202,6 +211,26 @@ static inline struct list *list_next(struct list *head, struct list *elem)
  * The list should be 'struct list list' within the containing structure.
  */
 #define list_iterate_items(v, head) list_iterate_items_gen(v, (head), list)
+
+/*
+ * Walk a list, setting 'v' in turn to the containing structure of each item.
+ * The containing structure should be the same type as 'v'.
+ * The 'struct list' variable within the containing structure is 'field'.
+ * t must be defined as a temporary variable of the same type as v.
+ */
+#define list_iterate_items_gen_safe(v, t, head, field) \
+	for (v = list_struct_base((head)->n, typeof(*v), field), \
+	     t = list_struct_base(v->field.n, typeof(*v), field); \
+	     &v->field != (head); \
+	     v = t, t = list_struct_base(v->field.n, typeof(*v), field))
+/*
+ * Walk a list, setting 'v' in turn to the containing structure of each item.
+ * The containing structure should be the same type as 'v'.
+ * The list should be 'struct list list' within the containing structure.
+ * t must be defined as a temporary variable of the same type as v.
+ */
+#define list_iterate_items_safe(v, t, head) \
+	list_iterate_items_gen_safe(v, t, (head), list)
 
 /*
  * Walk a list backwards, setting 'v' in turn to the containing structure 
