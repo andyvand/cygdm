@@ -62,10 +62,6 @@ case "$host_os" in
 esac
 
 ################################################################################
-dnl -- Additional library location
-usrlibdir='${prefix}/lib'
-
-################################################################################
 dnl -- Check for programs.
 AC_PROG_AWK
 AC_PROG_CC
@@ -332,6 +328,17 @@ if test x$INTL = xyes; then
 fi
 
 ################################################################################
+AC_ARG_WITH(usrlibdir,
+	    [  --with-usrlibdir=DIR],
+	    [ usrlibdir="$withval"],
+	    [ usrlibdir='${prefix}/lib' ])
+
+AC_ARG_WITH(usrsbindir,
+	    [  --with-usrsbindir=DIR],
+	    [ usrsbindir="$withval"],
+	    [ usrsbindir='${prefix}/sbin' ])
+
+################################################################################
 dnl -- Where the linux src tree is
 AC_MSG_CHECKING(for kernel directory)
 AC_ARG_WITH(kerneldir,
@@ -495,6 +502,7 @@ AC_SUBST(missingkernel)
 AC_SUBST(kernelvsn)
 AC_SUBST(tmpdir)
 AC_SUBST(usrlibdir)
+AC_SUBST(usrsbindir)
 
 ################################################################################
 dnl -- First and last lines should not contain files to generate in order to

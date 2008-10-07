@@ -732,6 +732,7 @@ missingkernel
 kernelvsn
 tmpdir
 usrlibdir
+usrsbindir
 LTLIBOBJS'
 ac_subst_files=''
       ac_precious_vars='build_alias
@@ -1336,6 +1337,8 @@ Optional Packages:
   --with-device-mode=MODE Set the mode used for new device nodes [MODE=0600]
   --with-optimisation=OPT C optimisation flag [OPT=-O2]
   --with-localedir=DIR    Translation files in DIR [PREFIX/share/locale]
+  --with-usrlibdir=DIR
+  --with-usrsbindir=DIR
   --with-kernel-dir=DIR   linux kernel source in DIR
   --with-kernel-version=VERSION   linux kernel version
   --with-tmp-dir=DIR      temp dir to make kernel patches [/tmp/kerndiff]
@@ -1972,9 +1975,6 @@ case "$host_os" in
 		FSADM=no
 		;;
 esac
-
-################################################################################
-usrlibdir='${prefix}/lib'
 
 ################################################################################
 for ac_prog in gawk mawk nawk awk
@@ -8766,6 +8766,25 @@ fi
 fi
 
 ################################################################################
+
+# Check whether --with-usrlibdir was given.
+if test "${with_usrlibdir+set}" = set; then
+  withval=$with_usrlibdir;  usrlibdir="$withval"
+else
+   usrlibdir='${prefix}/lib'
+fi
+
+
+
+# Check whether --with-usrsbindir was given.
+if test "${with_usrsbindir+set}" = set; then
+  withval=$with_usrsbindir;  usrsbindir="$withval"
+else
+   usrsbindir='${prefix}/sbin'
+fi
+
+
+################################################################################
 { echo "$as_me:$LINENO: checking for kernel directory" >&5
 echo $ECHO_N "checking for kernel directory... $ECHO_C" >&6; }
 
@@ -8923,6 +8942,7 @@ fi
 fi
 
 ################################################################################
+
 
 
 
@@ -9763,10 +9783,11 @@ missingkernel!$missingkernel$ac_delim
 kernelvsn!$kernelvsn$ac_delim
 tmpdir!$tmpdir$ac_delim
 usrlibdir!$usrlibdir$ac_delim
+usrsbindir!$usrsbindir$ac_delim
 LTLIBOBJS!$LTLIBOBJS$ac_delim
 _ACEOF
 
-  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 22; then
+  if test `sed -n "s/.*$ac_delim\$/X/p" conf$$subs.sed | grep -c X` = 23; then
     break
   elif $ac_last_try; then
     { { echo "$as_me:$LINENO: error: could not make $CONFIG_STATUS" >&5
