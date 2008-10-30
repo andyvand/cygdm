@@ -2,7 +2,7 @@
  * Copyright (C) 2001-2004 Sistina Software, Inc. All rights reserved.  
  * Copyright (C) 2004-2007 Red Hat, Inc. All rights reserved.
  *
- * This file is part of the device-mapper userspace tools.
+ * This file is part of LVM2.
  *
  * This copyrighted material is made available to anyone wishing to use,
  * modify, copy, or redistribute it subject to the terms and conditions
@@ -13,27 +13,22 @@
  * Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
-/*
- * This file must be included first by every library source file.
- */
-#ifndef _DM_LIB_H
-#define _DM_LIB_H
+#ifndef _LVM_TYPES_H
+#define _LVM_TYPES_H
 
-#define _REENTRANT
-#define _GNU_SOURCE
-#define _FILE_OFFSET_BITS 64
+#include "list.h"
 
-#include <configure.h>
+#include <sys/types.h>
+#include <inttypes.h>
 
-#include "log.h"
-#include "intl.h"
-#include "lvm-types.h"
+/* Define some portable printing types */
+#define PRIsize_t "zu"
+#define PRIptrdiff_t "td"
+#define PRIpid_t PRId32
 
-#include <stdio.h>
-#include <stdlib.h>
-#include <errno.h>
-#include <string.h>
-#include <unistd.h>
-#include <sys/stat.h>
+struct str_list {
+	struct list list;
+	const char *str;
+};
 
 #endif
