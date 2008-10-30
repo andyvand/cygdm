@@ -16,8 +16,6 @@
 #ifndef _DM_LOG_H
 #define _DM_LOG_H
 
-#include "libdevmapper.h"
-
 #include <stdio.h>		/* FILE */
 #include <string.h>		/* strerror() */
 #include <errno.h>
